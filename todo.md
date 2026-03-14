@@ -19,3 +19,16 @@
 - [x] BUG: Produtos não carregam ao selecionar uma tag - mostra 0 produtos e fica carregando
 - [x] BUG: Filtro por tag não funciona - ao selecionar uma tag específica, mostra todos os produtos
 - [x] BUG: Tag HIGIPACK com 320 produtos retorna 0 - implementado sistema de indexação em background que varre todos os 124k produtos
+- [x] Sistema de filtros avançado estilo BaseLinker - expandir índice com dados completos dos produtos
+- [x] Filtro por Tags (múltipla seleção)
+- [x] Filtro por Categoria do inventário
+- [x] Filtro por Fabricante/Marca
+- [x] Filtro por Nome do produto (busca texto)
+- [x] Filtro por EAN / SKU
+- [x] Filtro por Faixa de preço (de/até)
+- [x] Filtro por Faixa de estoque (de/até)
+- [x] Filtro por Peso (de/até)
+- [x] Painel de filtros expansível/colapsável
+- [x] Seleção de itens por página (50, 100, 200)
+- [x] Botão Limpar filtros
+- [x] Contador de resultados com total filtrado

@@ -158,6 +158,58 @@ export const appRouter = router({
         baselinker.stopTagIndexScan(token, input.inventoryId);
         return { stopped: true };
       }),
+
+    // Advanced filter using the full product index
+    filterProducts: protectedProcedure
+      .input(z.object({
+        inventoryId: z.number(),
+        filters: z.object({
+          tagName: z.string().optional(),
+          tags: z.array(z.string()).optional(),
+          categoryId: z.number().optional(),
+          manufacturerId: z.number().optional(),
+          searchName: z.string().optional(),
+          searchEan: z.string().optional(),
+          searchSku: z.string().optional(),
+          priceMin: z.number().optional(),
+          priceMax: z.number().optional(),
+          stockMin: z.number().optional(),
+          stockMax: z.number().optional(),
+          weightMin: z.number().optional(),
+          weightMax: z.number().optional(),
+        }),
+        page: z.number().optional(),
+        pageSize: z.number().optional(),
+      }))
+      .query(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        return baselinker.filterProductsFromIndex(
+          token,
+          input.inventoryId,
+          input.filters,
+          input.page || 1,
+          input.pageSize || 50
+        );
+      }),
+
+    // Get index statistics
+    getIndexStats: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        return baselinker.getIndexStats(token, input.inventoryId);
+      }),
+
+    // Get manufacturers list
+    getManufacturers: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        return baselinker.getInventoryManufacturers(token, input.inventoryId);
+      }),
   }),
 
   // ============ MARKETPLACES ============
