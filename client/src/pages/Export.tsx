@@ -43,6 +43,29 @@ interface IntegrationAccount {
   langs: string[];
 }
 
+// Map BaseLinker marketplace type codes to readable names
+const MARKETPLACE_TYPE_NAMES: Record<string, string> = {
+  shop: "Loja Virtual",
+  blconnect: "BL Connect",
+  amazon: "Amazon",
+  americanas: "Americanas",
+  omnik: "Omnik",
+  shopeebr: "Shopee",
+  carrefourbr: "Carrefour",
+  kabum: "KaBuM!",
+  leroymerlinbr: "Leroy Merlin",
+  madeiramadeira: "Madeira Madeira",
+  magaluopenapi: "Magazine Luiza",
+  webcontinental: "Webcontinental",
+  olist: "Olist",
+  shein: "Shein",
+  viavarejo: "Via Varejo",
+  melibr: "Mercado Livre",
+  mercadolivre: "Mercado Livre",
+  shopee: "Shopee",
+  magalu: "Magazine Luiza",
+};
+
 export default function ExportPage() {
   const [, setLocation] = useLocation();
   const [step, setStep] = useState<ExportStep>("select");
@@ -72,47 +95,22 @@ export default function ExportPage() {
   // Search filter for accounts
   const [accountSearch, setAccountSearch] = useState("");
 
-  // Flatten integrations into a list of accounts
+  // Flatten marketplace accounts from getOrderSources into a list
   const allAccounts = useMemo<IntegrationAccount[]>(() => {
     if (!integrationsData) return [];
     const accounts: IntegrationAccount[] = [];
 
-    // Process integrations (marketplace accounts like Mercado Livre, Amazon, Shopee)
-    const integrations = integrationsData.integrations;
-    if (Array.isArray(integrations) && integrations.length > 0) {
-      // The API returns an array with a single object containing all integrations
-      const intObj = integrations[0] || {};
-      for (const [code, info] of Object.entries(intObj as Record<string, any>)) {
-        const integrationInfo = info as { langs?: string[]; accounts?: Record<string, string> };
-        if (integrationInfo.accounts) {
-          for (const [accId, accName] of Object.entries(integrationInfo.accounts)) {
-            accounts.push({
-              integrationCode: code,
-              integrationLabel: formatIntegrationName(code),
-              accountId: accId,
-              accountName: String(accName),
-              langs: integrationInfo.langs || [],
-            });
-          }
-        }
-      }
-    }
-
-    // Also include external storages (Bling, Shopify, etc.) as a fallback
-    const storages = integrationsData.storages;
-    if (Array.isArray(storages)) {
-      for (const s of storages) {
-        // Avoid duplicates - check if account already exists from integrations
-        const exists = accounts.some(a => a.accountId === s.storage_id);
-        if (!exists) {
-          accounts.push({
-            integrationCode: `storage_${s.storage_id}`,
-            integrationLabel: "Armazém Externo",
-            accountId: s.storage_id,
-            accountName: s.name,
-            langs: [],
-          });
-        }
+    // Process accounts from getOrderSources (the correct API method)
+    // integrationsData.accounts is already parsed by the server
+    if (integrationsData.accounts && Array.isArray(integrationsData.accounts)) {
+      for (const acc of integrationsData.accounts) {
+        accounts.push({
+          integrationCode: acc.marketplaceType,
+          integrationLabel: MARKETPLACE_TYPE_NAMES[acc.marketplaceType] || acc.marketplaceName || formatIntegrationName(acc.marketplaceType),
+          accountId: acc.id, // e.g. "melibr_16544"
+          accountName: acc.name,
+          langs: [],
+        });
       }
     }
 

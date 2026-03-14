@@ -132,6 +132,81 @@ export async function getInventoryExtraFields(token: string, inventoryId: number
   return data.extra_fields || [];
 }
 
+/**
+ * Get all order sources (marketplace accounts) from BaseLinker.
+ * This is the correct method to list ALL marketplace connections including
+ * Mercado Livre, Shopee, Amazon, Magazine Luiza, etc.
+ * Returns: { sources: { marketplace_type: { account_id: account_name } } }
+ */
+export async function getOrderSources(token: string) {
+  const data = await rateLimitedRequest(token, "getOrderSources");
+  return data.sources || {};
+}
+
+/** Marketplace type display names */
+const MARKETPLACE_NAMES: Record<string, string> = {
+  personal: "Pessoal",
+  shop: "Loja Virtual",
+  blconnect: "BL Connect",
+  amazon: "Amazon",
+  americanas: "Americanas",
+  omnik: "Omnik",
+  shopeebr: "Shopee",
+  carrefourbr: "Carrefour",
+  kabum: "Kabum",
+  leroymerlinbr: "Leroy Merlin",
+  madeiramadeira: "Madeira Madeira",
+  magaluopenapi: "Magazine Luiza",
+  webcontinental: "Webcontinental",
+  olist: "Olist",
+  shein: "Shein",
+  viavarejo: "Via Varejo",
+  melibr: "Mercado Livre",
+  order_return: "Devolução",
+  mercadolivre: "Mercado Livre",
+  ml: "Mercado Livre",
+  shopee: "Shopee",
+  magalu: "Magazine Luiza",
+};
+
+export type MarketplaceAccount = {
+  id: string;
+  name: string;
+  marketplaceType: string;
+  marketplaceName: string;
+};
+
+/**
+ * Parse getOrderSources response into a flat list of marketplace accounts.
+ * Excludes 'personal' and 'order_return' types.
+ */
+export function parseOrderSourcesToAccounts(sources: Record<string, Record<string, string>>): MarketplaceAccount[] {
+  const accounts: MarketplaceAccount[] = [];
+  const excludeTypes = new Set(["personal", "order_return"]);
+  
+  for (const [marketplaceType, accountsMap] of Object.entries(sources)) {
+    if (excludeTypes.has(marketplaceType)) continue;
+    const marketplaceName = MARKETPLACE_NAMES[marketplaceType] || marketplaceType;
+    
+    for (const [accountId, accountName] of Object.entries(accountsMap)) {
+      accounts.push({
+        id: `${marketplaceType}_${accountId}`,
+        name: String(accountName),
+        marketplaceType,
+        marketplaceName,
+      });
+    }
+  }
+  
+  // Sort by marketplace name, then account name
+  accounts.sort((a, b) => {
+    const cmp = a.marketplaceName.localeCompare(b.marketplaceName);
+    return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+  });
+  
+  return accounts;
+}
+
 // ==========================================
 // PERSISTENT CACHE SYSTEM (Database-backed)
 // ==========================================

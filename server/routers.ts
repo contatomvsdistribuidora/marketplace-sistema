@@ -119,16 +119,16 @@ export const appRouter = router({
       return baselinker.getExternalStoragesList(token);
     }),
 
-    // Get marketplace integrations (Mercado Livre, Amazon, Shopee, etc.)
+    // Get ALL marketplace accounts (Mercado Livre, Amazon, Shopee, etc.)
+    // Uses getOrderSources which returns all connected marketplace accounts
     getIntegrations: protectedProcedure
       .input(z.object({ inventoryId: z.number() }))
-      .query(async ({ ctx, input }) => {
+      .query(async ({ ctx }) => {
         const token = await db.getSetting(ctx.user.id, "baselinker_token");
         if (!token) throw new Error("Token do BaseLinker não configurado");
-        const integrations = await baselinker.getInventoryIntegrations(token, input.inventoryId);
-        // Also get external storages for a complete list
-        const storages = await baselinker.getExternalStoragesList(token);
-        return { integrations, storages };
+        const sources = await baselinker.getOrderSources(token);
+        const accounts = baselinker.parseOrderSourcesToAccounts(sources);
+        return { accounts, rawSources: sources };
       }),
 
     getExternalCategories: protectedProcedure
