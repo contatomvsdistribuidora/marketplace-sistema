@@ -37,3 +37,4 @@
 - [x] Atualização incremental (só buscar produtos novos/alterados)
 - [x] Carregamento instantâneo da página de Produtos usando cache do banco
 - [x] Botão "Atualizar cache" para forçar re-sincronização manual
+- [x] BUG: Produtos selecionados na página de Produtos se perdem ao navegar para a página de Exportação

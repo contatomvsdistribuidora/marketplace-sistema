@@ -6,10 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Upload, Store, Tag, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
-  ArrowRight, ArrowLeft, Package, Edit3, Save
+  ArrowRight, ArrowLeft, Package, Edit3, Save, Info
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
@@ -23,6 +22,11 @@ interface MappedProduct {
   description: string;
   category: string;
   features: Record<string, string>;
+  ean?: string;
+  sku?: string;
+  mainPrice?: number;
+  totalStock?: number;
+  imageUrl?: string;
   suggestedCategory?: { id: string; name: string; path: string; confidence: number };
   suggestedAttributes?: { attributeName: string; attributeId: string; value: string; confidence: number; source: string }[];
   status: "pending" | "mapped" | "error";
@@ -33,31 +37,67 @@ export default function ExportPage() {
   const [, setLocation] = useLocation();
   const [step, setStep] = useState<ExportStep>("select");
   const [selectedMarketplace, setSelectedMarketplace] = useState<string>("");
-  const [selectedTag, setSelectedTag] = useState<string>("");
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
   const [mappingProgress, setMappingProgress] = useState(0);
   const [isMappingInProgress, setIsMappingInProgress] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportJobId, setExportJobId] = useState<number | null>(null);
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
+  const [preSelectedIds, setPreSelectedIds] = useState<number[]>([]);
+  const [preSelectedTag, setPreSelectedTag] = useState<string>("");
 
   const { data: tokenData } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
   const inventoryId = inventoryData?.inventoryId;
 
   const { data: marketplaces } = trpc.marketplaces.list.useQuery();
-  const { data: tags } = trpc.baselinker.getTags.useQuery(
-    { inventoryId: inventoryId! },
-    { enabled: !!inventoryId && !!tokenData?.hasToken }
+
+  // Load pre-selected product IDs from sessionStorage (coming from Products page)
+  useEffect(() => {
+    const storedIds = sessionStorage.getItem("export_product_ids");
+    const storedTag = sessionStorage.getItem("export_tag");
+    if (storedIds) {
+      try {
+        const ids = JSON.parse(storedIds) as string[];
+        setPreSelectedIds(ids.map(id => parseInt(id)).filter(id => !isNaN(id)));
+      } catch (e) {
+        console.error("Error parsing stored product IDs:", e);
+      }
+    }
+    if (storedTag) {
+      setPreSelectedTag(storedTag);
+    }
+  }, []);
+
+  // Fetch pre-selected products from cache
+  const { data: preSelectedProducts, isLoading: preSelectedLoading } = trpc.baselinker.getProductsByIds.useQuery(
+    { inventoryId: inventoryId!, productIds: preSelectedIds },
+    { enabled: !!inventoryId && preSelectedIds.length > 0 }
   );
 
-  const { data: productsData, isLoading: productsLoading, refetch: refetchProducts } = trpc.baselinker.getProducts.useQuery(
-    {
-      inventoryId: inventoryId!,
-      tagName: selectedTag && selectedTag !== "all" ? selectedTag : undefined,
-    },
-    { enabled: false }
-  );
+  // Auto-populate mapped products from pre-selected products
+  useEffect(() => {
+    if (preSelectedProducts && preSelectedProducts.length > 0 && mappedProducts.length === 0) {
+      setMappedProducts(
+        preSelectedProducts.map((p: any) => ({
+          id: String(p.id),
+          name: p.name || "",
+          description: p.description || "",
+          category: String(p.categoryId || ""),
+          features: {},
+          ean: p.ean || "",
+          sku: p.sku || "",
+          mainPrice: p.mainPrice || 0,
+          totalStock: p.totalStock || 0,
+          imageUrl: p.imageUrl || "",
+          status: "pending" as const,
+        }))
+      );
+      // Clear sessionStorage after loading
+      sessionStorage.removeItem("export_product_ids");
+      sessionStorage.removeItem("export_tag");
+    }
+  }, [preSelectedProducts]);
 
   const mapCategoryMutation = trpc.ai.mapCategory.useMutation();
   const fillAttributesMutation = trpc.ai.fillAttributes.useMutation();
@@ -65,51 +105,13 @@ export default function ExportPage() {
   const updateExportMutation = trpc.exports.updateStatus.useMutation();
   const addLogMutation = trpc.exports.addLog.useMutation();
 
-  const products = useMemo(() => {
-    if (!productsData?.products) return [];
-    return Object.entries(productsData.products).map(([id, data]: [string, any]) => ({
-      id,
-      name: data.name || "",
-      description: data.text_fields?.description || data.text_fields?.["description_extra1"] || "",
-      category: data.category_id?.toString() || "",
-      features: data.features || {},
-      sku: data.sku || "",
-      ean: data.ean || "",
-      prices: data.prices || {},
-      stock: data.stock || {},
-    }));
-  }, [productsData]);
-
-  const handleLoadProducts = async () => {
-    if (!selectedTag) {
-      toast.error("Selecione uma tag para filtrar os produtos");
-      return;
-    }
-    await refetchProducts();
-  };
-
-  useEffect(() => {
-    if (products.length > 0 && mappedProducts.length === 0) {
-      setMappedProducts(
-        products.map((p) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          category: p.category,
-          features: p.features,
-          status: "pending" as const,
-        }))
-      );
-    }
-  }, [products]);
-
   const handleStartMapping = async () => {
     if (!selectedMarketplace) {
       toast.error("Selecione um marketplace de destino");
       return;
     }
     if (mappedProducts.length === 0) {
-      toast.error("Carregue os produtos primeiro");
+      toast.error("Nenhum produto selecionado para exportar");
       return;
     }
 
@@ -120,23 +122,22 @@ export default function ExportPage() {
     const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
     const marketplaceName = marketplace?.name || "Marketplace";
 
-    // Process products one by one with AI
     for (let i = 0; i < mappedProducts.length; i++) {
       const product = mappedProducts[i];
       try {
-        // Map category with AI
         const categorySuggestions = await mapCategoryMutation.mutateAsync({
           product: {
             name: product.name,
             description: product.description,
             features: product.features,
             category: product.category,
+            ean: product.ean,
+            sku: product.sku,
           },
           marketplace: marketplaceName,
-          availableCategories: [], // Will use AI general knowledge
+          availableCategories: [],
         });
 
-        // Fill attributes with AI
         const attributeSuggestions = await fillAttributesMutation.mutateAsync({
           product: {
             name: product.name,
@@ -199,11 +200,10 @@ export default function ExportPage() {
     setStep("exporting");
     setExportProgress(0);
 
-    // Create export job
     const { jobId } = await createExportMutation.mutateAsync({
       marketplaceId: marketplace.id,
       totalProducts: mappedProducts.length,
-      tagFilter: selectedTag,
+      tagFilter: preSelectedTag || undefined,
     });
 
     if (!jobId) {
@@ -221,8 +221,6 @@ export default function ExportPage() {
       const product = mappedProducts[i];
 
       try {
-        // Here we would call the actual BaseLinker API to export the product
-        // For now, we log the mapping result
         await addLogMutation.mutateAsync({
           jobId,
           productId: product.id,
@@ -336,48 +334,119 @@ export default function ExportPage() {
 
       {/* Step: Select */}
       {step === "select" && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Tag className="h-4 w-4" />
-                Filtrar por Tag
-              </CardTitle>
-              <CardDescription>Selecione a tag dos produtos que deseja exportar</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Select value={selectedTag} onValueChange={setSelectedTag}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione uma tag" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os produtos</SelectItem>
-                  {(tags || []).map((tag: any) => (
-                    <SelectItem key={tag.tag_id} value={String(tag.tag_id)}>
-                      {tag.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={handleLoadProducts} disabled={productsLoading} className="w-full">
-                {productsLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Carregando...
-                  </>
-                ) : (
-                  <>
-                    <Package className="mr-2 h-4 w-4" />
-                    Carregar Produtos
-                  </>
-                )}
-              </Button>
-              {products.length > 0 && (
-                <Badge variant="secondary">{products.length} produto(s) carregado(s)</Badge>
-              )}
-            </CardContent>
-          </Card>
+        <div className="space-y-4">
+          {/* Products loaded from Products page */}
+          {preSelectedLoading && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="py-4">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="text-sm">Carregando {preSelectedIds.length} produtos selecionados...</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
+          {mappedProducts.length > 0 && (
+            <Card className="border-green-500/30 bg-green-50">
+              <CardContent className="py-4">
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  <div>
+                    <p className="text-sm font-medium text-green-800">
+                      {mappedProducts.length} produto(s) carregado(s) para exportação
+                    </p>
+                    {preSelectedTag && preSelectedTag !== "all" && (
+                      <p className="text-xs text-green-600 mt-0.5">
+                        Tag: {preSelectedTag}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto text-green-700"
+                    onClick={() => {
+                      setMappedProducts([]);
+                      setPreSelectedIds([]);
+                      setLocation("/products");
+                    }}
+                  >
+                    Alterar seleção
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {mappedProducts.length === 0 && !preSelectedLoading && (
+            <Card className="border-dashed border-amber-300 bg-amber-50/50">
+              <CardContent className="flex flex-col items-center justify-center py-8 gap-3">
+                <Info className="h-8 w-8 text-amber-500" />
+                <p className="text-sm text-amber-700 text-center">
+                  Nenhum produto selecionado. Vá para a página de <strong>Produtos</strong>, selecione os produtos desejados e clique em <strong>"Exportar"</strong>.
+                </p>
+                <Button variant="outline" onClick={() => setLocation("/products")}>
+                  <Package className="mr-2 h-4 w-4" />
+                  Ir para Produtos
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Product preview table */}
+          {mappedProducts.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Package className="h-4 w-4" />
+                  Produtos para Exportação ({mappedProducts.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">#</TableHead>
+                        <TableHead>Nome</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead>EAN</TableHead>
+                        <TableHead className="text-right">Preço</TableHead>
+                        <TableHead className="text-right">Estoque</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {mappedProducts.slice(0, 20).map((p, idx) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
+                          <TableCell>
+                            <p className="text-sm font-medium truncate max-w-[300px]">{p.name}</p>
+                            <p className="text-xs text-muted-foreground">ID: {p.id}</p>
+                          </TableCell>
+                          <TableCell className="text-xs">{p.sku || "—"}</TableCell>
+                          <TableCell className="text-xs">{p.ean || "—"}</TableCell>
+                          <TableCell className="text-right text-sm">
+                            {p.mainPrice ? `R$ ${p.mainPrice.toFixed(2)}` : "—"}
+                          </TableCell>
+                          <TableCell className="text-right text-sm">{p.totalStock ?? "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                      {mappedProducts.length > 20 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-2">
+                            ... e mais {mappedProducts.length - 20} produto(s)
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Marketplace selection */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -401,11 +470,12 @@ export default function ExportPage() {
               </Select>
               <Button
                 onClick={handleStartMapping}
-                disabled={!selectedMarketplace || products.length === 0}
+                disabled={!selectedMarketplace || mappedProducts.length === 0 || isMappingInProgress}
                 className="w-full"
+                size="lg"
               >
                 <Sparkles className="mr-2 h-4 w-4" />
-                Iniciar Mapeamento com IA
+                Iniciar Mapeamento com IA ({mappedProducts.length} produtos)
               </Button>
             </CardContent>
           </Card>
@@ -432,17 +502,20 @@ export default function ExportPage() {
                 {mappedProducts.filter((p) => p.status !== "pending").length} de {mappedProducts.length} produtos
               </span>
             </div>
-            <div className="max-h-[300px] overflow-y-auto space-y-2">
+            <div className="max-h-[400px] overflow-y-auto space-y-2">
               {mappedProducts.map((p) => (
                 <div key={p.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
                   {p.status === "pending" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
                   {p.status === "mapped" && <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />}
                   {p.status === "error" && <XCircle className="h-4 w-4 text-destructive shrink-0" />}
-                  <span className="text-sm truncate">{p.name}</span>
+                  <span className="text-sm truncate flex-1">{p.name}</span>
                   {p.suggestedCategory && (
-                    <Badge variant="outline" className="ml-auto shrink-0 text-xs">
+                    <Badge variant="outline" className="shrink-0 text-xs">
                       {p.suggestedCategory.confidence}%
                     </Badge>
+                  )}
+                  {p.status === "error" && (
+                    <span className="text-xs text-destructive shrink-0">{p.errorMessage}</span>
                   )}
                 </div>
               ))}
@@ -454,7 +527,7 @@ export default function ExportPage() {
       {/* Step: Review */}
       {step === "review" && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-3">
               <Button variant="outline" size="sm" onClick={() => setStep("select")}>
                 <ArrowLeft className="mr-1 h-4 w-4" />
@@ -625,9 +698,10 @@ export default function ExportPage() {
                 onClick={() => {
                   setStep("select");
                   setMappedProducts([]);
-                  setSelectedTag("");
-                  setSelectedMarketplace("");
+                  setPreSelectedIds([]);
+                  setPreSelectedTag("");
                   setExportJobId(null);
+                  setLocation("/products");
                 }}
               >
                 Nova Exportação

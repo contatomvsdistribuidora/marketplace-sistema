@@ -201,6 +201,16 @@ export const appRouter = router({
         return baselinker.getCacheStats(ctx.user.id, input.inventoryId);
       }),
 
+    // Get products by IDs from cache (for export page)
+    getProductsByIds: protectedProcedure
+      .input(z.object({
+        inventoryId: z.number(),
+        productIds: z.array(z.number()),
+      }))
+      .query(async ({ ctx, input }) => {
+        return baselinker.getProductsByIdsFromCache(ctx.user.id, input.inventoryId, input.productIds);
+      }),
+
     // Get manufacturers list
     getManufacturers: protectedProcedure
       .input(z.object({ inventoryId: z.number() }))

@@ -558,6 +558,38 @@ export async function filterProductsFromCache(
   };
 }
 
+/** Get products by IDs from cache */
+export async function getProductsByIdsFromCache(
+  userId: number,
+  inventoryId: number,
+  productIds: number[]
+): Promise<IndexedProduct[]> {
+  const db = getDbInstance();
+  if (!db || productIds.length === 0) return [];
+
+  const rows = await db.select().from(productCache)
+    .where(and(
+      eq(productCache.userId, userId),
+      eq(productCache.inventoryId, inventoryId),
+      inArray(productCache.productId, productIds)
+    ));
+
+  return rows.map(row => ({
+    id: row.productId,
+    name: row.name,
+    ean: row.ean,
+    sku: row.sku,
+    tags: (row.tags as string[]) || [],
+    categoryId: row.categoryId,
+    manufacturerId: row.manufacturerId,
+    weight: parseFloat(row.weight) || 0,
+    mainPrice: parseFloat(row.mainPrice) || 0,
+    totalStock: row.totalStock,
+    description: row.description || "",
+    imageUrl: row.imageUrl || "",
+  }));
+}
+
 /** Get cache statistics from database */
 export async function getCacheStats(userId: number, inventoryId: number) {
   const db = getDbInstance();
