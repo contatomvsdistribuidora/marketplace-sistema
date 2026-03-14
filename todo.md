@@ -16,3 +16,4 @@
 - [x] Rotas tRPC para exportação em lote
 - [x] Design do layout com DashboardLayout (sidebar navigation)
 - [x] Testes unitários (vitest)
+- [x] BUG: Produtos não carregam ao selecionar uma tag - mostra 0 produtos e fica carregando

@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,11 +8,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Package, Filter, Loader2, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
-import { toast } from "sonner";
 
 export default function ProductsPage() {
   const [, setLocation] = useLocation();
-  const [selectedTag, setSelectedTag] = useState<string>("");
+  const [selectedTag, setSelectedTag] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
 
@@ -25,10 +24,14 @@ export default function ProductsPage() {
     { enabled: !!tokenData?.hasToken && !!inventoryId }
   );
 
-  const { data: productsData, isLoading: productsLoading } = trpc.baselinker.getProducts.useQuery(
+  // Only pass tagId when a specific tag is selected (not "all")
+  const parsedTagId = selectedTag !== "all" ? Number(selectedTag) : undefined;
+  const isValidTagId = parsedTagId !== undefined && !isNaN(parsedTagId);
+
+  const { data: productsData, isLoading: productsLoading, error: productsError } = trpc.baselinker.getProducts.useQuery(
     {
       inventoryId: inventoryId!,
-      tagId: selectedTag ? parseInt(selectedTag) : undefined,
+      tagId: isValidTagId ? parsedTagId : undefined,
       page,
     },
     { enabled: !!tokenData?.hasToken && !!inventoryId }
@@ -112,17 +115,28 @@ export default function ProductsPage() {
               <Filter className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-medium">Filtrar por Tag:</span>
             </div>
-            <Select value={selectedTag} onValueChange={(val) => { setSelectedTag(val); setPage(1); setSelectedProducts(new Set()); }}>
-              <SelectTrigger className="w-[250px]">
+            <Select
+              value={selectedTag}
+              onValueChange={(val) => {
+                setSelectedTag(val);
+                setPage(1);
+                setSelectedProducts(new Set());
+              }}
+            >
+              <SelectTrigger className="w-[300px]">
                 <SelectValue placeholder="Todas as tags" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas as tags</SelectItem>
-                {(tags || []).map((tag: any) => (
-                  <SelectItem key={tag.tag_id} value={String(tag.tag_id)}>
-                    {tag.name}
-                  </SelectItem>
-                ))}
+                {(tags || []).map((tag: any) => {
+                  // BaseLinker API returns tags with tag_id (number)
+                  const tagId = tag.tag_id ?? tag.id;
+                  return (
+                    <SelectItem key={tagId} value={String(tagId)}>
+                      {tag.name}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             {tagsLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
@@ -132,7 +146,12 @@ export default function ProductsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {productsLoading ? (
+          {productsError ? (
+            <div className="text-center py-12 text-destructive">
+              <p className="font-medium">Erro ao carregar produtos</p>
+              <p className="text-sm mt-1">{productsError.message}</p>
+            </div>
+          ) : productsLoading ? (
             <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
               Carregando produtos...
@@ -143,7 +162,7 @@ export default function ProductsPage() {
             </div>
           ) : (
             <>
-              <div className="rounded-md border">
+              <div className="rounded-md border overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
