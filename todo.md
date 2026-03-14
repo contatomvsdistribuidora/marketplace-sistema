@@ -18,3 +18,4 @@
 - [x] Testes unitários (vitest)
 - [x] BUG: Produtos não carregam ao selecionar uma tag - mostra 0 produtos e fica carregando
 - [x] BUG: Filtro por tag não funciona - ao selecionar uma tag específica, mostra todos os produtos
+- [x] BUG: Tag HIGIPACK com 320 produtos retorna 0 - implementado sistema de indexação em background que varre todos os 124k produtos

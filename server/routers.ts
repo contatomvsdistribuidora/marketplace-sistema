@@ -126,6 +126,38 @@ export const appRouter = router({
         if (!token) throw new Error("Token do BaseLinker não configurado");
         return baselinker.getExternalStorageCategories(token, input.storageId);
       }),
+
+    // Start scanning all products to build tag index
+    startTagScan: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        // Start scan in background (don't await)
+        baselinker.startTagIndexScan(token, input.inventoryId).catch(err => {
+          console.error("[TagScan] Background scan error:", err);
+        });
+        return { started: true };
+      }),
+
+    // Get scan progress
+    getTagScanProgress: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        return baselinker.getTagScanProgress(token, input.inventoryId);
+      }),
+
+    // Stop an active scan
+    stopTagScan: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        baselinker.stopTagIndexScan(token, input.inventoryId);
+        return { stopped: true };
+      }),
   }),
 
   // ============ MARKETPLACES ============
