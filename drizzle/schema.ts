@@ -110,3 +110,41 @@ export const exportLogs = mysqlTable("export_logs", {
 });
 
 export type ExportLog = typeof exportLogs.$inferSelect;
+
+/** Cached products from BaseLinker for fast filtering */
+export const productCache = mysqlTable("product_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  inventoryId: int("inventoryId").notNull(),
+  productId: bigint("productId", { mode: "number" }).notNull(),
+  name: varchar("name", { length: 1024 }).default("").notNull(),
+  sku: varchar("sku", { length: 256 }).default("").notNull(),
+  ean: varchar("ean", { length: 128 }).default("").notNull(),
+  categoryId: int("categoryId").default(0).notNull(),
+  manufacturerId: int("manufacturerId").default(0).notNull(),
+  mainPrice: varchar("mainPrice", { length: 32 }).default("0").notNull(),
+  totalStock: int("totalStock").default(0).notNull(),
+  weight: varchar("weight", { length: 32 }).default("0").notNull(),
+  tags: json("tags").$type<string[]>(),
+  description: text("description"),
+  imageUrl: varchar("imageUrl", { length: 1024 }),
+  cachedAt: timestamp("cachedAt").defaultNow().notNull(),
+});
+
+export type ProductCacheRow = typeof productCache.$inferSelect;
+export type InsertProductCache = typeof productCache.$inferInsert;
+
+/** Tracks the state of the product cache sync */
+export const cacheSync = mysqlTable("cache_sync", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  inventoryId: int("inventoryId").notNull(),
+  totalProducts: int("totalProducts").default(0).notNull(),
+  lastProductId: bigint("lastProductId", { mode: "number" }).default(0).notNull(),
+  isComplete: int("isComplete").default(0).notNull(),
+  lastSyncAt: timestamp("lastSyncAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type CacheSyncRow = typeof cacheSync.$inferSelect;

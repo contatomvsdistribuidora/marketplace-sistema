@@ -127,39 +127,42 @@ export const appRouter = router({
         return baselinker.getExternalStorageCategories(token, input.storageId);
       }),
 
-    // Start scanning all products to build tag index
-    startTagScan: protectedProcedure
-      .input(z.object({ inventoryId: z.number() }))
+    // Start syncing products to database cache
+    startProductSync: protectedProcedure
+      .input(z.object({ inventoryId: z.number(), forceFullSync: z.boolean().optional() }))
       .mutation(async ({ ctx, input }) => {
         const token = await db.getSetting(ctx.user.id, "baselinker_token");
         if (!token) throw new Error("Token do BaseLinker não configurado");
-        // Start scan in background (don't await)
-        baselinker.startTagIndexScan(token, input.inventoryId).catch(err => {
-          console.error("[TagScan] Background scan error:", err);
+        // Start sync in background (don't await)
+        baselinker.startProductSync(token, ctx.user.id, input.inventoryId, input.forceFullSync || false).catch(err => {
+          console.error("[ProductSync] Background sync error:", err);
         });
         return { started: true };
       }),
 
-    // Get scan progress
-    getTagScanProgress: protectedProcedure
+    // Get sync progress
+    getSyncProgress: protectedProcedure
       .input(z.object({ inventoryId: z.number() }))
       .query(async ({ ctx, input }) => {
-        const token = await db.getSetting(ctx.user.id, "baselinker_token");
-        if (!token) throw new Error("Token do BaseLinker não configurado");
-        return baselinker.getTagScanProgress(token, input.inventoryId);
+        return baselinker.getTagScanProgress(ctx.user.id, input.inventoryId);
       }),
 
-    // Stop an active scan
-    stopTagScan: protectedProcedure
+    // Get cache sync status from DB
+    getCacheSyncStatus: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        return baselinker.getCacheSyncStatus(ctx.user.id, input.inventoryId);
+      }),
+
+    // Stop an active sync
+    stopSync: protectedProcedure
       .input(z.object({ inventoryId: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        const token = await db.getSetting(ctx.user.id, "baselinker_token");
-        if (!token) throw new Error("Token do BaseLinker não configurado");
-        baselinker.stopTagIndexScan(token, input.inventoryId);
+        baselinker.stopProductSync(ctx.user.id, input.inventoryId);
         return { stopped: true };
       }),
 
-    // Advanced filter using the full product index
+    // Filter products from database cache (instant!)
     filterProducts: protectedProcedure
       .input(z.object({
         inventoryId: z.number(),
@@ -182,10 +185,8 @@ export const appRouter = router({
         pageSize: z.number().optional(),
       }))
       .query(async ({ ctx, input }) => {
-        const token = await db.getSetting(ctx.user.id, "baselinker_token");
-        if (!token) throw new Error("Token do BaseLinker não configurado");
-        return baselinker.filterProductsFromIndex(
-          token,
+        return baselinker.filterProductsFromCache(
+          ctx.user.id,
           input.inventoryId,
           input.filters,
           input.page || 1,
@@ -193,13 +194,11 @@ export const appRouter = router({
         );
       }),
 
-    // Get index statistics
-    getIndexStats: protectedProcedure
+    // Get cache statistics from DB
+    getCacheStats: protectedProcedure
       .input(z.object({ inventoryId: z.number() }))
       .query(async ({ ctx, input }) => {
-        const token = await db.getSetting(ctx.user.id, "baselinker_token");
-        if (!token) throw new Error("Token do BaseLinker não configurado");
-        return baselinker.getIndexStats(token, input.inventoryId);
+        return baselinker.getCacheStats(ctx.user.id, input.inventoryId);
       }),
 
     // Get manufacturers list

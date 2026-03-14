@@ -76,17 +76,22 @@ export default function ProductsPage() {
     { enabled: !!tokenData?.hasToken && !!inventoryId }
   );
 
-  const { data: scanProgress, refetch: refetchProgress } = trpc.baselinker.getTagScanProgress.useQuery(
+  const { data: scanProgress, refetch: refetchProgress } = trpc.baselinker.getSyncProgress.useQuery(
     { inventoryId: inventoryId! },
     { enabled: !!inventoryId && !!tokenData?.hasToken, refetchInterval: scanStarted ? 3000 : false }
   );
 
-  const { data: indexStats } = trpc.baselinker.getIndexStats.useQuery(
+  const { data: cacheStats } = trpc.baselinker.getCacheStats.useQuery(
     { inventoryId: inventoryId! },
     { enabled: !!inventoryId && !!tokenData?.hasToken && !!scanProgress?.isComplete }
   );
 
-  const startScanMutation = trpc.baselinker.startTagScan.useMutation({
+  const { data: cacheSyncStatus } = trpc.baselinker.getCacheSyncStatus.useQuery(
+    { inventoryId: inventoryId! },
+    { enabled: !!inventoryId && !!tokenData?.hasToken }
+  );
+
+  const startSyncMutation = trpc.baselinker.startProductSync.useMutation({
     onSuccess: () => setScanStarted(true),
   });
 
@@ -129,12 +134,15 @@ export default function ProductsPage() {
       { enabled: !!tokenData?.hasToken && !!inventoryId }
     );
 
-  // Auto-start scan
+  // Auto-start sync if no cache exists
   useEffect(() => {
-    if (inventoryId && tokenData?.hasToken && !scanProgress?.isComplete && !scanProgress?.isScanning) {
-      startScanMutation.mutate({ inventoryId });
+    if (inventoryId && tokenData?.hasToken && !scanProgress?.isScanning) {
+      // Check if cache exists and is fresh
+      if (!cacheSyncStatus || !cacheSyncStatus.isComplete) {
+        startSyncMutation.mutate({ inventoryId });
+      }
     }
-  }, [inventoryId, tokenData?.hasToken]);
+  }, [inventoryId, tokenData?.hasToken, cacheSyncStatus]);
 
   useEffect(() => {
     if (scanProgress?.isComplete) {
@@ -211,8 +219,8 @@ export default function ProductsPage() {
     setDraftWeightMax("");
   };
 
-  const handleStartScan = () => {
-    if (inventoryId) startScanMutation.mutate({ inventoryId });
+  const handleStartSync = () => {
+    if (inventoryId) startSyncMutation.mutate({ inventoryId, forceFullSync: true });
   };
 
   if (!tokenData?.hasToken || !inventoryId) {
@@ -251,8 +259,8 @@ export default function ProductsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Produtos</h1>
           <p className="text-muted-foreground mt-1">
-            {indexStats
-              ? `${indexStats.totalProducts.toLocaleString()} produtos indexados — ${indexStats.uniqueTags} tags — ${indexStats.uniqueCategories} categorias`
+            {cacheStats
+              ? `${cacheStats.totalProducts.toLocaleString()} produtos no cache — ${cacheStats.uniqueTags} tags — ${cacheStats.uniqueCategories} categorias`
               : "Visualize e selecione produtos do BaseLinker para exportação"}
           </p>
         </div>
@@ -315,17 +323,22 @@ export default function ProductsPage() {
         </Card>
       )}
 
-      {scanProgress?.isComplete && !isScanning && (
+      {(cacheSyncStatus?.isComplete || scanProgress?.isComplete) && !isScanning && (
         <Card className="border-green-500/30 bg-green-50">
           <CardContent className="py-2.5">
             <div className="flex items-center gap-3">
               <span className="text-sm text-green-700">
-                Indexação completa: {scanProgress.productsScanned?.toLocaleString()} produtos,
-                {" "}{scanProgress.uniqueTags} tags.
+                Cache pronto: {cacheStats?.totalProducts?.toLocaleString() || cacheSyncStatus?.totalProducts?.toLocaleString() || 0} produtos,
+                {" "}{cacheStats?.uniqueTags || 0} tags.
+                {cacheSyncStatus?.lastSyncAt && (
+                  <span className="text-green-600 ml-1">
+                    (atualizado {new Date(cacheSyncStatus.lastSyncAt).toLocaleString("pt-BR")})
+                  </span>
+                )}
               </span>
-              <Button variant="ghost" size="sm" className="ml-auto h-7" onClick={handleStartScan}>
+              <Button variant="ghost" size="sm" className="ml-auto h-7" onClick={handleStartSync}>
                 <RefreshCw className="h-3 w-3 mr-1" />
-                Re-indexar
+                Atualizar cache
               </Button>
             </div>
           </CardContent>
@@ -372,9 +385,9 @@ export default function ProductsPage() {
                       {(tags || []).map((tag: any, i: number) => (
                         <SelectItem key={`tag-${i}-${tag.name}`} value={tag.name}>
                           {tag.name}
-                          {indexStats?.tagStats?.find((t: any) => t.tag === tag.name) && (
+                          {cacheStats?.tagStats?.find((t: any) => t.tag === tag.name) && (
                             <span className="text-muted-foreground ml-1">
-                              ({indexStats.tagStats.find((t: any) => t.tag === tag.name)?.count})
+                              ({cacheStats.tagStats.find((t: any) => t.tag === tag.name)?.count})
                             </span>
                           )}
                         </SelectItem>
@@ -525,7 +538,7 @@ export default function ProductsPage() {
               </Badge>
               {hasActiveFilters && (
                 <span className="text-xs text-muted-foreground">
-                  (filtrado de {indexStats?.totalProducts?.toLocaleString() || "?"} total)
+                  (filtrado de {cacheStats?.totalProducts?.toLocaleString() || "?"} total)
                 </span>
               )}
             </div>
@@ -576,12 +589,12 @@ export default function ProductsPage() {
                     Limpar filtros
                   </Button>
                 </>
-              ) : !scanProgress?.isComplete ? (
+              ) : !cacheSyncStatus?.isComplete && !scanProgress?.isComplete ? (
                 <>
-                  <p>Aguardando indexação dos produtos...</p>
-                  <Button variant="outline" size="sm" onClick={handleStartScan}>
+                  <p>Aguardando sincronização dos produtos...</p>
+                  <Button variant="outline" size="sm" onClick={handleStartSync}>
                     <Search className="h-3 w-3 mr-1" />
-                    Iniciar indexação
+                    Iniciar sincronização
                   </Button>
                 </>
               ) : (

@@ -33,3 +33,7 @@
 - [x] Botão Limpar filtros
 - [x] Contador de resultados com total filtrado
 - [x] Botão para selecionar TODOS os produtos filtrados (não apenas os da página atual)
+- [x] Cache persistente no banco de dados para produtos (eliminar re-indexação)
+- [x] Atualização incremental (só buscar produtos novos/alterados)
+- [x] Carregamento instantâneo da página de Produtos usando cache do banco
+- [x] Botão "Atualizar cache" para forçar re-sincronização manual

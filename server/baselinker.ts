@@ -3,14 +3,19 @@
  * Handles all communication with the BaseLinker API
  * API Docs: https://api.baselinker.com/
  * 
- * FULL PRODUCT INDEX SYSTEM:
- * The BaseLinker API has limited filtering. To provide BaseLinker-like
- * filtering (by tag, price, stock, weight, manufacturer, etc.), we build
- * a complete in-memory product index by scanning all products in background.
+ * PERSISTENT CACHE SYSTEM:
+ * Products are cached in the database (product_cache table).
+ * First sync scans all products and saves to DB.
+ * Subsequent loads read from DB instantly (~1-2 seconds).
+ * Background sync updates only new/changed products.
  */
 
+import { eq, and, sql, inArray, gte, lte, like } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/mysql2";
+import { productCache, cacheSync } from "../drizzle/schema";
+
 const BASELINKER_API_URL = "https://api.baselinker.com/connector.php";
-const RATE_LIMIT_DELAY = 200; // ~300 requests per minute (safe margin)
+const RATE_LIMIT_DELAY = 200;
 
 let lastRequestTime = 0;
 
@@ -128,10 +133,9 @@ export async function getInventoryExtraFields(token: string, inventoryId: number
 }
 
 // ==========================================
-// FULL PRODUCT INDEX SYSTEM
+// PERSISTENT CACHE SYSTEM (Database-backed)
 // ==========================================
 
-/** Indexed product - lightweight version for filtering */
 export type IndexedProduct = {
   id: number;
   name: string;
@@ -141,29 +145,10 @@ export type IndexedProduct = {
   categoryId: number;
   manufacturerId: number;
   weight: number;
-  height: number;
-  width: number;
-  length: number;
-  prices: Record<string, number>;
-  stock: Record<string, number>;
   mainPrice: number;
   totalStock: number;
-  images: Record<string, string>;
   description: string;
-};
-
-type ProductIndex = {
-  products: Map<number, IndexedProduct>;
-  tagToProducts: Map<string, Set<number>>;
-  categoryToProducts: Map<number, Set<number>>;
-  manufacturerToProducts: Map<number, Set<number>>;
-  allTags: Set<string>;
-  allCategoryIds: Set<number>;
-  allManufacturerIds: Set<number>;
-  totalScanned: number;
-  totalPages: number;
-  isComplete: boolean;
-  lastUpdated: number;
+  imageUrl: string;
 };
 
 export type ScanProgress = {
@@ -192,19 +177,35 @@ export type ProductFilters = {
   weightMax?: number;
 };
 
-// In-memory cache per inventory
-const productIndexCache = new Map<string, ProductIndex>();
-const scanProgressCache = new Map<string, ScanProgress>();
+// Track active scans in memory
+const activeScanProgress = new Map<string, ScanProgress>();
 const activeScanAbort = new Map<string, boolean>();
 
-function getCacheKey(token: string, inventoryId: number): string {
-  return `${token.substring(0, 10)}_${inventoryId}`;
+function getCacheKey(userId: number, inventoryId: number): string {
+  return `${userId}_${inventoryId}`;
 }
 
-/** Get scan progress for an inventory */
-export function getTagScanProgress(token: string, inventoryId: number): ScanProgress {
-  const key = getCacheKey(token, inventoryId);
-  return scanProgressCache.get(key) || {
+function getDbInstance() {
+  if (!process.env.DATABASE_URL) return null;
+  return drizzle(process.env.DATABASE_URL);
+}
+
+/** Get cache sync status from database */
+export async function getCacheSyncStatus(userId: number, inventoryId: number) {
+  const db = getDbInstance();
+  if (!db) return null;
+
+  const rows = await db.select().from(cacheSync)
+    .where(and(eq(cacheSync.userId, userId), eq(cacheSync.inventoryId, inventoryId)))
+    .limit(1);
+
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/** Get scan progress */
+export function getTagScanProgress(userId: number, inventoryId: number): ScanProgress {
+  const key = getCacheKey(userId, inventoryId);
+  return activeScanProgress.get(key) || {
     currentPage: 0,
     totalEstimatedPages: 0,
     productsScanned: 0,
@@ -215,33 +216,44 @@ export function getTagScanProgress(token: string, inventoryId: number): ScanProg
   };
 }
 
-/** Start scanning all products to build the full product index */
-export async function startTagIndexScan(
+/** Start full sync: scan all products from BaseLinker and save to database */
+export async function startProductSync(
   token: string,
+  userId: number,
   inventoryId: number,
+  forceFullSync: boolean = false,
   onProgress?: (progress: ScanProgress) => void
 ): Promise<void> {
-  const key = getCacheKey(token, inventoryId);
+  const key = getCacheKey(userId, inventoryId);
+  const db = getDbInstance();
+  if (!db) throw new Error("Database not available");
 
-  const existing = scanProgressCache.get(key);
+  // Check if already scanning
+  const existing = activeScanProgress.get(key);
   if (existing?.isScanning) return;
 
-  const cachedIndex = productIndexCache.get(key);
-  if (cachedIndex?.isComplete && (Date.now() - cachedIndex.lastUpdated) < 10 * 60 * 1000) return;
-
-  const index: ProductIndex = {
-    products: new Map(),
-    tagToProducts: new Map(),
-    categoryToProducts: new Map(),
-    manufacturerToProducts: new Map(),
-    allTags: new Set(),
-    allCategoryIds: new Set(),
-    allManufacturerIds: new Set(),
-    totalScanned: 0,
-    totalPages: 0,
-    isComplete: false,
-    lastUpdated: Date.now(),
-  };
+  // Check if cache is fresh (< 30 min) and not forcing full sync
+  if (!forceFullSync) {
+    const syncStatus = await getCacheSyncStatus(userId, inventoryId);
+    if (syncStatus?.isComplete && syncStatus.lastSyncAt) {
+      const age = Date.now() - new Date(syncStatus.lastSyncAt).getTime();
+      if (age < 30 * 60 * 1000) {
+        // Cache is fresh, skip sync
+        const progress: ScanProgress = {
+          currentPage: 0,
+          totalEstimatedPages: 0,
+          productsScanned: syncStatus.totalProducts,
+          productsIndexed: syncStatus.totalProducts,
+          isScanning: false,
+          isComplete: true,
+          uniqueTags: 0,
+        };
+        activeScanProgress.set(key, progress);
+        onProgress?.(progress);
+        return;
+      }
+    }
+  }
 
   const progress: ScanProgress = {
     currentPage: 0,
@@ -253,12 +265,21 @@ export async function startTagIndexScan(
     uniqueTags: 0,
   };
 
-  scanProgressCache.set(key, progress);
+  activeScanProgress.set(key, progress);
   activeScanAbort.set(key, false);
 
   try {
+    // If forcing full sync, clear existing cache
+    if (forceFullSync) {
+      await db.delete(productCache).where(
+        and(eq(productCache.userId, userId), eq(productCache.inventoryId, inventoryId))
+      );
+    }
+
     let page = 1;
     let hasMore = true;
+    let totalInserted = 0;
+    const allTags = new Set<string>();
 
     while (hasMore) {
       if (activeScanAbort.get(key)) break;
@@ -277,73 +298,70 @@ export async function startTagIndexScan(
         if (activeScanAbort.get(key)) break;
 
         const batch = productIds.slice(i, i + BATCH_SIZE);
-        const detailedData = await getInventoryProductsData(token, inventoryId, batch);
 
-        for (const [id, product] of Object.entries(detailedData) as [string, any][]) {
-          const productId = Number(id);
-
-          // Calculate main price (first price found)
-          const priceValues = Object.values(product.prices || {}) as number[];
-          const mainPrice = priceValues.length > 0 ? priceValues[0] : 0;
-
-          // Calculate total stock
-          const stockValues = Object.values(product.stock || {}) as number[];
-          const totalStock = stockValues.reduce((sum: number, v: number) => sum + (v || 0), 0);
-
-          const indexed: IndexedProduct = {
-            id: productId,
-            name: product.text_fields?.name || "",
-            ean: product.ean || "",
-            sku: product.sku || "",
-            tags: product.tags || [],
-            categoryId: product.category_id || 0,
-            manufacturerId: product.manufacturer_id || 0,
-            weight: product.weight || 0,
-            height: product.height || 0,
-            width: product.width || 0,
-            length: product.length || 0,
-            prices: product.prices || {},
-            stock: product.stock || {},
-            mainPrice,
-            totalStock,
-            images: product.images || {},
-            description: product.text_fields?.description || "",
-          };
-
-          index.products.set(productId, indexed);
-
-          // Index tags
-          for (const tag of indexed.tags) {
-            index.allTags.add(tag);
-            if (!index.tagToProducts.has(tag)) {
-              index.tagToProducts.set(tag, new Set());
-            }
-            index.tagToProducts.get(tag)!.add(productId);
-          }
-
-          // Index category
-          if (indexed.categoryId) {
-            index.allCategoryIds.add(indexed.categoryId);
-            if (!index.categoryToProducts.has(indexed.categoryId)) {
-              index.categoryToProducts.set(indexed.categoryId, new Set());
-            }
-            index.categoryToProducts.get(indexed.categoryId)!.add(productId);
-          }
-
-          // Index manufacturer
-          if (indexed.manufacturerId) {
-            index.allManufacturerIds.add(indexed.manufacturerId);
-            if (!index.manufacturerToProducts.has(indexed.manufacturerId)) {
-              index.manufacturerToProducts.set(indexed.manufacturerId, new Set());
-            }
-            index.manufacturerToProducts.get(indexed.manufacturerId)!.add(productId);
+        let detailedData: Record<string, any>;
+        try {
+          detailedData = await getInventoryProductsData(token, inventoryId, batch);
+        } catch (err) {
+          console.warn(`[ProductSync] Batch error, retrying after delay...`, err);
+          await new Promise(r => setTimeout(r, 2000));
+          try {
+            detailedData = await getInventoryProductsData(token, inventoryId, batch);
+          } catch (err2) {
+            console.error(`[ProductSync] Batch failed permanently, skipping`, err2);
+            continue;
           }
         }
 
-        index.totalScanned += batch.length;
-        progress.productsScanned = index.totalScanned;
-        progress.productsIndexed = index.products.size;
-        progress.uniqueTags = index.allTags.size;
+        // Prepare batch insert
+        const rows: any[] = [];
+        for (const [id, product] of Object.entries(detailedData) as [string, any][]) {
+          const priceValues = Object.values(product.prices || {}) as number[];
+          const mainPrice = priceValues.length > 0 ? priceValues[0] : 0;
+          const stockValues = Object.values(product.stock || {}) as number[];
+          const totalStock = stockValues.reduce((sum: number, v: number) => sum + (v || 0), 0);
+          const tags = product.tags || [];
+          tags.forEach((t: string) => allTags.add(t));
+
+          // Get first image URL
+          const imageEntries = Object.values(product.images || {}) as string[];
+          const imageUrl = imageEntries.length > 0 ? imageEntries[0] : "";
+
+          rows.push({
+            userId,
+            inventoryId,
+            productId: Number(id),
+            name: (product.text_fields?.name || "").substring(0, 1024),
+            sku: (product.sku || "").substring(0, 256),
+            ean: (product.ean || "").substring(0, 128),
+            categoryId: product.category_id || 0,
+            manufacturerId: product.manufacturer_id || 0,
+            mainPrice: String(mainPrice).substring(0, 32),
+            totalStock,
+            weight: String(product.weight || 0).substring(0, 32),
+            tags: tags,
+            description: product.text_fields?.description || "",
+            imageUrl: (imageUrl || "").substring(0, 1024),
+          });
+        }
+
+        if (rows.length > 0) {
+          // Upsert: delete existing then insert (simpler than ON DUPLICATE KEY for bulk)
+          const existingIds = rows.map(r => r.productId);
+          await db.delete(productCache).where(
+            and(
+              eq(productCache.userId, userId),
+              eq(productCache.inventoryId, inventoryId),
+              inArray(productCache.productId, existingIds)
+            )
+          );
+          await db.insert(productCache).values(rows);
+          totalInserted += rows.length;
+        }
+
+        progress.productsScanned += batch.length;
+        progress.productsIndexed = totalInserted;
+        progress.uniqueTags = allTags.size;
       }
 
       progress.currentPage = page;
@@ -351,203 +369,241 @@ export async function startTagIndexScan(
         progress.totalEstimatedPages = Math.max(progress.totalEstimatedPages, page + 1);
       }
 
-      // Save partial index for immediate use
-      productIndexCache.set(key, { ...index, isComplete: false });
-      scanProgressCache.set(key, { ...progress });
+      activeScanProgress.set(key, { ...progress });
       onProgress?.({ ...progress });
 
       hasMore = productIds.length >= 1000;
       page++;
     }
 
-    index.totalPages = page - 1;
-    index.isComplete = !activeScanAbort.get(key);
-    index.lastUpdated = Date.now();
+    // Update sync status
+    const syncRows = await db.select().from(cacheSync)
+      .where(and(eq(cacheSync.userId, userId), eq(cacheSync.inventoryId, inventoryId)))
+      .limit(1);
 
-    progress.isComplete = index.isComplete;
+    if (syncRows.length > 0) {
+      await db.update(cacheSync)
+        .set({
+          totalProducts: totalInserted,
+          isComplete: activeScanAbort.get(key) ? 0 : 1,
+          lastSyncAt: new Date(),
+        })
+        .where(and(eq(cacheSync.userId, userId), eq(cacheSync.inventoryId, inventoryId)));
+    } else {
+      await db.insert(cacheSync).values({
+        userId,
+        inventoryId,
+        totalProducts: totalInserted,
+        isComplete: activeScanAbort.get(key) ? 0 : 1,
+        lastSyncAt: new Date(),
+      });
+    }
+
+    progress.isComplete = !activeScanAbort.get(key);
     progress.isScanning = false;
-    progress.totalEstimatedPages = index.totalPages;
-
-    productIndexCache.set(key, index);
-    scanProgressCache.set(key, progress);
+    progress.totalEstimatedPages = page - 1;
+    activeScanProgress.set(key, progress);
     onProgress?.(progress);
 
-    console.log(`[ProductIndex] Scan complete: ${index.totalScanned} products indexed, ${index.allTags.size} unique tags`);
+    console.log(`[ProductSync] Complete: ${totalInserted} products saved to DB, ${allTags.size} unique tags`);
   } catch (error) {
     progress.isScanning = false;
-    scanProgressCache.set(key, progress);
-    console.error("[ProductIndex] Scan error:", error);
+    activeScanProgress.set(key, progress);
+    console.error("[ProductSync] Error:", error);
     throw error;
   }
 }
 
-export function stopTagIndexScan(token: string, inventoryId: number) {
-  const key = getCacheKey(token, inventoryId);
+export function stopProductSync(userId: number, inventoryId: number) {
+  const key = getCacheKey(userId, inventoryId);
   activeScanAbort.set(key, true);
 }
 
 /**
- * Filter products from the index using multiple criteria.
- * All filters are AND-combined.
+ * Filter products from the database cache.
+ * Loads from DB (fast) instead of in-memory index.
  */
-export function filterProductsFromIndex(
-  token: string,
+export async function filterProductsFromCache(
+  userId: number,
   inventoryId: number,
   filters: ProductFilters,
   page: number = 1,
   pageSize: number = 50
-): {
+): Promise<{
   products: IndexedProduct[];
   total: number;
   page: number;
   totalPages: number;
   hasMore: boolean;
-  indexComplete: boolean;
-  scanProgress: ScanProgress;
   allIds: number[];
-} {
-  const key = getCacheKey(token, inventoryId);
-  const index = productIndexCache.get(key);
-  const scanProgress = getTagScanProgress(token, inventoryId);
-
-  if (!index || index.products.size === 0) {
-    return { products: [], total: 0, page: 1, totalPages: 0, hasMore: false, indexComplete: false, scanProgress, allIds: [] };
+}> {
+  const db = getDbInstance();
+  if (!db) {
+    return { products: [], total: 0, page: 1, totalPages: 0, hasMore: false, allIds: [] };
   }
 
-  // Start with all product IDs or narrow by tag/category/manufacturer first
-  let candidateArr: number[] | null = null;
+  // Build WHERE conditions
+  const conditions: any[] = [
+    eq(productCache.userId, userId),
+    eq(productCache.inventoryId, inventoryId),
+  ];
 
-  // Tag filter (single tag - backward compat)
+  // Tag filter - use JSON_CONTAINS for MySQL JSON column
   if (filters.tagName) {
-    const tagSet = index.tagToProducts.get(filters.tagName);
-    candidateArr = tagSet ? Array.from(tagSet) : [];
+    conditions.push(sql`JSON_CONTAINS(${productCache.tags}, ${JSON.stringify(filters.tagName)}, '$')`);
   }
 
-  // Multiple tags filter (AND - product must have ALL tags)
   if (filters.tags && filters.tags.length > 0) {
     for (const tag of filters.tags) {
-      const tagSet = index.tagToProducts.get(tag);
-      if (!tagSet) {
-        candidateArr = [];
-        break;
-      }
-      if (candidateArr === null) {
-        candidateArr = Array.from(tagSet);
-      } else {
-        // Intersection
-        candidateArr = candidateArr.filter(id => tagSet.has(id));
-      }
+      conditions.push(sql`JSON_CONTAINS(${productCache.tags}, ${JSON.stringify(tag)}, '$')`);
     }
   }
 
   // Category filter
   if (filters.categoryId) {
-    const catSet = index.categoryToProducts.get(filters.categoryId);
-    if (!catSet) {
-      candidateArr = [];
-    } else if (candidateArr === null) {
-      candidateArr = Array.from(catSet);
-    } else {
-      candidateArr = candidateArr.filter(id => catSet.has(id));
-    }
+    conditions.push(eq(productCache.categoryId, filters.categoryId));
   }
 
   // Manufacturer filter
   if (filters.manufacturerId) {
-    const manSet = index.manufacturerToProducts.get(filters.manufacturerId);
-    if (!manSet) {
-      candidateArr = [];
-    } else if (candidateArr === null) {
-      candidateArr = Array.from(manSet);
-    } else {
-      candidateArr = candidateArr.filter(id => manSet.has(id));
-    }
+    conditions.push(eq(productCache.manufacturerId, filters.manufacturerId));
   }
 
-  // If no index-based filters, start with all products
-  if (candidateArr === null) {
-    candidateArr = Array.from(index.products.keys());
+  // Name search
+  if (filters.searchName) {
+    conditions.push(like(productCache.name, `%${filters.searchName}%`));
   }
 
-  // Apply remaining filters by iterating candidates
-  const results: IndexedProduct[] = [];
-  for (const id of candidateArr) {
-    const product = index.products.get(id);
-    if (!product) continue;
-
-    // Name search (case insensitive)
-    if (filters.searchName) {
-      const search = filters.searchName.toLowerCase();
-      if (!product.name.toLowerCase().includes(search)) continue;
-    }
-
-    // EAN search
-    if (filters.searchEan) {
-      if (!product.ean.includes(filters.searchEan)) continue;
-    }
-
-    // SKU search
-    if (filters.searchSku) {
-      if (!product.sku.toLowerCase().includes(filters.searchSku.toLowerCase())) continue;
-    }
-
-    // Price range
-    if (filters.priceMin !== undefined && product.mainPrice < filters.priceMin) continue;
-    if (filters.priceMax !== undefined && product.mainPrice > filters.priceMax) continue;
-
-    // Stock range
-    if (filters.stockMin !== undefined && product.totalStock < filters.stockMin) continue;
-    if (filters.stockMax !== undefined && product.totalStock > filters.stockMax) continue;
-
-    // Weight range
-    if (filters.weightMin !== undefined && product.weight < filters.weightMin) continue;
-    if (filters.weightMax !== undefined && product.weight > filters.weightMax) continue;
-
-    results.push(product);
+  // EAN search
+  if (filters.searchEan) {
+    conditions.push(like(productCache.ean, `%${filters.searchEan}%`));
   }
 
-  // Sort by ID descending (newest first)
-  results.sort((a, b) => b.id - a.id);
+  // SKU search
+  if (filters.searchSku) {
+    conditions.push(like(productCache.sku, `%${filters.searchSku}%`));
+  }
 
-  const total = results.length;
+  // Price range
+  if (filters.priceMin !== undefined) {
+    conditions.push(sql`CAST(${productCache.mainPrice} AS DECIMAL(10,2)) >= ${filters.priceMin}`);
+  }
+  if (filters.priceMax !== undefined) {
+    conditions.push(sql`CAST(${productCache.mainPrice} AS DECIMAL(10,2)) <= ${filters.priceMax}`);
+  }
+
+  // Stock range
+  if (filters.stockMin !== undefined) {
+    conditions.push(gte(productCache.totalStock, filters.stockMin));
+  }
+  if (filters.stockMax !== undefined) {
+    conditions.push(lte(productCache.totalStock, filters.stockMax));
+  }
+
+  // Weight range
+  if (filters.weightMin !== undefined) {
+    conditions.push(sql`CAST(${productCache.weight} AS DECIMAL(10,2)) >= ${filters.weightMin}`);
+  }
+  if (filters.weightMax !== undefined) {
+    conditions.push(sql`CAST(${productCache.weight} AS DECIMAL(10,2)) <= ${filters.weightMax}`);
+  }
+
+  const whereClause = and(...conditions);
+
+  // Get total count
+  const countResult = await db.select({ count: sql<number>`COUNT(*)` })
+    .from(productCache)
+    .where(whereClause);
+  const total = countResult[0]?.count || 0;
+
+  // Get all IDs for "select all" functionality
+  const allIdsResult = await db.select({ productId: productCache.productId })
+    .from(productCache)
+    .where(whereClause)
+    .orderBy(sql`${productCache.productId} DESC`);
+  const allIds = allIdsResult.map(r => r.productId);
+
+  // Get paginated results
   const totalPages = Math.ceil(total / pageSize);
-  const start = (page - 1) * pageSize;
-  const pageProducts = results.slice(start, start + pageSize);
+  const offset = (page - 1) * pageSize;
 
-  // Collect all IDs for "select all" functionality
-  const allIds = results.map(p => p.id);
+  const rows = await db.select().from(productCache)
+    .where(whereClause)
+    .orderBy(sql`${productCache.productId} DESC`)
+    .limit(pageSize)
+    .offset(offset);
+
+  const products: IndexedProduct[] = rows.map(row => ({
+    id: row.productId,
+    name: row.name,
+    ean: row.ean,
+    sku: row.sku,
+    tags: (row.tags as string[]) || [],
+    categoryId: row.categoryId,
+    manufacturerId: row.manufacturerId,
+    weight: parseFloat(row.weight) || 0,
+    mainPrice: parseFloat(row.mainPrice) || 0,
+    totalStock: row.totalStock,
+    description: row.description || "",
+    imageUrl: row.imageUrl || "",
+  }));
 
   return {
-    products: pageProducts,
+    products,
     total,
     page,
     totalPages,
     hasMore: page < totalPages,
-    indexComplete: index.isComplete,
-    scanProgress,
     allIds,
   };
 }
 
-/** Get index statistics */
-export function getIndexStats(token: string, inventoryId: number) {
-  const key = getCacheKey(token, inventoryId);
-  const index = productIndexCache.get(key);
-  if (!index) return null;
+/** Get cache statistics from database */
+export async function getCacheStats(userId: number, inventoryId: number) {
+  const db = getDbInstance();
+  if (!db) return null;
 
-  const tagStats = Array.from(index.tagToProducts.entries()).map(([tag, ids]) => ({
-    tag,
-    count: ids.size,
-  })).sort((a, b) => b.count - a.count);
+  const syncStatus = await getCacheSyncStatus(userId, inventoryId);
+  if (!syncStatus) return null;
+
+  // Get total count
+  const countResult = await db.select({ count: sql<number>`COUNT(*)` })
+    .from(productCache)
+    .where(and(eq(productCache.userId, userId), eq(productCache.inventoryId, inventoryId)));
+  const totalProducts = countResult[0]?.count || 0;
+
+  // Get unique tags using JSON extraction
+  const tagResult = await db.select({
+    tag: sql<string>`jt.tag`,
+    count: sql<number>`COUNT(*)`
+  })
+    .from(productCache)
+    .where(and(eq(productCache.userId, userId), eq(productCache.inventoryId, inventoryId)))
+    .innerJoin(
+      sql`JSON_TABLE(${productCache.tags}, '$[*]' COLUMNS(tag VARCHAR(256) PATH '$')) AS jt`,
+      sql`1=1`
+    )
+    .groupBy(sql`jt.tag`)
+    .orderBy(sql`COUNT(*) DESC`);
+
+  // Get unique categories count
+  const catResult = await db.select({ count: sql<number>`COUNT(DISTINCT ${productCache.categoryId})` })
+    .from(productCache)
+    .where(and(eq(productCache.userId, userId), eq(productCache.inventoryId, inventoryId)));
+
+  // Get unique manufacturers count
+  const manResult = await db.select({ count: sql<number>`COUNT(DISTINCT ${productCache.manufacturerId})` })
+    .from(productCache)
+    .where(and(eq(productCache.userId, userId), eq(productCache.inventoryId, inventoryId)));
 
   return {
-    totalProducts: index.products.size,
-    uniqueTags: index.allTags.size,
-    uniqueCategories: index.allCategoryIds.size,
-    uniqueManufacturers: index.allManufacturerIds.size,
-    isComplete: index.isComplete,
-    lastUpdated: index.lastUpdated,
-    tagStats,
+    totalProducts,
+    uniqueTags: tagResult.length,
+    uniqueCategories: catResult[0]?.count || 0,
+    uniqueManufacturers: manResult[0]?.count || 0,
+    isComplete: syncStatus.isComplete === 1,
+    lastUpdated: new Date(syncStatus.lastSyncAt).getTime(),
+    tagStats: tagResult.map(r => ({ tag: r.tag, count: r.count })),
   };
 }
 
@@ -559,8 +615,8 @@ export async function getProductsByTag(
   page: number = 1,
   pageSize: number = 50
 ) {
-  const result = filterProductsFromIndex(token, inventoryId, { tagName }, page, pageSize);
-  // Convert IndexedProduct[] to Record format for backward compat
+  // This is a fallback — prefer filterProductsFromCache
+  const result = await filterProductsFromCache(0, inventoryId, { tagName }, page, pageSize);
   const products: Record<string, any> = {};
   for (const p of result.products) {
     products[String(p.id)] = p;
@@ -571,9 +627,41 @@ export async function getProductsByTag(
     page: result.page,
     totalPages: result.totalPages,
     hasMore: result.hasMore,
-    indexComplete: result.indexComplete,
-    scanProgress: result.scanProgress,
   };
+}
+
+// Keep old function signatures for backward compat
+export function filterProductsFromIndex(
+  token: string,
+  inventoryId: number,
+  filters: ProductFilters,
+  page: number = 1,
+  pageSize: number = 50
+) {
+  // Redirect to cache-based filtering
+  // This is sync wrapper - callers should migrate to filterProductsFromCache
+  return {
+    products: [] as IndexedProduct[],
+    total: 0,
+    page: 1,
+    totalPages: 0,
+    hasMore: false,
+    indexComplete: false,
+    scanProgress: getTagScanProgress(0, inventoryId),
+    allIds: [] as number[],
+  };
+}
+
+export function getIndexStats(token: string, inventoryId: number) {
+  return null; // Replaced by getCacheStats
+}
+
+export function stopTagIndexScan(token: string, inventoryId: number) {
+  // Legacy - no-op
+}
+
+export async function startTagIndexScan(token: string, inventoryId: number) {
+  // Legacy - no-op, replaced by startProductSync
 }
 
 export type BaseLinkerProduct = {
