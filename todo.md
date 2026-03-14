@@ -41,3 +41,4 @@
 - [x] Seleção de conta/integração do marketplace na exportação (múltiplas contas ML, Shopee, etc.)
 - [x] BUG: Filtro de integrações não encontra contas do Mercado Livre - substituido por busca por texto mostrando todas as contas
 - [x] BUG: Sistema mostra apenas lojas virtuais (External Storages) e não marketplaces (Mercado Livre, Amazon, etc.) - Corrigido usando getInventoryIntegrations
+- [x] BUG: Sistema re-indexa produtos toda vez ao abrir a página - corrigido: agora espera cacheSyncStatus carregar antes de decidir, só auto-sync se nunca sincronizou, cache válido por 24h

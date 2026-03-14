@@ -1,0 +1,21 @@
+{
+  "query": "SELECT * FROM cache_sync;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT * FROM cache_sync;",
+  "rows": [
+    {
+      "id": "1",
+      "userId": "1",
+      "inventoryId": "25529",
+      "totalProducts": "125643",
+      "lastProductId": "0",
+      "isComplete": "1",
+      "lastSyncAt": "2026-03-14 20:44:52",
+      "createdAt": "2026-03-14 20:44:51",
+      "updatedAt": "2026-03-14 20:44:51"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuserId\tinventoryId\ttotalProducts\tlastProductId\tisComplete\tlastSyncAt\tcreatedAt\tupdatedAt\n1\t1\t25529\t125643\t0\t1\t2026-03-14 20:44:52\t2026-03-14 20:44:51\t2026-03-14 20:44:51\n",
+  "stderr": "",
+  "execution_time_ms": 363
+}

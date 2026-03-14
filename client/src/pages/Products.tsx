@@ -86,7 +86,7 @@ export default function ProductsPage() {
     { enabled: !!inventoryId && !!tokenData?.hasToken && !!scanProgress?.isComplete }
   );
 
-  const { data: cacheSyncStatus } = trpc.baselinker.getCacheSyncStatus.useQuery(
+  const { data: cacheSyncStatus, isFetched: cacheSyncFetched } = trpc.baselinker.getCacheSyncStatus.useQuery(
     { inventoryId: inventoryId! },
     { enabled: !!inventoryId && !!tokenData?.hasToken }
   );
@@ -134,15 +134,22 @@ export default function ProductsPage() {
       { enabled: !!tokenData?.hasToken && !!inventoryId }
     );
 
-  // Auto-start sync if no cache exists
+  // Auto-start sync ONLY if cache doesn't exist yet (never synced before)
+  // Wait for cacheSyncStatus to be fetched before deciding
+  const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
   useEffect(() => {
-    if (inventoryId && tokenData?.hasToken && !scanProgress?.isScanning) {
-      // Check if cache exists and is fresh
-      if (!cacheSyncStatus || !cacheSyncStatus.isComplete) {
-        startSyncMutation.mutate({ inventoryId });
-      }
+    if (!cacheSyncFetched || autoSyncTriggered) return; // Wait for DB check to complete
+    if (!inventoryId || !tokenData?.hasToken) return;
+    if (scanProgress?.isScanning) return;
+    
+    // Only auto-sync if cache has NEVER been created (null = no row in DB)
+    // If cache exists (even if old), show cached data immediately
+    if (cacheSyncStatus === null) {
+      console.log("[Products] No cache found, starting initial sync...");
+      setAutoSyncTriggered(true);
+      startSyncMutation.mutate({ inventoryId });
     }
-  }, [inventoryId, tokenData?.hasToken, cacheSyncStatus]);
+  }, [inventoryId, tokenData?.hasToken, cacheSyncFetched, cacheSyncStatus, autoSyncTriggered]);
 
   useEffect(() => {
     if (scanProgress?.isComplete) {
@@ -323,7 +330,7 @@ export default function ProductsPage() {
         </Card>
       )}
 
-      {(cacheSyncStatus?.isComplete || scanProgress?.isComplete) && !isScanning && (
+      {((cacheSyncStatus?.isComplete === 1) || scanProgress?.isComplete) && !isScanning && (
         <Card className="border-green-500/30 bg-green-50">
           <CardContent className="py-2.5">
             <div className="flex items-center gap-3">
@@ -589,7 +596,7 @@ export default function ProductsPage() {
                     Limpar filtros
                   </Button>
                 </>
-              ) : !cacheSyncStatus?.isComplete && !scanProgress?.isComplete ? (
+              ) : cacheSyncFetched && !cacheSyncStatus?.isComplete && !scanProgress?.isComplete ? (
                 <>
                   <p>Aguardando sincronização dos produtos...</p>
                   <Button variant="outline" size="sm" onClick={handleStartSync}>

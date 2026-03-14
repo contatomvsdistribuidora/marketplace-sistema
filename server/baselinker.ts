@@ -237,7 +237,8 @@ export async function startProductSync(
     const syncStatus = await getCacheSyncStatus(userId, inventoryId);
     if (syncStatus?.isComplete && syncStatus.lastSyncAt) {
       const age = Date.now() - new Date(syncStatus.lastSyncAt).getTime();
-      if (age < 30 * 60 * 1000) {
+      // Cache is valid for 24 hours - user can manually refresh anytime
+      if (age < 24 * 60 * 60 * 1000) {
         // Cache is fresh, skip sync
         const progress: ScanProgress = {
           currentPage: 0,
