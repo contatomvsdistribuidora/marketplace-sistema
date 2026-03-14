@@ -1,0 +1,13 @@
+{
+  "query": "SELECT settingValue FROM settings WHERE settingKey='baselinker_token' LIMIT 1",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT settingValue FROM settings WHERE settingKey='baselinker_token' LIMIT 1",
+  "rows": [
+    {
+      "settingValue": "8003874-8014187-TVS3CLRUGF3B72ZTQCE7F3TRPKXD1DEI4WTL13M1SMM9P0DIDCRVYGIZJYCGR9T2"
+    }
+  ],
+  "messages": [],
+  "stdout": "settingValue\n8003874-8014187-TVS3CLRUGF3B72ZTQCE7F3TRPKXD1DEI4WTL13M1SMM9P0DIDCRVYGIZJYCGR9T2\n",
+  "stderr": "",
+  "execution_time_ms": 381
+}

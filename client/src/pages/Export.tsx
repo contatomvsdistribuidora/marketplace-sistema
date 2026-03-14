@@ -68,59 +68,15 @@ export default function ExportPage() {
     { enabled: !!tokenData?.hasToken }
   );
 
-  // Filter storages based on selected marketplace name
-  const filteredStorages = (externalStorages || []).filter((s: ExternalStorage) => {
-    if (!selectedMarketplace) return false;
-    const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
-    if (!marketplace) return false;
-    
-    // Match storage name with marketplace name (case insensitive, partial match)
-    const mpName = marketplace.name.toLowerCase();
-    const storageName = s.name.toLowerCase();
-    
-    // Common marketplace name mappings
-    const nameVariants: Record<string, string[]> = {
-      "mercado livre": ["mercado livre", "mercadolivre", "meli", "ml"],
-      "shopee": ["shopee"],
-      "amazon": ["amazon", "amz"],
-      "magazine luiza": ["magazine luiza", "magalu", "magazineluiza"],
-      "americanas": ["americanas", "b2w"],
-      "tiktok shop": ["tiktok", "tik tok"],
-      "madeira madeira": ["madeira"],
-      "leroy merlin": ["leroy"],
-      "casas bahia": ["casas bahia"],
-      "extra": ["extra.com"],
-      "carrefour": ["carrefour"],
-      "aliexpress": ["aliexpress", "ali express"],
-      "ebay": ["ebay"],
-      "wish": ["wish"],
-      "shein": ["shein"],
-      "bling": ["bling"],
-      "tiny": ["tiny"],
-      "nuvemshop": ["nuvemshop", "nuvem"],
-      "tray": ["tray"],
-      "vtex": ["vtex"],
-      "woocommerce": ["woocommerce", "woo"],
-      "shopify": ["shopify"],
-    };
+  // Search filter for storages
+  const [storageSearch, setStorageSearch] = useState("");
 
-    // Check direct match
-    if (storageName.includes(mpName)) return true;
-
-    // Check variant matches
-    for (const [key, variants] of Object.entries(nameVariants)) {
-      if (mpName.includes(key)) {
-        return variants.some(v => storageName.includes(v));
-      }
-    }
-
-    // Fallback: show all storages if no specific match found
-    return false;
+  // Show all storages with optional search filter
+  const displayedStorages = (externalStorages || []).filter((s: ExternalStorage) => {
+    if (!storageSearch) return true;
+    const search = storageSearch.toLowerCase();
+    return s.name.toLowerCase().includes(search) || s.storage_id.toLowerCase().includes(search);
   });
-
-  // Also provide option to show ALL storages
-  const [showAllStorages, setShowAllStorages] = useState(false);
-  const displayedStorages = showAllStorages ? (externalStorages || []) : filteredStorages;
 
   // Load pre-selected product IDs from sessionStorage
   useEffect(() => {
@@ -539,7 +495,7 @@ export default function ExportPage() {
                   onValueChange={(val) => {
                     setSelectedMarketplace(val);
                     setSelectedStorage(""); // Reset storage when marketplace changes
-                    setShowAllStorages(false);
+                    setStorageSearch("");
                   }}
                 >
                   <SelectTrigger>
@@ -564,6 +520,9 @@ export default function ExportPage() {
                       Conta / Integração
                     </label>
                     <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {(externalStorages || []).length} contas conectadas
+                      </span>
                       <Button 
                         variant="ghost" 
                         size="sm" 
@@ -581,80 +540,50 @@ export default function ExportPage() {
                       <Loader2 className="h-4 w-4 animate-spin" />
                       <span className="text-sm text-muted-foreground">Carregando contas conectadas...</span>
                     </div>
-                  ) : displayedStorages.length > 0 ? (
+                  ) : (externalStorages || []).length > 0 ? (
                     <>
-                      <Select value={selectedStorage} onValueChange={setSelectedStorage}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione a conta de destino" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {displayedStorages.map((s: ExternalStorage) => (
-                            <SelectItem key={s.storage_id} value={s.storage_id}>
-                              <div className="flex items-center gap-2">
-                                <span>{s.name}</span>
-                                <span className="text-xs text-muted-foreground">({s.storage_id})</span>
-                                {s.write && (
-                                  <Badge variant="outline" className="text-[10px] h-4 px-1">escrita</Badge>
-                                )}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {/* Search field for storages */}
+                      <Input
+                        placeholder="Buscar conta por nome ou ID..."
+                        value={storageSearch}
+                        onChange={(e) => setStorageSearch(e.target.value)}
+                        className="h-8 text-sm"
+                      />
 
-                      {!showAllStorages && filteredStorages.length === 0 && (
+                      {displayedStorages.length > 0 ? (
+                        <Select value={selectedStorage} onValueChange={setSelectedStorage}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a conta de destino" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[300px]">
+                            {displayedStorages.map((s: ExternalStorage) => (
+                              <SelectItem key={s.storage_id} value={s.storage_id}>
+                                <div className="flex items-center gap-2">
+                                  <span>{s.name}</span>
+                                  <span className="text-xs text-muted-foreground">({s.storage_id})</span>
+                                  {s.write && (
+                                    <Badge variant="outline" className="text-[10px] h-4 px-1">escrita</Badge>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
                         <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
                           <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                          <div className="flex-1">
-                            <p className="text-xs text-amber-700">
-                              Nenhuma conta encontrada para este marketplace.
-                            </p>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-xs h-7 shrink-0"
-                            onClick={() => setShowAllStorages(true)}
-                          >
-                            Mostrar todas as contas
-                          </Button>
+                          <p className="text-xs text-amber-700">
+                            Nenhuma conta encontrada com "{storageSearch}". Tente outro termo.
+                          </p>
                         </div>
-                      )}
-
-                      {!showAllStorages && filteredStorages.length > 0 && (externalStorages || []).length > filteredStorages.length && (
-                        <button
-                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                          onClick={() => setShowAllStorages(true)}
-                        >
-                          Mostrar todas as {(externalStorages || []).length} contas conectadas
-                        </button>
-                      )}
-
-                      {showAllStorages && (
-                        <button
-                          className="text-xs text-primary hover:underline"
-                          onClick={() => setShowAllStorages(false)}
-                        >
-                          Mostrar apenas contas do marketplace selecionado
-                        </button>
                       )}
                     </>
                   ) : (
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
                       <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-xs text-amber-700">
-                          Nenhuma integração encontrada. Verifique se o marketplace está conectado no BaseLinker.
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs h-7 shrink-0"
-                        onClick={() => setShowAllStorages(true)}
-                      >
-                        Mostrar todas as contas
-                      </Button>
+                      <p className="text-xs text-amber-700">
+                        Nenhuma integração encontrada. Verifique se os marketplaces estão conectados no BaseLinker.
+                      </p>
                     </div>
                   )}
 
