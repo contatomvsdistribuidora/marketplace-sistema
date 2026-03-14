@@ -17,3 +17,4 @@
 - [x] Design do layout com DashboardLayout (sidebar navigation)
 - [x] Testes unitários (vitest)
 - [x] BUG: Produtos não carregam ao selecionar uma tag - mostra 0 produtos e fica carregando
+- [x] BUG: Filtro por tag não funciona - ao selecionar uma tag específica, mostra todos os produtos

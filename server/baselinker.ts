@@ -70,13 +70,18 @@ export async function getInventoryCategories(token: string, inventoryId: number)
   return data.categories || [];
 }
 
-/** Get product list with optional tag filter - paginated */
+/**
+ * Get product list - paginated
+ * NOTE: BaseLinker API getInventoryProductsList does NOT support filter_tag_id.
+ * Available filters: filter_id, filter_category_id, filter_ean, filter_sku, filter_name,
+ * filter_price_from, filter_price_to, filter_stock_from, filter_stock_to, filter_sort
+ */
 export async function getInventoryProductsList(
   token: string,
   inventoryId: number,
   options: {
-    filterTagId?: number;
     filterCategoryId?: number;
+    filterName?: string;
     page?: number;
   } = {}
 ) {
@@ -84,11 +89,11 @@ export async function getInventoryProductsList(
     inventory_id: inventoryId,
   };
 
-  if (options.filterTagId) {
-    params.filter_tag_id = options.filterTagId;
-  }
   if (options.filterCategoryId) {
     params.filter_category_id = options.filterCategoryId;
+  }
+  if (options.filterName) {
+    params.filter_name = options.filterName;
   }
   if (options.page) {
     params.page = options.page;
@@ -110,25 +115,81 @@ export async function getInventoryProductsData(token: string, inventoryId: numbe
   return data.products || {};
 }
 
-/** Get all products with a specific tag (handles pagination) */
+/**
+ * Get products filtered by tag name.
+ * Since BaseLinker API doesn't support tag filtering in getInventoryProductsList,
+ * we need to:
+ * 1. Get all product IDs from the list
+ * 2. Get detailed data in batches (which includes tags)
+ * 3. Filter by tag name server-side
+ */
+export async function getProductsByTag(
+  token: string,
+  inventoryId: number,
+  tagName: string,
+  page: number = 1
+): Promise<{ products: Record<string, any>; total: number; hasMore: boolean }> {
+  // Step 1: Get product IDs from the list (1000 per page)
+  const listResult = await getInventoryProductsList(token, inventoryId, { page });
+  const productIds = Object.keys(listResult.products).map(Number);
+
+  if (productIds.length === 0) {
+    return { products: {}, total: 0, hasMore: false };
+  }
+
+  // Step 2: Get detailed data in batches of 100 (API limit)
+  const BATCH_SIZE = 100;
+  const filteredProducts: Record<string, any> = {};
+
+  for (let i = 0; i < productIds.length; i += BATCH_SIZE) {
+    const batch = productIds.slice(i, i + BATCH_SIZE);
+    const detailedData = await getInventoryProductsData(token, inventoryId, batch);
+
+    // Step 3: Filter by tag name
+    for (const [id, product] of Object.entries(detailedData) as [string, any][]) {
+      const productTags: string[] = product.tags || [];
+      if (productTags.some((t: string) => t.toLowerCase() === tagName.toLowerCase())) {
+        // Merge basic list data with the tag match info
+        filteredProducts[id] = {
+          ...listResult.products[id],
+          id: Number(id),
+          tags: productTags,
+          name: product.text_fields?.name || product.text_fields?.["name"] || listResult.products[id]?.name || "",
+          description: product.text_fields?.description || "",
+          features: product.features || {},
+        };
+      }
+    }
+  }
+
+  return {
+    products: filteredProducts,
+    total: Object.keys(filteredProducts).length,
+    hasMore: productIds.length >= 1000, // BaseLinker returns 1000 per page
+  };
+}
+
+/**
+ * Get ALL products with a specific tag across all pages.
+ * Iterates through all pages until no more products are found.
+ */
 export async function getAllProductsByTag(
   token: string,
   inventoryId: number,
-  tagId: number,
+  tagName: string,
   maxPages: number = 100
 ): Promise<Record<string, any>> {
   let allProducts: Record<string, any> = {};
   let page = 1;
 
   while (page <= maxPages) {
-    const result = await getInventoryProductsList(token, inventoryId, {
-      filterTagId: tagId,
-      page,
-    });
+    const result = await getProductsByTag(token, inventoryId, tagName, page);
 
-    if (Object.keys(result.products).length === 0) break;
+    if (Object.keys(result.products).length === 0 && !result.hasMore) break;
 
     allProducts = { ...allProducts, ...result.products };
+
+    if (!result.hasMore) break;
     page++;
   }
 
@@ -208,4 +269,5 @@ export type BaseLinkerProduct = {
   features: Record<string, string>;
   variants: Record<string, any>;
   text_fields: Record<string, any>;
+  tags: string[];
 };

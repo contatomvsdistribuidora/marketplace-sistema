@@ -24,14 +24,13 @@ export default function ProductsPage() {
     { enabled: !!tokenData?.hasToken && !!inventoryId }
   );
 
-  // Only pass tagId when a specific tag is selected (not "all")
-  const parsedTagId = selectedTag !== "all" ? Number(selectedTag) : undefined;
-  const isValidTagId = parsedTagId !== undefined && !isNaN(parsedTagId);
+  // Use tagName (string) for filtering - BaseLinker tags only have "name" field
+  const tagName = selectedTag !== "all" ? selectedTag : undefined;
 
   const { data: productsData, isLoading: productsLoading, error: productsError } = trpc.baselinker.getProducts.useQuery(
     {
       inventoryId: inventoryId!,
-      tagId: isValidTagId ? parsedTagId : undefined,
+      tagName: tagName,
       page,
     },
     { enabled: !!tokenData?.hasToken && !!inventoryId }
@@ -128,18 +127,14 @@ export default function ProductsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas as tags</SelectItem>
-                {(tags || []).map((tag: any) => {
-                  // BaseLinker API returns tags with tag_id (number)
-                  const tagId = tag.tag_id ?? tag.id;
-                  return (
-                    <SelectItem key={tagId} value={String(tagId)}>
-                      {tag.name}
-                    </SelectItem>
-                  );
-                })}
+                {(tags || []).map((tag: any, index: number) => (
+                  <SelectItem key={`tag-${index}-${tag.name}`} value={tag.name}>
+                    {tag.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-            {tagsLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {(tagsLoading || productsLoading) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
             <Badge variant="secondary" className="ml-auto">
               {productsData?.total ?? 0} produto(s) encontrado(s)
             </Badge>
@@ -152,13 +147,18 @@ export default function ProductsPage() {
               <p className="text-sm mt-1">{productsError.message}</p>
             </div>
           ) : productsLoading ? (
-            <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+            <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
-              Carregando produtos...
+              <p>Carregando produtos...</p>
+              {tagName && (
+                <p className="text-xs">Filtrando por tag "{tagName}" — isso pode levar alguns segundos</p>
+              )}
             </div>
           ) : products.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
-              Nenhum produto encontrado com os filtros selecionados.
+              {tagName
+                ? `Nenhum produto encontrado com a tag "${tagName}".`
+                : "Nenhum produto encontrado."}
             </div>
           ) : (
             <>
@@ -218,7 +218,7 @@ export default function ProductsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={products.length < 100}
+                    disabled={!(productsData as any)?.hasMore && products.length < 1000}
                     onClick={() => setPage((p) => p + 1)}
                   >
                     Próxima

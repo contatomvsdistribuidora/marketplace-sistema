@@ -54,7 +54,7 @@ export default function ExportPage() {
   const { data: productsData, isLoading: productsLoading, refetch: refetchProducts } = trpc.baselinker.getProducts.useQuery(
     {
       inventoryId: inventoryId!,
-      tagId: selectedTag && selectedTag !== "all" ? parseInt(selectedTag) : undefined,
+      tagName: selectedTag && selectedTag !== "all" ? selectedTag : undefined,
     },
     { enabled: false }
   );

@@ -84,7 +84,7 @@ export const appRouter = router({
       .input(
         z.object({
           inventoryId: z.number(),
-          tagId: z.number().optional(),
+          tagName: z.string().optional(),
           categoryId: z.number().optional(),
           page: z.number().optional(),
         })
@@ -92,8 +92,14 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         const token = await db.getSetting(ctx.user.id, "baselinker_token");
         if (!token) throw new Error("Token do BaseLinker não configurado");
+
+        // If filtering by tag, use the tag-aware function
+        if (input.tagName) {
+          return baselinker.getProductsByTag(token, input.inventoryId, input.tagName, input.page || 1);
+        }
+
+        // Otherwise, use the standard product list
         return baselinker.getInventoryProductsList(token, input.inventoryId, {
-          filterTagId: input.tagId,
           filterCategoryId: input.categoryId,
           page: input.page,
         });
