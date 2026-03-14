@@ -161,7 +161,8 @@ export async function exportProductToMarketplace(
 ): Promise<{ success: boolean; productId: string; error?: string }> {
   try {
     // Build the source_id for marketplace-specific text fields
-    const sourceId = `${marketplaceType}_${accountId}`;
+    // BaseLinker format: "field|lang|marketplaceType|accountId" (all separated by pipes)
+    const sourceId = `${marketplaceType}|${accountId}`;
     
     // Build text_fields with marketplace-specific content
     const textFields: Record<string, string> = {};

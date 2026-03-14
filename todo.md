@@ -54,3 +54,4 @@
 - [x] Status visual de cada produto sendo listado no BaseLinker pelo agente
 - [x] Produtos já exportados devem ter opção de re-exportar para outro marketplace (a partir dos logs/jobs)
 - [x] Re-exportação para mesmo tipo de marketplace deve pular mapeamento IA e reutilizar dados já mapeados do job anterior
+- [x] BUG: Erro na exportação ML - text_field identifier usa melibr_34615 mas deveria ser melibr|34615 (pipe ao invés de underscore) - corrigido
