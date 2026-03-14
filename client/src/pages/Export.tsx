@@ -6,11 +6,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  Upload, Store, Tag, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
-  ArrowRight, ArrowLeft, Package, Edit3, Save, Info
+  Upload, Store, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
+  ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
@@ -33,10 +34,19 @@ interface MappedProduct {
   errorMessage?: string;
 }
 
+interface ExternalStorage {
+  storage_id: string;
+  name: string;
+  methods?: string[];
+  read?: boolean;
+  write?: boolean;
+}
+
 export default function ExportPage() {
   const [, setLocation] = useLocation();
   const [step, setStep] = useState<ExportStep>("select");
   const [selectedMarketplace, setSelectedMarketplace] = useState<string>("");
+  const [selectedStorage, setSelectedStorage] = useState<string>("");
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
   const [mappingProgress, setMappingProgress] = useState(0);
   const [isMappingInProgress, setIsMappingInProgress] = useState(false);
@@ -52,7 +62,67 @@ export default function ExportPage() {
 
   const { data: marketplaces } = trpc.marketplaces.list.useQuery();
 
-  // Load pre-selected product IDs from sessionStorage (coming from Products page)
+  // Fetch external storages (connected marketplace accounts)
+  const { data: externalStorages, isLoading: storagesLoading, refetch: refetchStorages } = trpc.baselinker.getExternalStorages.useQuery(
+    undefined,
+    { enabled: !!tokenData?.hasToken }
+  );
+
+  // Filter storages based on selected marketplace name
+  const filteredStorages = (externalStorages || []).filter((s: ExternalStorage) => {
+    if (!selectedMarketplace) return false;
+    const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
+    if (!marketplace) return false;
+    
+    // Match storage name with marketplace name (case insensitive, partial match)
+    const mpName = marketplace.name.toLowerCase();
+    const storageName = s.name.toLowerCase();
+    
+    // Common marketplace name mappings
+    const nameVariants: Record<string, string[]> = {
+      "mercado livre": ["mercado livre", "mercadolivre", "meli", "ml"],
+      "shopee": ["shopee"],
+      "amazon": ["amazon", "amz"],
+      "magazine luiza": ["magazine luiza", "magalu", "magazineluiza"],
+      "americanas": ["americanas", "b2w"],
+      "tiktok shop": ["tiktok", "tik tok"],
+      "madeira madeira": ["madeira"],
+      "leroy merlin": ["leroy"],
+      "casas bahia": ["casas bahia"],
+      "extra": ["extra.com"],
+      "carrefour": ["carrefour"],
+      "aliexpress": ["aliexpress", "ali express"],
+      "ebay": ["ebay"],
+      "wish": ["wish"],
+      "shein": ["shein"],
+      "bling": ["bling"],
+      "tiny": ["tiny"],
+      "nuvemshop": ["nuvemshop", "nuvem"],
+      "tray": ["tray"],
+      "vtex": ["vtex"],
+      "woocommerce": ["woocommerce", "woo"],
+      "shopify": ["shopify"],
+    };
+
+    // Check direct match
+    if (storageName.includes(mpName)) return true;
+
+    // Check variant matches
+    for (const [key, variants] of Object.entries(nameVariants)) {
+      if (mpName.includes(key)) {
+        return variants.some(v => storageName.includes(v));
+      }
+    }
+
+    // Fallback: show all storages if no specific match found
+    return false;
+  });
+
+  // Also provide option to show ALL storages
+  const [showAllStorages, setShowAllStorages] = useState(false);
+  const displayedStorages = showAllStorages ? (externalStorages || []) : filteredStorages;
+
+  // Load pre-selected product IDs from sessionStorage
   useEffect(() => {
     const storedIds = sessionStorage.getItem("export_product_ids");
     const storedTag = sessionStorage.getItem("export_tag");
@@ -93,7 +163,6 @@ export default function ExportPage() {
           status: "pending" as const,
         }))
       );
-      // Clear sessionStorage after loading
       sessionStorage.removeItem("export_product_ids");
       sessionStorage.removeItem("export_tag");
     }
@@ -110,6 +179,10 @@ export default function ExportPage() {
       toast.error("Selecione um marketplace de destino");
       return;
     }
+    if (!selectedStorage) {
+      toast.error("Selecione a conta/integração de destino");
+      return;
+    }
     if (mappedProducts.length === 0) {
       toast.error("Nenhum produto selecionado para exportar");
       return;
@@ -121,6 +194,8 @@ export default function ExportPage() {
 
     const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
     const marketplaceName = marketplace?.name || "Marketplace";
+    const storage = (externalStorages || []).find((s: ExternalStorage) => s.storage_id === selectedStorage);
+    const storageName = storage?.name || "";
 
     for (let i = 0; i < mappedProducts.length; i++) {
       const product = mappedProducts[i];
@@ -134,7 +209,7 @@ export default function ExportPage() {
             ean: product.ean,
             sku: product.sku,
           },
-          marketplace: marketplaceName,
+          marketplace: `${marketplaceName} (${storageName})`,
           availableCategories: [],
         });
 
@@ -446,31 +521,168 @@ export default function ExportPage() {
             </Card>
           )}
 
-          {/* Marketplace selection */}
+          {/* Marketplace + Account selection */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Store className="h-4 w-4" />
-                Marketplace de Destino
+                Marketplace e Conta de Destino
               </CardTitle>
-              <CardDescription>Selecione para qual marketplace deseja exportar</CardDescription>
+              <CardDescription>Selecione o marketplace e a conta/integração para onde deseja exportar</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Select value={selectedMarketplace} onValueChange={setSelectedMarketplace}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um marketplace" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(marketplaces || []).map((mp: any) => (
-                    <SelectItem key={mp.id} value={String(mp.id)}>
-                      {mp.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Marketplace selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Marketplace</label>
+                <Select 
+                  value={selectedMarketplace} 
+                  onValueChange={(val) => {
+                    setSelectedMarketplace(val);
+                    setSelectedStorage(""); // Reset storage when marketplace changes
+                    setShowAllStorages(false);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um marketplace" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(marketplaces || []).map((mp: any) => (
+                      <SelectItem key={mp.id} value={String(mp.id)}>
+                        {mp.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Account/Integration selection */}
+              {selectedMarketplace && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      <Link2 className="h-3.5 w-3.5" />
+                      Conta / Integração
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-7 text-xs"
+                        onClick={() => refetchStorages()}
+                      >
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                        Atualizar
+                      </Button>
+                    </div>
+                  </div>
+
+                  {storagesLoading ? (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-sm text-muted-foreground">Carregando contas conectadas...</span>
+                    </div>
+                  ) : displayedStorages.length > 0 ? (
+                    <>
+                      <Select value={selectedStorage} onValueChange={setSelectedStorage}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a conta de destino" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {displayedStorages.map((s: ExternalStorage) => (
+                            <SelectItem key={s.storage_id} value={s.storage_id}>
+                              <div className="flex items-center gap-2">
+                                <span>{s.name}</span>
+                                <span className="text-xs text-muted-foreground">({s.storage_id})</span>
+                                {s.write && (
+                                  <Badge variant="outline" className="text-[10px] h-4 px-1">escrita</Badge>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      {!showAllStorages && filteredStorages.length === 0 && (
+                        <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                          <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-xs text-amber-700">
+                              Nenhuma conta encontrada para este marketplace.
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs h-7 shrink-0"
+                            onClick={() => setShowAllStorages(true)}
+                          >
+                            Mostrar todas as contas
+                          </Button>
+                        </div>
+                      )}
+
+                      {!showAllStorages && filteredStorages.length > 0 && (externalStorages || []).length > filteredStorages.length && (
+                        <button
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() => setShowAllStorages(true)}
+                        >
+                          Mostrar todas as {(externalStorages || []).length} contas conectadas
+                        </button>
+                      )}
+
+                      {showAllStorages && (
+                        <button
+                          className="text-xs text-primary hover:underline"
+                          onClick={() => setShowAllStorages(false)}
+                        >
+                          Mostrar apenas contas do marketplace selecionado
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-xs text-amber-700">
+                          Nenhuma integração encontrada. Verifique se o marketplace está conectado no BaseLinker.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7 shrink-0"
+                        onClick={() => setShowAllStorages(true)}
+                      >
+                        Mostrar todas as contas
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Selected storage info */}
+                  {selectedStorage && (
+                    <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-primary shrink-0" />
+                        <div>
+                          <p className="text-sm font-medium">
+                            {(externalStorages || []).find((s: ExternalStorage) => s.storage_id === selectedStorage)?.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            ID: {selectedStorage}
+                            {(externalStorages || []).find((s: ExternalStorage) => s.storage_id === selectedStorage)?.write
+                              ? " • Permissão de escrita ativa"
+                              : " • Somente leitura"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <Button
                 onClick={handleStartMapping}
-                disabled={!selectedMarketplace || mappedProducts.length === 0 || isMappingInProgress}
+                disabled={!selectedMarketplace || !selectedStorage || mappedProducts.length === 0 || isMappingInProgress}
                 className="w-full"
                 size="lg"
               >
@@ -540,10 +752,15 @@ export default function ExportPage() {
                 {mappedProducts.filter((p) => p.status === "error").length} erro(s)
               </Badge>
             </div>
-            <Button onClick={handleExport}>
-              <Upload className="mr-2 h-4 w-4" />
-              Confirmar Exportação
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-muted-foreground">
+                Destino: <strong>{(externalStorages || []).find((s: ExternalStorage) => s.storage_id === selectedStorage)?.name}</strong>
+              </div>
+              <Button onClick={handleExport}>
+                <Upload className="mr-2 h-4 w-4" />
+                Confirmar Exportação
+              </Button>
+            </div>
           </div>
 
           <Card>
@@ -660,7 +877,10 @@ export default function ExportPage() {
               <Upload className="h-5 w-5 text-primary animate-pulse" />
               Exportando Produtos...
             </CardTitle>
-            <CardDescription>Os produtos estão sendo exportados para o marketplace selecionado</CardDescription>
+            <CardDescription>
+              Os produtos estão sendo exportados para{" "}
+              <strong>{(externalStorages || []).find((s: ExternalStorage) => s.storage_id === selectedStorage)?.name}</strong>
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Progress value={exportProgress} className="h-3" />
@@ -682,6 +902,9 @@ export default function ExportPage() {
               <CheckCircle className="h-8 w-8 text-green-600" />
             </div>
             <h3 className="text-xl font-semibold">Exportação Concluída!</h3>
+            <p className="text-sm text-muted-foreground">
+              Destino: {(externalStorages || []).find((s: ExternalStorage) => s.storage_id === selectedStorage)?.name}
+            </p>
             <div className="flex items-center gap-4">
               <Badge variant="default" className="text-sm">
                 {mappedProducts.filter((p) => p.status === "mapped").length} sucesso
@@ -701,6 +924,7 @@ export default function ExportPage() {
                   setPreSelectedIds([]);
                   setPreSelectedTag("");
                   setExportJobId(null);
+                  setSelectedStorage("");
                   setLocation("/products");
                 }}
               >

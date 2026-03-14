@@ -38,3 +38,4 @@
 - [x] Carregamento instantâneo da página de Produtos usando cache do banco
 - [x] Botão "Atualizar cache" para forçar re-sincronização manual
 - [x] BUG: Produtos selecionados na página de Produtos se perdem ao navegar para a página de Exportação
+- [x] Seleção de conta/integração do marketplace na exportação (múltiplas contas ML, Shopee, etc.)
