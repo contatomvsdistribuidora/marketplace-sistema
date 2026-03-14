@@ -40,3 +40,4 @@
 - [x] BUG: Produtos selecionados na página de Produtos se perdem ao navegar para a página de Exportação
 - [x] Seleção de conta/integração do marketplace na exportação (múltiplas contas ML, Shopee, etc.)
 - [x] BUG: Filtro de integrações não encontra contas do Mercado Livre - substituido por busca por texto mostrando todas as contas
+- [x] BUG: Sistema mostra apenas lojas virtuais (External Storages) e não marketplaces (Mercado Livre, Amazon, etc.) - Corrigido usando getInventoryIntegrations

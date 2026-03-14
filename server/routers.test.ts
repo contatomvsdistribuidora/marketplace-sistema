@@ -138,3 +138,19 @@ describe("exports.list", () => {
     expect(Array.isArray(result)).toBe(true);
   });
 });
+
+describe("baselinker.getIntegrations", () => {
+  it("requires authentication", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.baselinker.getIntegrations({ inventoryId: 1 })).rejects.toThrow();
+  });
+});
+
+describe("baselinker.getExternalStorages", () => {
+  it("requires authentication", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.baselinker.getExternalStorages()).rejects.toThrow();
+  });
+});

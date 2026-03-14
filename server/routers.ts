@@ -119,6 +119,18 @@ export const appRouter = router({
       return baselinker.getExternalStoragesList(token);
     }),
 
+    // Get marketplace integrations (Mercado Livre, Amazon, Shopee, etc.)
+    getIntegrations: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        const integrations = await baselinker.getInventoryIntegrations(token, input.inventoryId);
+        // Also get external storages for a complete list
+        const storages = await baselinker.getExternalStoragesList(token);
+        return { integrations, storages };
+      }),
+
     getExternalCategories: protectedProcedure
       .input(z.object({ storageId: z.string() }))
       .query(async ({ ctx, input }) => {
