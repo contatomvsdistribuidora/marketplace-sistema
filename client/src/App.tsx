@@ -11,6 +11,7 @@ import Marketplaces from "./pages/Marketplaces";
 import Export from "./pages/Export";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
+import AgentMonitor from "./pages/AgentMonitor";
 
 function Router() {
   return (
@@ -22,6 +23,7 @@ function Router() {
         <Route path="/export" component={Export} />
         <Route path="/logs" component={Logs} />
         <Route path="/settings" component={Settings} />
+        <Route path="/agent" component={AgentMonitor} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

@@ -154,3 +154,60 @@ describe("baselinker.getExternalStorages", () => {
     await expect(caller.baselinker.getExternalStorages()).rejects.toThrow();
   });
 });
+
+describe("agent.queue", () => {
+  it("requires authentication", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.agent.queue()).rejects.toThrow();
+  });
+
+  it("returns array when authenticated", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+    const result = await caller.agent.queue();
+    expect(Array.isArray(result)).toBe(true);
+  });
+});
+
+describe("agent.queueStats", () => {
+  it("requires authentication", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.agent.queueStats()).rejects.toThrow();
+  });
+
+  it("returns stats object when authenticated", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+    const result = await caller.agent.queueStats();
+    expect(result).toHaveProperty("total");
+    expect(result).toHaveProperty("waiting");
+    expect(result).toHaveProperty("processing");
+    expect(result).toHaveProperty("completed");
+    expect(result).toHaveProperty("failed");
+  });
+});
+
+describe("agent.actions", () => {
+  it("requires authentication", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.agent.actions()).rejects.toThrow();
+  });
+
+  it("returns array when authenticated", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+    const result = await caller.agent.actions();
+    expect(Array.isArray(result)).toBe(true);
+  });
+});
+
+describe("agent.latestScreenshot", () => {
+  it("requires authentication", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.agent.latestScreenshot()).rejects.toThrow();
+  });
+});

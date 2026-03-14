@@ -522,6 +522,138 @@ export const appRouter = router({
       return { stats, recentLogs, recentJobs };
     }),
   }),
+
+  // ============ AGENT ============
+  agent: router({
+    // Add products to the agent's processing queue
+    enqueue: protectedProcedure
+      .input(
+        z.object({
+          jobId: z.number(),
+          products: z.array(
+            z.object({
+              productId: z.string(),
+              productName: z.string().optional(),
+              sku: z.string().optional(),
+              ean: z.string().optional(),
+              price: z.string().optional(),
+              stock: z.number().optional(),
+              imageUrl: z.string().optional(),
+              description: z.string().optional(),
+              mappedCategory: z.string().optional(),
+              mappedAttributes: z.any().optional(),
+            })
+          ),
+          marketplaceType: z.string(),
+          accountId: z.string(),
+          accountName: z.string().optional(),
+          inventoryId: z.number(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const items = input.products.map((p) => ({
+          userId: ctx.user.id,
+          jobId: input.jobId,
+          productId: p.productId,
+          productName: p.productName || null,
+          sku: p.sku || null,
+          ean: p.ean || null,
+          price: p.price || null,
+          stock: p.stock || 0,
+          imageUrl: p.imageUrl || null,
+          description: p.description || null,
+          mappedCategory: p.mappedCategory || null,
+          mappedAttributes: p.mappedAttributes || null,
+          marketplaceType: input.marketplaceType,
+          accountId: input.accountId,
+          accountName: input.accountName || null,
+          inventoryId: input.inventoryId,
+        }));
+        const ids = await db.addToAgentQueue(items);
+        return { queuedCount: ids.length, ids };
+      }),
+
+    // Get queue items for a job or all
+    queue: protectedProcedure
+      .input(
+        z.object({
+          jobId: z.number().optional(),
+          status: z.string().optional(),
+        }).optional()
+      )
+      .query(async ({ ctx, input }) => {
+        return db.getAgentQueue(ctx.user.id, input?.jobId, input?.status);
+      }),
+
+    // Get queue stats
+    queueStats: protectedProcedure
+      .input(z.object({ jobId: z.number().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        return db.getAgentQueueStats(ctx.user.id, input?.jobId);
+      }),
+
+    // Get agent actions/log
+    actions: protectedProcedure
+      .input(
+        z.object({
+          jobId: z.number().optional(),
+          limit: z.number().optional(),
+        }).optional()
+      )
+      .query(async ({ ctx, input }) => {
+        return db.getAgentActions(ctx.user.id, input?.jobId, input?.limit || 50);
+      }),
+
+    // Get latest screenshot
+    latestScreenshot: protectedProcedure.query(async ({ ctx }) => {
+      return db.getLatestScreenshot(ctx.user.id);
+    }),
+
+    // Update queue item status (used by agent processing)
+    updateQueueItem: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          status: z.enum(["waiting", "processing", "completed", "failed", "skipped"]),
+          errorMessage: z.string().optional(),
+          screenshotUrl: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        await db.updateAgentQueueItem(input.id, {
+          status: input.status,
+          errorMessage: input.errorMessage,
+          screenshotUrl: input.screenshotUrl,
+          processedAt: input.status !== "waiting" ? new Date() : undefined,
+        });
+        return { success: true };
+      }),
+
+    // Add an action log entry
+    addAction: protectedProcedure
+      .input(
+        z.object({
+          jobId: z.number().optional(),
+          queueItemId: z.number().optional(),
+          actionType: z.enum(["navigate", "click", "type", "select", "screenshot", "wait", "success", "error", "info"]),
+          description: z.string(),
+          screenshotUrl: z.string().optional(),
+          metadata: z.any().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const id = await db.addAgentAction({
+          userId: ctx.user.id,
+          jobId: input.jobId,
+          queueItemId: input.queueItemId,
+          actionType: input.actionType,
+          description: input.description,
+          screenshotUrl: input.screenshotUrl || null,
+          metadata: input.metadata || null,
+        });
+        return { id };
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

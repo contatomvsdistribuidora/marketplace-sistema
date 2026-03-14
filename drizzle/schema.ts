@@ -148,3 +148,49 @@ export const cacheSync = mysqlTable("cache_sync", {
 });
 
 export type CacheSyncRow = typeof cacheSync.$inferSelect;
+
+/** Agent export queue - products waiting to be listed by the agent in BaseLinker panel */
+export const agentQueue = mysqlTable("agent_queue", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  jobId: int("jobId").notNull(),
+  productId: varchar("productId", { length: 128 }).notNull(),
+  productName: varchar("productName", { length: 512 }),
+  sku: varchar("sku", { length: 256 }),
+  ean: varchar("ean", { length: 128 }),
+  price: varchar("price", { length: 32 }),
+  stock: int("stock").default(0),
+  imageUrl: varchar("imageUrl", { length: 1024 }),
+  description: text("description"),
+  mappedCategory: varchar("mappedCategory", { length: 512 }),
+  mappedAttributes: json("mappedAttributes"),
+  marketplaceType: varchar("marketplaceType", { length: 64 }).notNull(),
+  accountId: varchar("accountId", { length: 128 }).notNull(),
+  accountName: varchar("accountName", { length: 256 }),
+  inventoryId: int("inventoryId").notNull(),
+  status: mysqlEnum("queue_status", ["waiting", "processing", "completed", "failed", "skipped"]).default("waiting").notNull(),
+  errorMessage: text("errorMessage"),
+  screenshotUrl: varchar("screenshotUrl", { length: 1024 }),
+  processedAt: timestamp("processedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AgentQueueRow = typeof agentQueue.$inferSelect;
+export type InsertAgentQueue = typeof agentQueue.$inferInsert;
+
+/** Agent action log - tracks every action the agent performs in BaseLinker panel */
+export const agentActions = mysqlTable("agent_actions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  jobId: int("jobId"),
+  queueItemId: int("queueItemId"),
+  actionType: mysqlEnum("action_type", ["navigate", "click", "type", "select", "screenshot", "wait", "success", "error", "info"]).default("info").notNull(),
+  description: text("description").notNull(),
+  screenshotUrl: varchar("screenshotUrl", { length: 1024 }),
+  metadata: json("metadata"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AgentActionRow = typeof agentActions.$inferSelect;
+export type InsertAgentAction = typeof agentActions.$inferInsert;

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Upload, Store, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
-  ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw
+  ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw, Bot
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
@@ -187,6 +187,7 @@ export default function ExportPage() {
   const updateExportMutation = trpc.exports.updateStatus.useMutation();
   const addLogMutation = trpc.exports.addLog.useMutation();
   const exportProductMutation = trpc.exports.exportProduct.useMutation();
+  const enqueueAgentMutation = trpc.agent.enqueue.useMutation();
 
   const handleStartMapping = async () => {
     if (!selectedMarketplace) {
@@ -397,6 +398,38 @@ export default function ExportPage() {
       jobId,
       status: errorCount === mappedProducts.length ? "failed" : "completed",
     });
+
+    // Also enqueue products for the agent to list in the BaseLinker panel
+    try {
+      const productsForAgent = mappedProducts
+        .filter(p => p.status === "mapped")
+        .map(p => ({
+          productId: p.id,
+          productName: p.name,
+          sku: p.sku || undefined,
+          ean: p.ean || undefined,
+          price: p.mainPrice?.toString() || undefined,
+          stock: p.totalStock || 0,
+          imageUrl: p.imageUrl || undefined,
+          description: p.description || undefined,
+          mappedCategory: p.suggestedCategory?.name || undefined,
+          mappedAttributes: p.suggestedAttributes || undefined,
+        }));
+
+      if (productsForAgent.length > 0) {
+        await enqueueAgentMutation.mutateAsync({
+          jobId,
+          products: productsForAgent,
+          marketplaceType: mktType,
+          accountId: rawAccountId,
+          accountName: selectedAccountInfo?.accountName || undefined,
+          inventoryId,
+        });
+        toast.info(`${productsForAgent.length} produtos adicionados \u00e0 fila do agente para listagem no marketplace.`);
+      }
+    } catch (agentError: any) {
+      console.error("Error enqueuing to agent:", agentError);
+    }
 
     setStep("done");
     toast.success(`Exporta\u00e7\u00e3o conclu\u00edda! ${successCount} produtos atualizados no BaseLinker, ${errorCount} erros.`);
@@ -961,9 +994,16 @@ export default function ExportPage() {
                 {mappedProducts.filter((p) => p.status === "error").length} erros
               </Badge>
             </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Os produtos foram adicionados à fila do agente para listagem no marketplace.
+            </p>
             <div className="flex gap-3 mt-4">
               <Button variant="outline" onClick={() => setLocation("/logs")}>
                 Ver Logs Detalhados
+              </Button>
+              <Button variant="outline" onClick={() => setLocation("/agent")}>
+                <Bot className="h-4 w-4 mr-1" />
+                Monitor do Agente
               </Button>
               <Button
                 onClick={() => {

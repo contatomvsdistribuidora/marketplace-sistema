@@ -43,7 +43,12 @@
 - [x] BUG: Sistema mostra apenas lojas virtuais (External Storages) e não marketplaces (Mercado Livre, Amazon, etc.) - Corrigido usando getInventoryIntegrations
 - [x] BUG: Sistema re-indexa produtos toda vez ao abrir a página - corrigido: agora espera cacheSyncStatus carregar antes de decidir, só auto-sync se nunca sincronizou, cache válido por 24h
 - [x] BUG: Integrações de marketplace (Mercado Livre) não aparecem na exportação - corrigido: substituido getInventoryIntegrations por getOrderSources que retorna TODAS as contas de marketplace
-- [ ] Implementar exportação REAL de produtos para marketplace via API BaseLinker (addInventoryProduct) - produtos devem aparecer no painel do BaseLinker
+- [x] Implementar exportação REAL de produtos para marketplace via API BaseLinker (addInventoryProduct) - produtos devem aparecer no painel do BaseLinker
 - [x] Implementar atualização de produtos via API addInventoryProduct com text_fields específicos para conta ML
 - [x] Atualizar Export.tsx para chamar exportação real via API (não apenas logs)
 - [ ] Automatizar listagem de anúncios no Mercado Livre via navegador no painel BaseLinker
+- [x] Criar tabelas no banco para fila de exportação do agente (agent_queue, agent_actions)
+- [x] Criar endpoints tRPC para gerenciar fila de exportação e upload de screenshots
+- [x] Criar página de Monitoramento do Agente com screenshots em tempo real e log de ações
+- [x] Integrar Export.tsx para enviar produtos para fila do agente ao invés de exportar direto
+- [x] Status visual de cada produto sendo listado no BaseLinker pelo agente

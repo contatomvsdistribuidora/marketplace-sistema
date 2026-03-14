@@ -9,6 +9,10 @@ import {
   attributeTemplates,
   exportJobs,
   exportLogs,
+  agentQueue,
+  agentActions,
+  InsertAgentQueue,
+  InsertAgentAction,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -270,6 +274,92 @@ export async function getRecentLogs(userId: number, limit: number = 100) {
     .where(eq(exportLogs.userId, userId))
     .orderBy(desc(exportLogs.createdAt))
     .limit(limit);
+}
+
+// ============ AGENT QUEUE ============
+export async function addToAgentQueue(items: InsertAgentQueue[]) {
+  const db = await getDb();
+  if (!db) return [];
+  const ids: number[] = [];
+  for (const item of items) {
+    const result = await db.insert(agentQueue).values(item).$returningId();
+    if (result[0]?.id) ids.push(result[0].id);
+  }
+  return ids;
+}
+
+export async function getAgentQueue(userId: number, jobId?: number, status?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [eq(agentQueue.userId, userId)];
+  if (jobId) conditions.push(eq(agentQueue.jobId, jobId));
+  if (status) conditions.push(eq(agentQueue.status, status as any));
+  return db.select().from(agentQueue).where(and(...conditions)).orderBy(desc(agentQueue.createdAt)).limit(500);
+}
+
+export async function getAgentQueueStats(userId: number, jobId?: number) {
+  const db = await getDb();
+  if (!db) return { total: 0, waiting: 0, processing: 0, completed: 0, failed: 0 };
+  const conditions = [eq(agentQueue.userId, userId)];
+  if (jobId) conditions.push(eq(agentQueue.jobId, jobId));
+  const result = await db.select({
+    total: sql<number>`COUNT(*)`,
+    waiting: sql<number>`SUM(CASE WHEN queue_status = 'waiting' THEN 1 ELSE 0 END)`,
+    processing: sql<number>`SUM(CASE WHEN queue_status = 'processing' THEN 1 ELSE 0 END)`,
+    completed: sql<number>`SUM(CASE WHEN queue_status = 'completed' THEN 1 ELSE 0 END)`,
+    failed: sql<number>`SUM(CASE WHEN queue_status = 'failed' THEN 1 ELSE 0 END)`,
+  }).from(agentQueue).where(and(...conditions));
+  return result[0] || { total: 0, waiting: 0, processing: 0, completed: 0, failed: 0 };
+}
+
+export async function updateAgentQueueItem(id: number, data: Partial<{
+  status: "waiting" | "processing" | "completed" | "failed" | "skipped";
+  errorMessage: string;
+  screenshotUrl: string;
+  processedAt: Date;
+}>) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(agentQueue).set(data).where(eq(agentQueue.id, id));
+}
+
+export async function getNextQueueItem(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(agentQueue)
+    .where(and(eq(agentQueue.userId, userId), eq(agentQueue.status, "waiting")))
+    .orderBy(agentQueue.createdAt)
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+// ============ AGENT ACTIONS ============
+export async function addAgentAction(data: InsertAgentAction) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(agentActions).values(data).$returningId();
+  return result[0]?.id || null;
+}
+
+export async function getAgentActions(userId: number, jobId?: number, limit: number = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [eq(agentActions.userId, userId)];
+  if (jobId) conditions.push(eq(agentActions.jobId, jobId));
+  return db.select().from(agentActions).where(and(...conditions)).orderBy(desc(agentActions.createdAt)).limit(limit);
+}
+
+export async function getLatestScreenshot(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(agentActions)
+    .where(and(
+      eq(agentActions.userId, userId),
+      sql`screenshotUrl IS NOT NULL AND screenshotUrl != ''`
+    ))
+    .orderBy(desc(agentActions.createdAt))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
 }
 
 // ============ STATS ============
