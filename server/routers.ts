@@ -377,6 +377,15 @@ export const appRouter = router({
 
   // ============ EXPORT JOBS ============
   exports: router({
+    // Get available text field keys for a given inventory (debug/validation)
+    getAvailableTextFieldKeys: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        return baselinker.getInventoryAvailableTextFieldKeys(token, input.inventoryId);
+      }),
+
     create: protectedProcedure
       .input(
         z.object({

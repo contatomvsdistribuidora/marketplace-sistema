@@ -75,6 +75,11 @@ export async function getInventoryTags(token: string, inventoryId: number) {
   return data.tags || [];
 }
 
+export async function getInventoryAvailableTextFieldKeys(token: string, inventoryId: number) {
+  const data = await rateLimitedRequest(token, "getInventoryAvailableTextFieldKeys", { inventory_id: inventoryId });
+  return data.text_field_keys || {};
+}
+
 export async function getInventoryCategories(token: string, inventoryId: number) {
   const data = await rateLimitedRequest(token, "getInventoryCategories", { inventory_id: inventoryId });
   return data.categories || [];
@@ -161,21 +166,22 @@ export async function exportProductToMarketplace(
 ): Promise<{ success: boolean; productId: string; error?: string }> {
   try {
     // Build the source_id for marketplace-specific text fields
-    // BaseLinker format: "field|lang|marketplaceType|accountId" (all separated by pipes)
-    const sourceId = `${marketplaceType}|${accountId}`;
+    // BaseLinker format: "field|lang|marketplaceType_accountId" (underscore between type and id)
+    // Language code for Brazil is "br" (not "pt")
+    const sourceId = `${marketplaceType}_${accountId}`;
     
     // Build text_fields with marketplace-specific content
     const textFields: Record<string, string> = {};
     
     // Set name for the specific marketplace account
-    textFields[`name|pt|${sourceId}`] = product.name;
+    textFields[`name|br|${sourceId}`] = product.name;
     
     // Set description for the specific marketplace account
-    textFields[`description|pt|${sourceId}`] = product.description;
+    textFields[`description|br|${sourceId}`] = product.description;
     
     // Set features for the specific marketplace account
     if (product.features && Object.keys(product.features).length > 0) {
-      textFields[`features|pt|${sourceId}`] = JSON.stringify(product.features);
+      textFields[`features|br|${sourceId}`] = JSON.stringify(product.features);
     }
     
     // Also set default name and description (without source_id) as fallback

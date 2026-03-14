@@ -1,0 +1,20 @@
+{
+  "query": "SELECT userId, settingKey, settingValue FROM settings;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT userId, settingKey, settingValue FROM settings;",
+  "rows": [
+    {
+      "userId": "1",
+      "settingKey": "baselinker_token",
+      "settingValue": "8003874-8014187-TVS3CLRUGF3B72ZTQCE7F3TRPKXD1DEI4WTL13M1SMM9P0DIDCRVYGIZJYCGR9T2"
+    },
+    {
+      "userId": "1",
+      "settingKey": "default_inventory_id",
+      "settingValue": "25529"
+    }
+  ],
+  "messages": [],
+  "stdout": "userId\tsettingKey\tsettingValue\n1\tbaselinker_token\t8003874-8014187-TVS3CLRUGF3B72ZTQCE7F3TRPKXD1DEI4WTL13M1SMM9P0DIDCRVYGIZJYCGR9T2\n1\tdefault_inventory_id\t25529\n",
+  "stderr": "",
+  "execution_time_ms": 382
+}
