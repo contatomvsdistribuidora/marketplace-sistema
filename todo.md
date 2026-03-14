@@ -1,0 +1,18 @@
+# Project TODO
+
+- [x] Configuração do token da API BaseLinker (tela de configuração + armazenamento seguro)
+- [x] Dashboard principal com estatísticas de produtos e marketplaces
+- [x] Listagem de produtos do BaseLinker filtrados por tag
+- [x] Seleção de marketplace de destino (Mercado Livre, Shopee, Amazon, TikTok, Madeira Madeira, Leroy Merlin, Magazine Luiza, etc.)
+- [x] Mapeamento automático de categorias usando IA (analisa nome/descrição → sugere categoria)
+- [x] Preenchimento automático de fichas técnicas obrigatórias usando IA
+- [x] Visualização e edição manual dos mapeamentos sugeridos pela IA
+- [x] Exportação em lote com barra de progresso e tratamento de erros
+- [x] Log de atividades com histórico de exportações (sucesso/erro/detalhes)
+- [x] Armazenamento de configurações de mapeamento para reutilização futura
+- [x] Schema do banco de dados (settings, marketplace_mappings, export_jobs, export_logs)
+- [x] Rotas tRPC para integração com API BaseLinker
+- [x] Rotas tRPC para mapeamento de categorias com IA
+- [x] Rotas tRPC para exportação em lote
+- [x] Design do layout com DashboardLayout (sidebar navigation)
+- [x] Testes unitários (vitest)

@@ -1,0 +1,160 @@
+{
+  "query": "SELECT id, code, name FROM marketplaces LIMIT 30;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, code, name FROM marketplaces LIMIT 30;",
+  "rows": [
+    {
+      "id": "1",
+      "code": "mercadolivre",
+      "name": "Mercado Livre"
+    },
+    {
+      "id": "2",
+      "code": "shopee",
+      "name": "Shopee"
+    },
+    {
+      "id": "3",
+      "code": "amazon",
+      "name": "Amazon"
+    },
+    {
+      "id": "4",
+      "code": "tiktok",
+      "name": "TikTok Shop"
+    },
+    {
+      "id": "5",
+      "code": "madeiramadeira",
+      "name": "Madeira Madeira"
+    },
+    {
+      "id": "6",
+      "code": "leroymerlin",
+      "name": "Leroy Merlin"
+    },
+    {
+      "id": "7",
+      "code": "magalu",
+      "name": "Magazine Luiza"
+    },
+    {
+      "id": "8",
+      "code": "americanas",
+      "name": "Americanas"
+    },
+    {
+      "id": "9",
+      "code": "casasbahia",
+      "name": "Casas Bahia"
+    },
+    {
+      "id": "10",
+      "code": "carrefour",
+      "name": "Carrefour"
+    },
+    {
+      "id": "11",
+      "code": "aliexpress",
+      "name": "AliExpress"
+    },
+    {
+      "id": "12",
+      "code": "shein",
+      "name": "Shein"
+    },
+    {
+      "id": "13",
+      "code": "kabum",
+      "name": "KaBuM!"
+    },
+    {
+      "id": "14",
+      "code": "dafiti",
+      "name": "Dafiti"
+    },
+    {
+      "id": "15",
+      "code": "netshoes",
+      "name": "Netshoes"
+    },
+    {
+      "id": "16",
+      "code": "centauro",
+      "name": "Centauro"
+    },
+    {
+      "id": "17",
+      "code": "fastshop",
+      "name": "Fast Shop"
+    },
+    {
+      "id": "18",
+      "code": "rihappy",
+      "name": "Ri Happy"
+    },
+    {
+      "id": "19",
+      "code": "olxbr",
+      "name": "OLX Brasil"
+    },
+    {
+      "id": "20",
+      "code": "privalia",
+      "name": "Privalia"
+    },
+    {
+      "id": "21",
+      "code": "renner",
+      "name": "Renner"
+    },
+    {
+      "id": "22",
+      "code": "riachuelo",
+      "name": "Riachuelo"
+    },
+    {
+      "id": "23",
+      "code": "zattini",
+      "name": "Zattini"
+    },
+    {
+      "id": "24",
+      "code": "zoom",
+      "name": "Zoom"
+    },
+    {
+      "id": "25",
+      "code": "webcontinental",
+      "name": "WebContinental"
+    },
+    {
+      "id": "26",
+      "code": "olist",
+      "name": "Olist"
+    },
+    {
+      "id": "27",
+      "code": "belezanaweb",
+      "name": "Beleza na Web"
+    },
+    {
+      "id": "28",
+      "code": "decathlonbr",
+      "name": "Decathlon BR"
+    },
+    {
+      "id": "29",
+      "code": "polishop",
+      "name": "Polishop"
+    },
+    {
+      "id": "30",
+      "code": "temu",
+      "name": "Temu"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tcode\tname\n1\tmercadolivre\tMercado Livre\n2\tshopee\tShopee\n3\tamazon\tAmazon\n4\ttiktok\tTikTok Shop\n5\tmadeiramadeira\tMadeira Madeira\n6\tleroymerlin\tLeroy Merlin\n7\tmagalu\tMagazine Luiza\n8\tamericanas\tAmericanas\n9\tcasasbahia\tCasas Bahia\n10\tcarrefour\tCarrefour\n11\taliexpress\tAliExpress\n12\tshein\tShein\n13\tkabum\tKaBuM!\n14\tdafiti\tDafiti\n15\tnetshoes\tNetshoes\n16\tcentauro\tCentauro\n17\tfastshop\tFast Shop\n18\trihappy\tRi Happy\n19\tolxbr\tOLX Brasil\n20\tprivalia\tPrivalia\n21\trenner\tRenner\n22\triachuelo\tRiachuelo\n23\tzattini\tZattini\n24\tzoom\tZoom\n25\twebcontinental\tWebContinental\n26\tolist\tOlist\n27\tbelezanaweb\tBeleza na Web\n28\tdecathlonbr\tDecathlon BR\n29\tpolishop\tPolishop\n30\ttemu\tTemu\n",
+  "stderr": "",
+  "execution_time_ms": 372
+}
