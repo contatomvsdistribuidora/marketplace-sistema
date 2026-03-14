@@ -152,7 +152,10 @@ export default function ProductsPage() {
 
   const products = productsData?.products || [];
 
+  const [allFilteredSelected, setAllFilteredSelected] = useState(false);
+
   const toggleProduct = (id: string) => {
+    setAllFilteredSelected(false);
     setSelectedProducts(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -160,13 +163,38 @@ export default function ProductsPage() {
     });
   };
 
-  const toggleAll = () => {
-    if (selectedProducts.size === products.length) {
-      setSelectedProducts(new Set());
+  const togglePageAll = () => {
+    setAllFilteredSelected(false);
+    if (products.every((p: any) => selectedProducts.has(String(p.id)))) {
+      // Deselect page products
+      setSelectedProducts(prev => {
+        const next = new Set(prev);
+        products.forEach((p: any) => next.delete(String(p.id)));
+        return next;
+      });
     } else {
-      setSelectedProducts(new Set(products.map((p: any) => String(p.id))));
+      // Select page products
+      setSelectedProducts(prev => {
+        const next = new Set(prev);
+        products.forEach((p: any) => next.add(String(p.id)));
+        return next;
+      });
     }
   };
+
+  const selectAllFiltered = () => {
+    if (productsData?.allIds) {
+      setSelectedProducts(new Set(productsData.allIds.map((id: number) => String(id))));
+      setAllFilteredSelected(true);
+    }
+  };
+
+  const deselectAll = () => {
+    setSelectedProducts(new Set());
+    setAllFilteredSelected(false);
+  };
+
+  const pageAllSelected = products.length > 0 && products.every((p: any) => selectedProducts.has(String(p.id)));
 
   const clearAllFilters = () => {
     setSelectedTag("all");
@@ -228,18 +256,44 @@ export default function ProductsPage() {
               : "Visualize e selecione produtos do BaseLinker para exportação"}
           </p>
         </div>
-        {selectedProducts.size > 0 && (
-          <Button onClick={() => {
-            const ids = Array.from(selectedProducts);
-            sessionStorage.setItem("export_product_ids", JSON.stringify(ids));
-            sessionStorage.setItem("export_tag", selectedTag);
-            setLocation("/export");
-          }}>
-            Exportar {selectedProducts.size} produto(s)
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
-        )}
       </div>
+
+      {/* Selection Action Bar */}
+      {selectedProducts.size > 0 && (
+        <Card className="border-primary/50 bg-primary/5">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <Checkbox checked={true} onCheckedChange={deselectAll} />
+                <span className="text-sm font-medium">
+                  {allFilteredSelected
+                    ? `Todos os ${productsData?.total?.toLocaleString() || 0} produtos filtrados selecionados`
+                    : `${selectedProducts.size.toLocaleString()} produto(s) selecionado(s)`}
+                </span>
+                {pageAllSelected && !allFilteredSelected && (productsData?.total || 0) > pageSize && (
+                  <Button variant="link" size="sm" className="h-auto p-0 text-primary" onClick={selectAllFiltered}>
+                    Selecionar todos os {productsData?.total?.toLocaleString()} produtos filtrados
+                  </Button>
+                )}
+                {allFilteredSelected && (
+                  <Button variant="link" size="sm" className="h-auto p-0 text-muted-foreground" onClick={deselectAll}>
+                    Limpar seleção
+                  </Button>
+                )}
+              </div>
+              <Button onClick={() => {
+                const ids = Array.from(selectedProducts);
+                sessionStorage.setItem("export_product_ids", JSON.stringify(ids));
+                sessionStorage.setItem("export_tag", selectedTag);
+                setLocation("/export");
+              }}>
+                Exportar {selectedProducts.size.toLocaleString()} produto(s)
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Scan Progress Banner */}
       {isScanning && (
@@ -542,8 +596,8 @@ export default function ProductsPage() {
                     <TableRow>
                       <TableHead className="w-10">
                         <Checkbox
-                          checked={selectedProducts.size === products.length && products.length > 0}
-                          onCheckedChange={toggleAll}
+                          checked={pageAllSelected}
+                          onCheckedChange={togglePageAll}
                         />
                       </TableHead>
                       <TableHead className="w-24">ID</TableHead>

@@ -404,13 +404,14 @@ export function filterProductsFromIndex(
   hasMore: boolean;
   indexComplete: boolean;
   scanProgress: ScanProgress;
+  allIds: number[];
 } {
   const key = getCacheKey(token, inventoryId);
   const index = productIndexCache.get(key);
   const scanProgress = getTagScanProgress(token, inventoryId);
 
   if (!index || index.products.size === 0) {
-    return { products: [], total: 0, page: 1, totalPages: 0, hasMore: false, indexComplete: false, scanProgress };
+    return { products: [], total: 0, page: 1, totalPages: 0, hasMore: false, indexComplete: false, scanProgress, allIds: [] };
   }
 
   // Start with all product IDs or narrow by tag/category/manufacturer first
@@ -513,6 +514,9 @@ export function filterProductsFromIndex(
   const start = (page - 1) * pageSize;
   const pageProducts = results.slice(start, start + pageSize);
 
+  // Collect all IDs for "select all" functionality
+  const allIds = results.map(p => p.id);
+
   return {
     products: pageProducts,
     total,
@@ -521,6 +525,7 @@ export function filterProductsFromIndex(
     hasMore: page < totalPages,
     indexComplete: index.isComplete,
     scanProgress,
+    allIds,
   };
 }
 

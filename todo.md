@@ -32,3 +32,4 @@
 - [x] Seleção de itens por página (50, 100, 200)
 - [x] Botão Limpar filtros
 - [x] Contador de resultados com total filtrado
+- [x] Botão para selecionar TODOS os produtos filtrados (não apenas os da página atual)
