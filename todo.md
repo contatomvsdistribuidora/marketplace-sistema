@@ -43,3 +43,7 @@
 - [x] BUG: Sistema mostra apenas lojas virtuais (External Storages) e não marketplaces (Mercado Livre, Amazon, etc.) - Corrigido usando getInventoryIntegrations
 - [x] BUG: Sistema re-indexa produtos toda vez ao abrir a página - corrigido: agora espera cacheSyncStatus carregar antes de decidir, só auto-sync se nunca sincronizou, cache válido por 24h
 - [x] BUG: Integrações de marketplace (Mercado Livre) não aparecem na exportação - corrigido: substituido getInventoryIntegrations por getOrderSources que retorna TODAS as contas de marketplace
+- [ ] Implementar exportação REAL de produtos para marketplace via API BaseLinker (addInventoryProduct) - produtos devem aparecer no painel do BaseLinker
+- [x] Implementar atualização de produtos via API addInventoryProduct com text_fields específicos para conta ML
+- [x] Atualizar Export.tsx para chamar exportação real via API (não apenas logs)
+- [ ] Automatizar listagem de anúncios no Mercado Livre via navegador no painel BaseLinker

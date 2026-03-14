@@ -454,6 +454,63 @@ export const appRouter = router({
         });
         return { success: true };
       }),
+
+    // REAL EXPORT: Update product in BaseLinker catalog with marketplace-specific data
+    exportProduct: protectedProcedure
+      .input(
+        z.object({
+          inventoryId: z.number(),
+          productId: z.string(),
+          name: z.string(),
+          description: z.string(),
+          features: z.record(z.string(), z.string()).optional(),
+          ean: z.string().optional(),
+          sku: z.string().optional(),
+          price: z.number().optional(),
+          stock: z.number().optional(),
+          images: z.record(z.string(), z.string()).optional(),
+          marketplaceType: z.string(), // e.g. "melibr"
+          accountId: z.string(), // e.g. "16544"
+          jobId: z.number(),
+          marketplaceId: z.number(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker n\u00e3o configurado");
+
+        const result = await baselinker.exportProductToMarketplace(
+          token,
+          input.inventoryId,
+          {
+            productId: input.productId,
+            name: input.name,
+            description: input.description,
+            features: (input.features || {}) as Record<string, string>,
+            ean: input.ean,
+            sku: input.sku,
+            price: input.price,
+            stock: input.stock,
+            images: input.images as Record<string, string> | undefined,
+          },
+          input.marketplaceType,
+          input.accountId,
+        );
+
+        // Log the result
+        await db.createExportLog({
+          userId: ctx.user.id,
+          jobId: input.jobId,
+          productId: input.productId,
+          productName: input.name,
+          marketplaceId: input.marketplaceId,
+          status: result.success ? "success" : "error",
+          errorMessage: result.error,
+          baselinkerResponse: result,
+        });
+
+        return result;
+      }),
   }),
 
   // ============ DASHBOARD ============

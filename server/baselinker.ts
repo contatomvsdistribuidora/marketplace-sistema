@@ -127,6 +127,145 @@ export async function addInventoryProduct(token: string, inventoryId: number, pr
   return data;
 }
 
+/**
+ * Export a product to a specific marketplace account by updating its text_fields
+ * with marketplace-specific content (name, description, features).
+ * 
+ * The text_fields use the format: "field|lang|source_id"
+ * - field: "name", "description", "features", "description_extra1-4"
+ * - lang: "pt" for Portuguese
+ * - source_id: e.g. "melibr_16544" for a specific ML account
+ * 
+ * This updates the product in the BaseLinker catalog with marketplace-specific data,
+ * making it ready for listing in the marketplace.
+ */
+export interface ExportProductData {
+  productId: string;
+  name: string;
+  description: string;
+  features: Record<string, string>;
+  category?: string;
+  ean?: string;
+  sku?: string;
+  price?: number;
+  stock?: number;
+  images?: Record<string, string>; // position -> url
+}
+
+export async function exportProductToMarketplace(
+  token: string,
+  inventoryId: number,
+  product: ExportProductData,
+  marketplaceType: string, // e.g. "melibr"
+  accountId: string, // e.g. "16544"
+): Promise<{ success: boolean; productId: string; error?: string }> {
+  try {
+    // Build the source_id for marketplace-specific text fields
+    const sourceId = `${marketplaceType}_${accountId}`;
+    
+    // Build text_fields with marketplace-specific content
+    const textFields: Record<string, string> = {};
+    
+    // Set name for the specific marketplace account
+    textFields[`name|pt|${sourceId}`] = product.name;
+    
+    // Set description for the specific marketplace account
+    textFields[`description|pt|${sourceId}`] = product.description;
+    
+    // Set features for the specific marketplace account
+    if (product.features && Object.keys(product.features).length > 0) {
+      textFields[`features|pt|${sourceId}`] = JSON.stringify(product.features);
+    }
+    
+    // Also set default name and description (without source_id) as fallback
+    textFields["name"] = product.name;
+    textFields["description"] = product.description;
+    if (product.features && Object.keys(product.features).length > 0) {
+      textFields["features"] = JSON.stringify(product.features);
+    }
+    
+    // Build the product update payload
+    const updatePayload: Record<string, unknown> = {
+      product_id: product.productId,
+      text_fields: textFields,
+    };
+    
+    // Add EAN if provided
+    if (product.ean) {
+      updatePayload.ean = product.ean;
+    }
+    
+    // Add SKU if provided
+    if (product.sku) {
+      updatePayload.sku = product.sku;
+    }
+    
+    // Add images if provided
+    if (product.images && Object.keys(product.images).length > 0) {
+      const formattedImages: Record<string, string> = {};
+      for (const [pos, url] of Object.entries(product.images)) {
+        // BaseLinker requires "url:" prefix for external URLs
+        formattedImages[pos] = url.startsWith("url:") ? url : `url:${url}`;
+      }
+      updatePayload.images = formattedImages;
+    }
+    
+    // Call addInventoryProduct to update the product
+    const result = await addInventoryProduct(token, inventoryId, updatePayload);
+    
+    return {
+      success: true,
+      productId: result.product_id || product.productId,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      productId: product.productId,
+      error: error.message || "Erro desconhecido ao exportar produto",
+    };
+  }
+}
+
+/**
+ * Export multiple products to a marketplace account in batch.
+ * Processes products sequentially to respect API rate limits.
+ */
+export async function exportProductsBatch(
+  token: string,
+  inventoryId: number,
+  products: ExportProductData[],
+  marketplaceType: string,
+  accountId: string,
+  onProgress?: (current: number, total: number, result: { success: boolean; productId: string; error?: string }) => void,
+): Promise<{ successCount: number; errorCount: number; results: Array<{ success: boolean; productId: string; error?: string }> }> {
+  const results: Array<{ success: boolean; productId: string; error?: string }> = [];
+  let successCount = 0;
+  let errorCount = 0;
+  
+  for (let i = 0; i < products.length; i++) {
+    const result = await exportProductToMarketplace(
+      token,
+      inventoryId,
+      products[i],
+      marketplaceType,
+      accountId,
+    );
+    
+    results.push(result);
+    if (result.success) {
+      successCount++;
+    } else {
+      errorCount++;
+    }
+    
+    if (onProgress) {
+      onProgress(i + 1, products.length, result);
+    }
+  }
+  
+  return { successCount, errorCount, results };
+}
+
 export async function getInventoryExtraFields(token: string, inventoryId: number) {
   const data = await rateLimitedRequest(token, "getInventoryExtraFields", { inventory_id: inventoryId });
   return data.extra_fields || [];

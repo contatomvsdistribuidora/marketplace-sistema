@@ -186,6 +186,7 @@ export default function ExportPage() {
   const createExportMutation = trpc.exports.create.useMutation();
   const updateExportMutation = trpc.exports.updateStatus.useMutation();
   const addLogMutation = trpc.exports.addLog.useMutation();
+  const exportProductMutation = trpc.exports.exportProduct.useMutation();
 
   const handleStartMapping = async () => {
     if (!selectedMarketplace) {
@@ -282,7 +283,14 @@ export default function ExportPage() {
 
   const handleExport = async () => {
     const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
-    if (!marketplace) return;
+    if (!marketplace || !selectedAccountInfo || !inventoryId) return;
+
+    // Parse marketplace type and account ID from the selected account
+    // selectedAccount format: "marketplaceType:marketplaceType_accountId"
+    const mktType = selectedAccountInfo.integrationCode; // e.g. "melibr"
+    const rawAccountId = selectedAccountInfo.accountId; // e.g. "melibr_16544"
+    // Extract just the numeric account ID
+    const numericAccountId = rawAccountId.includes("_") ? rawAccountId.split("_").pop()! : rawAccountId;
 
     setStep("exporting");
     setExportProgress(0);
@@ -294,7 +302,7 @@ export default function ExportPage() {
     });
 
     if (!jobId) {
-      toast.error("Erro ao criar job de exportação");
+      toast.error("Erro ao criar job de exporta\u00e7\u00e3o");
       return;
     }
 
@@ -307,17 +315,62 @@ export default function ExportPage() {
     for (let i = 0; i < mappedProducts.length; i++) {
       const product = mappedProducts[i];
 
-      try {
+      if (product.status !== "mapped") {
+        // Skip unmapped products
         await addLogMutation.mutateAsync({
           jobId,
           productId: product.id,
           productName: product.name,
           marketplaceId: marketplace.id,
-          status: product.status === "mapped" ? "success" : "skipped",
-          mappedCategory: product.suggestedCategory?.path || "",
-          mappedAttributes: product.suggestedAttributes,
+          status: "skipped",
+          errorMessage: product.status === "error" ? product.errorMessage : "Produto n\u00e3o mapeado",
         });
-        if (product.status === "mapped") successCount++;
+        setExportProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
+        await updateExportMutation.mutateAsync({
+          jobId,
+          processedProducts: i + 1,
+          successCount,
+          errorCount,
+        });
+        continue;
+      }
+
+      try {
+        // Build features from suggested attributes
+        const features: Record<string, string> = {};
+        if (product.suggestedAttributes) {
+          for (const attr of product.suggestedAttributes) {
+            if (attr.value) {
+              features[attr.attributeName] = attr.value;
+            }
+          }
+        }
+
+        // REAL EXPORT: Call the API to update the product in BaseLinker
+        const result = await exportProductMutation.mutateAsync({
+          inventoryId,
+          productId: product.id,
+          name: product.name,
+          description: product.description,
+          features,
+          ean: product.ean || undefined,
+          sku: product.sku || undefined,
+          price: product.mainPrice || undefined,
+          stock: product.totalStock || undefined,
+          images: product.imageUrl ? { "0": product.imageUrl } : undefined,
+          marketplaceType: mktType,
+          accountId: numericAccountId,
+          jobId,
+          marketplaceId: marketplace.id,
+        });
+
+        if (result.success) {
+          successCount++;
+          toast.success(`Produto "${product.name.substring(0, 30)}..." exportado!`, { duration: 2000 });
+        } else {
+          errorCount++;
+          toast.error(`Erro em "${product.name.substring(0, 30)}...": ${result.error}`, { duration: 3000 });
+        }
       } catch (error: any) {
         errorCount++;
         await addLogMutation.mutateAsync({
@@ -328,6 +381,7 @@ export default function ExportPage() {
           status: "error",
           errorMessage: error.message,
         });
+        toast.error(`Erro em "${product.name.substring(0, 30)}...": ${error.message}`, { duration: 3000 });
       }
 
       setExportProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
@@ -345,7 +399,7 @@ export default function ExportPage() {
     });
 
     setStep("done");
-    toast.success(`Exportação concluída! ${successCount} sucesso, ${errorCount} erros.`);
+    toast.success(`Exporta\u00e7\u00e3o conclu\u00edda! ${successCount} produtos atualizados no BaseLinker, ${errorCount} erros.`);
   };
 
   const updateProductAttribute = (productId: string, attrIndex: number, newValue: string) => {
