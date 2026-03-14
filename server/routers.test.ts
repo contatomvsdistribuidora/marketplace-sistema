@@ -219,10 +219,12 @@ describe("exports.getJobProducts", () => {
     await expect(caller.exports.getJobProducts({ jobId: 1 })).rejects.toThrow();
   });
 
-  it("returns array when authenticated", async () => {
+  it("returns object with products array when authenticated", async () => {
     const { ctx } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
     const result = await caller.exports.getJobProducts({ jobId: 999 });
-    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveProperty("products");
+    expect(Array.isArray(result.products)).toBe(true);
+    expect(result).toHaveProperty("jobMarketplaceId");
   });
 });

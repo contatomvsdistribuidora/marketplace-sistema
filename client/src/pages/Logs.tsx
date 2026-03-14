@@ -74,6 +74,7 @@ function JobCard({ job, isExpanded, onToggle }: { job: any; isExpanded: boolean;
     // Store the job ID in sessionStorage so Export page can load products from this job
     sessionStorage.setItem("reexport_job_id", String(job.id));
     sessionStorage.setItem("reexport_job_tag", job.tagFilter || "");
+    sessionStorage.setItem("reexport_marketplace_id", String(job.marketplaceId || ""));
     toast.info("Redirecionando para exportação... Selecione o novo marketplace de destino.");
     setLocation("/export");
   };

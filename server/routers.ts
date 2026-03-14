@@ -432,11 +432,17 @@ export const appRouter = router({
         return db.getExportLogs(input.jobId);
       }),
 
-    // Get product IDs from a job for re-export
+    // Get product IDs and mapped data from a job for re-export
     getJobProducts: protectedProcedure
       .input(z.object({ jobId: z.number() }))
       .query(async ({ input }) => {
-        return db.getExportLogProductIds(input.jobId);
+        const products = await db.getExportLogProductIds(input.jobId);
+        const job = await db.getExportJob(input.jobId);
+        return {
+          products,
+          jobMarketplaceId: job?.marketplaceId || null,
+          jobConfig: job?.config as any || null,
+        };
       }),
 
     addLog: protectedProcedure

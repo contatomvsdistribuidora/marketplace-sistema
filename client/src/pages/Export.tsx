@@ -80,6 +80,8 @@ export default function ExportPage() {
   const [preSelectedIds, setPreSelectedIds] = useState<number[]>([]);
   const [preSelectedTag, setPreSelectedTag] = useState<string>("");
   const [reExportJobId, setReExportJobId] = useState<number | null>(null);
+  const [reExportMarketplaceId, setReExportMarketplaceId] = useState<number | null>(null);
+  const [reExportMappedData, setReExportMappedData] = useState<Record<string, { mappedCategory: string | null; mappedAttributes: any }>>({});
 
   const { data: tokenData } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
@@ -165,23 +167,37 @@ export default function ExportPage() {
   }, []);
 
   // Fetch products from a previous job for re-export
-  const { data: reExportProducts, isLoading: reExportLoading } = trpc.exports.getJobProducts.useQuery(
+  const { data: reExportData, isLoading: reExportLoading } = trpc.exports.getJobProducts.useQuery(
     { jobId: reExportJobId! },
     { enabled: !!reExportJobId }
   );
 
   // When re-export products are loaded, convert their IDs to numbers for the cache query
+  // Also store the mapped data from the previous job
   useEffect(() => {
-    if (reExportProducts && reExportProducts.length > 0 && preSelectedIds.length === 0 && mappedProducts.length === 0) {
-      const ids = reExportProducts
-        .map(p => parseInt(p.productId))
-        .filter(id => !isNaN(id));
+    if (reExportData && reExportData.products.length > 0 && preSelectedIds.length === 0 && mappedProducts.length === 0) {
+      const ids = reExportData.products
+        .map((p: any) => parseInt(p.productId))
+        .filter((id: number) => !isNaN(id));
       if (ids.length > 0) {
         setPreSelectedIds(ids);
+        // Store marketplace ID from previous job
+        if (reExportData.jobMarketplaceId) {
+          setReExportMarketplaceId(reExportData.jobMarketplaceId);
+        }
+        // Store mapped data (category + attributes) from previous job for reuse
+        const mappedDataMap: Record<string, { mappedCategory: string | null; mappedAttributes: any }> = {};
+        for (const p of reExportData.products) {
+          mappedDataMap[p.productId] = {
+            mappedCategory: p.mappedCategory,
+            mappedAttributes: p.mappedAttributes,
+          };
+        }
+        setReExportMappedData(mappedDataMap);
         toast.info(`${ids.length} produtos carregados do Job #${reExportJobId} para re-exporta\u00e7\u00e3o.`);
       }
     }
-  }, [reExportProducts]);
+  }, [reExportData]);
 
   // Fetch pre-selected products from cache
   const { data: preSelectedProducts, isLoading: preSelectedLoading } = trpc.baselinker.getProductsByIds.useQuery(
@@ -222,13 +238,25 @@ export default function ExportPage() {
   const exportProductMutation = trpc.exports.exportProduct.useMutation();
   const enqueueAgentMutation = trpc.agent.enqueue.useMutation();
 
+  // Check if this is a re-export to the same marketplace type (can skip AI mapping)
+  const canSkipMapping = useMemo(() => {
+    if (!reExportJobId || !reExportMarketplaceId || !selectedMarketplace) return false;
+    // Same marketplace ID = same type of marketplace, can reuse mapping
+    return reExportMarketplaceId.toString() === selectedMarketplace;
+  }, [reExportJobId, reExportMarketplaceId, selectedMarketplace]);
+
+  // Check if we have mapped data from previous job
+  const hasPreviousMappedData = useMemo(() => {
+    return Object.keys(reExportMappedData).length > 0;
+  }, [reExportMappedData]);
+
   const handleStartMapping = async () => {
     if (!selectedMarketplace) {
       toast.error("Selecione um marketplace de destino");
       return;
     }
     if (!selectedAccount) {
-      toast.error("Selecione a conta/integração de destino");
+      toast.error("Selecione a conta/integra\u00e7\u00e3o de destino");
       return;
     }
     if (mappedProducts.length === 0) {
@@ -244,6 +272,118 @@ export default function ExportPage() {
     const marketplaceName = marketplace?.name || "Marketplace";
     const accountName = selectedAccountInfo?.accountName || "";
 
+    // If re-exporting to same marketplace type and we have previous mapped data, skip AI mapping
+    if (canSkipMapping && hasPreviousMappedData) {
+      toast.info("Re-exporta\u00e7\u00e3o para mesmo marketplace detectada. Reutilizando mapeamento anterior...");
+      let reusedCount = 0;
+      let newMappingCount = 0;
+
+      for (let i = 0; i < mappedProducts.length; i++) {
+        const product = mappedProducts[i];
+        const previousData = reExportMappedData[product.id];
+
+        if (previousData && (previousData.mappedCategory || previousData.mappedAttributes)) {
+          // Reuse previous mapping data
+          const attrs = previousData.mappedAttributes as any[];
+          setMappedProducts((prev) =>
+            prev.map((p) =>
+              p.id === product.id
+                ? {
+                    ...p,
+                    suggestedCategory: previousData.mappedCategory
+                      ? {
+                          id: previousData.mappedCategory,
+                          name: previousData.mappedCategory,
+                          path: previousData.mappedCategory,
+                          confidence: 100,
+                        }
+                      : undefined,
+                    suggestedAttributes: Array.isArray(attrs) ? attrs : undefined,
+                    status: "mapped" as const,
+                  }
+                : p
+            )
+          );
+          reusedCount++;
+        } else {
+          // No previous data for this product, run AI mapping
+          try {
+            const categorySuggestions = await mapCategoryMutation.mutateAsync({
+              product: {
+                name: product.name,
+                description: product.description,
+                features: product.features,
+                category: product.category,
+                ean: product.ean,
+                sku: product.sku,
+              },
+              marketplace: `${marketplaceName} (${accountName})`,
+              availableCategories: [],
+            });
+
+            const attributeSuggestions = await fillAttributesMutation.mutateAsync({
+              product: {
+                name: product.name,
+                description: product.description,
+                features: product.features,
+                category: product.category,
+              },
+              requiredAttributes: [
+                { name: "Marca", id: "brand", required: true },
+                { name: "Modelo", id: "model", required: true },
+                { name: "Cor", id: "color", required: false },
+                { name: "Material", id: "material", required: false },
+                { name: "Peso", id: "weight", required: false },
+                { name: "Dimens\u00f5es", id: "dimensions", required: false },
+              ],
+              marketplace: marketplaceName,
+            });
+
+            setMappedProducts((prev) =>
+              prev.map((p) =>
+                p.id === product.id
+                  ? {
+                      ...p,
+                      suggestedCategory: categorySuggestions[0]
+                        ? {
+                            id: categorySuggestions[0].categoryId,
+                            name: categorySuggestions[0].categoryName,
+                            path: categorySuggestions[0].categoryPath,
+                            confidence: categorySuggestions[0].confidence,
+                          }
+                        : undefined,
+                      suggestedAttributes: attributeSuggestions,
+                      status: "mapped" as const,
+                    }
+                  : p
+              )
+            );
+            newMappingCount++;
+          } catch (error: any) {
+            setMappedProducts((prev) =>
+              prev.map((p) =>
+                p.id === product.id
+                  ? { ...p, status: "error" as const, errorMessage: error.message }
+                  : p
+              )
+            );
+          }
+        }
+
+        setMappingProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
+      }
+
+      setIsMappingInProgress(false);
+      setStep("review");
+      if (reusedCount > 0) {
+        toast.success(`Mapeamento conclu\u00eddo! ${reusedCount} produtos reutilizaram mapeamento anterior${newMappingCount > 0 ? `, ${newMappingCount} novos mapeamentos` : ""}.`);
+      } else {
+        toast.success("Mapeamento conclu\u00eddo! Revise os resultados antes de exportar.");
+      }
+      return;
+    }
+
+    // Normal AI mapping flow (no previous data to reuse)
     for (let i = 0; i < mappedProducts.length; i++) {
       const product = mappedProducts[i];
       try {
@@ -273,7 +413,7 @@ export default function ExportPage() {
             { name: "Cor", id: "color", required: false },
             { name: "Material", id: "material", required: false },
             { name: "Peso", id: "weight", required: false },
-            { name: "Dimensões", id: "dimensions", required: false },
+            { name: "Dimens\u00f5es", id: "dimensions", required: false },
           ],
           marketplace: marketplaceName,
         });
@@ -312,7 +452,7 @@ export default function ExportPage() {
 
     setIsMappingInProgress(false);
     setStep("review");
-    toast.success("Mapeamento concluído! Revise os resultados antes de exportar.");
+    toast.success("Mapeamento conclu\u00eddo! Revise os resultados antes de exportar.");
   };
 
   const handleExport = async () => {
@@ -795,14 +935,33 @@ export default function ExportPage() {
                 </div>
               )}
 
+              {/* Info about re-export skip mapping */}
+              {canSkipMapping && hasPreviousMappedData && (
+                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 text-blue-500 shrink-0" />
+                  <p className="text-xs text-blue-700">
+                    <strong>Re-exporta\u00e7\u00e3o para mesmo marketplace detectada.</strong> O mapeamento anterior (categorias e atributos) ser\u00e1 reutilizado automaticamente, sem necessidade de refazer o mapeamento com IA.
+                  </p>
+                </div>
+              )}
+
               <Button
                 onClick={handleStartMapping}
                 disabled={!selectedMarketplace || !selectedAccount || mappedProducts.length === 0 || isMappingInProgress}
                 className="w-full"
                 size="lg"
               >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Iniciar Mapeamento com IA ({mappedProducts.length} produtos)
+                {canSkipMapping && hasPreviousMappedData ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Reutilizar Mapeamento e Continuar ({mappedProducts.length} produtos)
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Iniciar Mapeamento com IA ({mappedProducts.length} produtos)
+                  </>
+                )}
               </Button>
             </CardContent>
           </Card>

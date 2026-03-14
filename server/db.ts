@@ -265,7 +265,7 @@ export async function getExportLogs(jobId: number, limit: number = 500) {
     .limit(limit);
 }
 
-export async function getExportLogProductIds(jobId: number): Promise<{ productId: string; productName: string | null; status: string }[]> {
+export async function getExportLogProductIds(jobId: number) {
   const db = await getDb();
   if (!db) return [];
   return db
@@ -273,6 +273,8 @@ export async function getExportLogProductIds(jobId: number): Promise<{ productId
       productId: exportLogs.productId,
       productName: exportLogs.productName,
       status: exportLogs.status,
+      mappedCategory: exportLogs.mappedCategory,
+      mappedAttributes: exportLogs.mappedAttributes,
     })
     .from(exportLogs)
     .where(eq(exportLogs.jobId, jobId));
