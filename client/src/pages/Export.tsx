@@ -79,6 +79,7 @@ export default function ExportPage() {
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
   const [preSelectedIds, setPreSelectedIds] = useState<number[]>([]);
   const [preSelectedTag, setPreSelectedTag] = useState<string>("");
+  const [reExportJobId, setReExportJobId] = useState<number | null>(null);
 
   const { data: tokenData } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
@@ -135,8 +136,19 @@ export default function ExportPage() {
     return allAccounts.find(a => `${a.integrationCode}:${a.accountId}` === selectedAccount) || null;
   }, [selectedAccount, allAccounts]);
 
-  // Load pre-selected product IDs from sessionStorage
+  // Load pre-selected product IDs from sessionStorage (from Products page or re-export)
   useEffect(() => {
+    // Check for re-export from Logs page
+    const reExportId = sessionStorage.getItem("reexport_job_id");
+    const reExportTag = sessionStorage.getItem("reexport_job_tag");
+    if (reExportId) {
+      setReExportJobId(parseInt(reExportId));
+      if (reExportTag) setPreSelectedTag(reExportTag);
+      sessionStorage.removeItem("reexport_job_id");
+      sessionStorage.removeItem("reexport_job_tag");
+      return; // Don't load from export_product_ids if re-exporting
+    }
+
     const storedIds = sessionStorage.getItem("export_product_ids");
     const storedTag = sessionStorage.getItem("export_tag");
     if (storedIds) {
@@ -152,11 +164,32 @@ export default function ExportPage() {
     }
   }, []);
 
+  // Fetch products from a previous job for re-export
+  const { data: reExportProducts, isLoading: reExportLoading } = trpc.exports.getJobProducts.useQuery(
+    { jobId: reExportJobId! },
+    { enabled: !!reExportJobId }
+  );
+
+  // When re-export products are loaded, convert their IDs to numbers for the cache query
+  useEffect(() => {
+    if (reExportProducts && reExportProducts.length > 0 && preSelectedIds.length === 0 && mappedProducts.length === 0) {
+      const ids = reExportProducts
+        .map(p => parseInt(p.productId))
+        .filter(id => !isNaN(id));
+      if (ids.length > 0) {
+        setPreSelectedIds(ids);
+        toast.info(`${ids.length} produtos carregados do Job #${reExportJobId} para re-exporta\u00e7\u00e3o.`);
+      }
+    }
+  }, [reExportProducts]);
+
   // Fetch pre-selected products from cache
   const { data: preSelectedProducts, isLoading: preSelectedLoading } = trpc.baselinker.getProductsByIds.useQuery(
     { inventoryId: inventoryId!, productIds: preSelectedIds },
     { enabled: !!inventoryId && preSelectedIds.length > 0 }
   );
+
+  const isLoadingProducts = preSelectedLoading || reExportLoading;
 
   // Auto-populate mapped products from pre-selected products
   useEffect(() => {
@@ -510,12 +543,17 @@ export default function ExportPage() {
       {step === "select" && (
         <div className="space-y-4">
           {/* Products loaded from Products page */}
-          {preSelectedLoading && (
+          {isLoadingProducts && (
             <Card className="border-primary/30 bg-primary/5">
               <CardContent className="py-4">
                 <div className="flex items-center gap-3">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  <span className="text-sm">Carregando {preSelectedIds.length} produtos selecionados...</span>
+                  <span className="text-sm">
+                    {reExportJobId
+                      ? `Carregando produtos do Job #${reExportJobId} para re-exporta\u00e7\u00e3o...`
+                      : `Carregando ${preSelectedIds.length} produtos selecionados...`
+                    }
+                  </span>
                 </div>
               </CardContent>
             </Card>
@@ -528,7 +566,12 @@ export default function ExportPage() {
                   <CheckCircle className="h-5 w-5 text-green-600" />
                   <div>
                     <p className="text-sm font-medium text-green-800">
-                      {mappedProducts.length} produto(s) carregado(s) para exportação
+                      {mappedProducts.length} produto(s) carregado(s) para exporta\u00e7\u00e3o
+                      {reExportJobId && (
+                        <Badge variant="outline" className="ml-2 text-xs border-green-500 text-green-700">
+                          Re-exporta\u00e7\u00e3o do Job #{reExportJobId}
+                        </Badge>
+                      )}
                     </p>
                     {preSelectedTag && preSelectedTag !== "all" && (
                       <p className="text-xs text-green-600 mt-0.5">
@@ -553,7 +596,7 @@ export default function ExportPage() {
             </Card>
           )}
 
-          {mappedProducts.length === 0 && !preSelectedLoading && (
+          {mappedProducts.length === 0 && !isLoadingProducts && (
             <Card className="border-dashed border-amber-300 bg-amber-50/50">
               <CardContent className="flex flex-col items-center justify-center py-8 gap-3">
                 <Info className="h-8 w-8 text-amber-500" />

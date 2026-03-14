@@ -52,3 +52,4 @@
 - [x] Criar página de Monitoramento do Agente com screenshots em tempo real e log de ações
 - [x] Integrar Export.tsx para enviar produtos para fila do agente ao invés de exportar direto
 - [x] Status visual de cada produto sendo listado no BaseLinker pelo agente
+- [x] Produtos já exportados devem ter opção de re-exportar para outro marketplace (a partir dos logs/jobs)

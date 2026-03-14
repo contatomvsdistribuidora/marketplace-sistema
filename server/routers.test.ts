@@ -211,3 +211,18 @@ describe("agent.latestScreenshot", () => {
     await expect(caller.agent.latestScreenshot()).rejects.toThrow();
   });
 });
+
+describe("exports.getJobProducts", () => {
+  it("requires authentication", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.exports.getJobProducts({ jobId: 1 })).rejects.toThrow();
+  });
+
+  it("returns array when authenticated", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+    const result = await caller.exports.getJobProducts({ jobId: 999 });
+    expect(Array.isArray(result)).toBe(true);
+  });
+});

@@ -265,6 +265,19 @@ export async function getExportLogs(jobId: number, limit: number = 500) {
     .limit(limit);
 }
 
+export async function getExportLogProductIds(jobId: number): Promise<{ productId: string; productName: string | null; status: string }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      productId: exportLogs.productId,
+      productName: exportLogs.productName,
+      status: exportLogs.status,
+    })
+    .from(exportLogs)
+    .where(eq(exportLogs.jobId, jobId));
+}
+
 export async function getRecentLogs(userId: number, limit: number = 100) {
   const db = await getDb();
   if (!db) return [];

@@ -3,8 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollText, Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, AlertCircle, Clock } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ScrollText, Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle,
+  AlertCircle, Clock, Upload, Copy
+} from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
 
 export default function LogsPage() {
   const { data: jobs, isLoading } = trpc.exports.list.useQuery();
@@ -48,6 +54,7 @@ export default function LogsPage() {
 }
 
 function JobCard({ job, isExpanded, onToggle }: { job: any; isExpanded: boolean; onToggle: () => void }) {
+  const [, setLocation] = useLocation();
   const { data: logs, isLoading: logsLoading } = trpc.exports.logs.useQuery(
     { jobId: job.id },
     { enabled: isExpanded }
@@ -63,25 +70,54 @@ function JobCard({ job, isExpanded, onToggle }: { job: any; isExpanded: boolean;
 
   const config = statusConfig[job.status] || statusConfig.pending;
 
+  const handleReExport = () => {
+    // Store the job ID in sessionStorage so Export page can load products from this job
+    sessionStorage.setItem("reexport_job_id", String(job.id));
+    sessionStorage.setItem("reexport_job_tag", job.tagFilter || "");
+    toast.info("Redirecionando para exportação... Selecione o novo marketplace de destino.");
+    setLocation("/export");
+  };
+
   return (
     <Card>
-      <CardHeader className="pb-3 cursor-pointer" onClick={onToggle}>
+      <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={onToggle}>
             <CardTitle className="text-base">Job #{job.id}</CardTitle>
             <Badge variant={config.variant} className="flex items-center gap-1">
               {config.icon}
               {config.label}
             </Badge>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-muted-foreground text-right">
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleReExport();
+                  }}
+                  className="gap-1.5"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Re-exportar</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Exportar os mesmos produtos para outro marketplace
+              </TooltipContent>
+            </Tooltip>
+            <div className="text-sm text-muted-foreground text-right cursor-pointer" onClick={onToggle}>
               <p>{job.totalProducts} produtos</p>
               <p className="text-xs">
                 {job.successCount} sucesso / {job.errorCount} erros
               </p>
             </div>
-            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            <div className="cursor-pointer" onClick={onToggle}>
+              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
@@ -101,48 +137,61 @@ function JobCard({ job, isExpanded, onToggle }: { job: any; isExpanded: boolean;
           ) : !logs || logs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">Nenhum log detalhado disponível.</p>
           ) : (
-            <div className="rounded-md border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">Status</TableHead>
-                    <TableHead>Produto</TableHead>
-                    <TableHead>Categoria Mapeada</TableHead>
-                    <TableHead>Erro</TableHead>
-                    <TableHead>Data</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {logs.map((log: any, idx: number) => (
-                    <TableRow key={idx}>
-                      <TableCell>
-                        {log.status === "success" && <CheckCircle className="h-4 w-4 text-green-500" />}
-                        {log.status === "error" && <XCircle className="h-4 w-4 text-destructive" />}
-                        {log.status === "skipped" && <AlertCircle className="h-4 w-4 text-amber-500" />}
-                        {log.status === "pending" && <Clock className="h-4 w-4 text-muted-foreground" />}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <p className="text-sm font-medium truncate max-w-[200px]">{log.productName || log.productId}</p>
-                          <p className="text-xs text-muted-foreground">ID: {log.productId}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">{log.mappedCategory || "—"}</TableCell>
-                      <TableCell>
-                        {log.errorMessage ? (
-                          <p className="text-xs text-destructive max-w-[200px] truncate">{log.errorMessage}</p>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {new Date(log.createdAt).toLocaleString("pt-BR")}
-                      </TableCell>
+            <>
+              <div className="flex justify-end mb-3">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleReExport}
+                  className="gap-1.5"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  Exportar estes {logs.length} produtos para outro marketplace
+                </Button>
+              </div>
+              <div className="rounded-md border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">Status</TableHead>
+                      <TableHead>Produto</TableHead>
+                      <TableHead>Categoria Mapeada</TableHead>
+                      <TableHead>Erro</TableHead>
+                      <TableHead>Data</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {logs.map((log: any, idx: number) => (
+                      <TableRow key={idx}>
+                        <TableCell>
+                          {log.status === "success" && <CheckCircle className="h-4 w-4 text-green-500" />}
+                          {log.status === "error" && <XCircle className="h-4 w-4 text-destructive" />}
+                          {log.status === "skipped" && <AlertCircle className="h-4 w-4 text-amber-500" />}
+                          {log.status === "pending" && <Clock className="h-4 w-4 text-muted-foreground" />}
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="text-sm font-medium truncate max-w-[200px]">{log.productName || log.productId}</p>
+                            <p className="text-xs text-muted-foreground">ID: {log.productId}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">{log.mappedCategory || "—"}</TableCell>
+                        <TableCell>
+                          {log.errorMessage ? (
+                            <p className="text-xs text-destructive max-w-[200px] truncate">{log.errorMessage}</p>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {new Date(log.createdAt).toLocaleString("pt-BR")}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       )}

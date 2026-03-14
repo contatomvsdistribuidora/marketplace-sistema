@@ -432,6 +432,13 @@ export const appRouter = router({
         return db.getExportLogs(input.jobId);
       }),
 
+    // Get product IDs from a job for re-export
+    getJobProducts: protectedProcedure
+      .input(z.object({ jobId: z.number() }))
+      .query(async ({ input }) => {
+        return db.getExportLogProductIds(input.jobId);
+      }),
+
     addLog: protectedProcedure
       .input(
         z.object({
