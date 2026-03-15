@@ -155,6 +155,7 @@ export interface ExportProductData {
   price?: number;
   stock?: number;
   images?: Record<string, string>; // position -> url
+  tags?: string[]; // tags to add to the product
 }
 
 export async function exportProductToMarketplace(
@@ -191,10 +192,30 @@ export async function exportProductToMarketplace(
       textFields["features"] = JSON.stringify(product.features);
     }
     
+    // Build export tag for this marketplace account
+    // Format: EXPORT_{MARKETPLACE}_{ACCOUNT_ID}
+    const exportTag = `EXPORT_${marketplaceType.toUpperCase()}_${accountId}`;
+    
+    // First, get current product data to preserve existing tags
+    let existingTags: string[] = [];
+    try {
+      const productData = await getInventoryProductsData(token, inventoryId, [parseInt(product.productId)]);
+      const pData = productData[product.productId];
+      if (pData && pData.tags) {
+        existingTags = Array.isArray(pData.tags) ? pData.tags : [];
+      }
+    } catch {
+      // If we can't get existing tags, proceed with just the export tag
+    }
+    
+    // Merge existing tags with new export tag and any custom tags
+    const allTags = Array.from(new Set([...existingTags, exportTag, ...(product.tags || [])]));
+    
     // Build the product update payload
     const updatePayload: Record<string, unknown> = {
       product_id: product.productId,
       text_fields: textFields,
+      tags: allTags,
     };
     
     // Add EAN if provided

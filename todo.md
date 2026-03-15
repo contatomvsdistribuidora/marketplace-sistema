@@ -46,7 +46,7 @@
 - [x] Implementar exportação REAL de produtos para marketplace via API BaseLinker (addInventoryProduct) - produtos devem aparecer no painel do BaseLinker
 - [x] Implementar atualização de produtos via API addInventoryProduct com text_fields específicos para conta ML
 - [x] Atualizar Export.tsx para chamar exportação real via API (não apenas logs)
-- [ ] Automatizar listagem de anúncios no Mercado Livre via navegador no painel BaseLinker
+- [x] Automatizar listagem de anúncios no Mercado Livre - SUBSTITUÍDO pelo agente nativo do BaseLinker (mais confiável que automação via navegador)
 - [x] Criar tabelas no banco para fila de exportação do agente (agent_queue, agent_actions)
 - [x] Criar endpoints tRPC para gerenciar fila de exportação e upload de screenshots
 - [x] Criar página de Monitoramento do Agente com screenshots em tempo real e log de ações
@@ -56,4 +56,8 @@
 - [x] Re-exportação para mesmo tipo de marketplace deve pular mapeamento IA e reutilizar dados já mapeados do job anterior
 - [x] BUG: Erro na exportação ML - text_field identifier usa melibr_34615 mas deveria ser melibr|34615 (pipe ao invés de underscore) - corrigido
 - [x] BUG: Formato text_field identifier corrigido - idioma era "pt" mas deveria ser "br", formato correto: name|br|melibr_34615
-- [ ] Explorar agentes de IA do BaseLinker no painel para automação
+- [x] Explorar agentes de IA do BaseLinker no painel para automação
+- [x] BUG: Exportação não cria anúncio no ML - RESOLVIDO: agente BaseLinker cuida da listagem automática (BL Exporter atualiza text_fields + tag → agente detecta tag → cria rascunho no ML)
+- [x] Configurar agente BaseLinker ML com modo rascunho e filtro por tag (configurado com tag HIGIPACK, modo rascunho, IA habilitada)
+- [x] Implementar adição de tag nos produtos exportados via API (EXPORT_{MARKETPLACE}_{ACCOUNT_ID}) - já implementado em exportProductToMarketplace()
+- [x] Integrar fluxo completo: BL Exporter → tag → agente BaseLinker → rascunho ML (agente configurado e salvo com sucesso)
