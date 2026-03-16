@@ -14,8 +14,9 @@ import Settings from "./pages/Settings";
 import AgentMonitor from "./pages/AgentMonitor";
 import MlAccounts from "./pages/MlAccounts";
 import MlPublish from "./pages/MlPublish";
+import Login from "./pages/Login";
 
-function Router() {
+function DashboardRouter() {
   return (
     <DashboardLayout>
       <Switch>
@@ -41,7 +42,10 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <Switch>
+            <Route path="/login" component={Login} />
+            <Route component={DashboardRouter} />
+          </Switch>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

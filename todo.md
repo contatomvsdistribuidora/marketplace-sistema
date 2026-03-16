@@ -81,3 +81,9 @@
 - [x] Frontend: exportação direta para ML com preview de anúncio
 - [x] Testes da integração ML
 - [x] BUG: OAuth ML falha porque redirect_uri usa domínio de dev em vez do domínio de produção (baselinker-marketplace-exporter.manus.space) - corrigido: sempre usa domínio de produção fixo
+- [x] Sistema de login com email e senha (independente do OAuth Manus)
+- [x] Tabela de credenciais no banco (email, password hash)
+- [x] Endpoints de registro e login com JWT
+- [x] Tela de login/registro no frontend
+- [x] Proteção de rotas para usuários autenticados
+- [x] Testes do sistema de autenticação

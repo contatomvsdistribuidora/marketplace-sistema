@@ -64,32 +64,9 @@ export default function DashboardLayout({
   }
 
   if (!user) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-4">
-            <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <Store className="h-8 w-8 text-primary" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-center text-foreground">
-              BaseLinker Exporter
-            </h1>
-            <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Exporte seus produtos do BaseLinker para múltiplos marketplaces com mapeamento inteligente de categorias e fichas técnicas.
-            </p>
-          </div>
-          <Button
-            onClick={() => {
-              window.location.href = getLoginUrl();
-            }}
-            size="lg"
-            className="w-full shadow-lg hover:shadow-xl transition-all"
-          >
-            Entrar
-          </Button>
-        </div>
-      </div>
-    );
+    // Redirect to local login page instead of Manus OAuth
+    window.location.href = "/login";
+    return <DashboardLayoutSkeleton />;
   }
 
   return (

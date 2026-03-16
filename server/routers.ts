@@ -1,4 +1,4 @@
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -7,6 +7,7 @@ import * as db from "./db";
 import * as baselinker from "./baselinker";
 import * as aiMapper from "./ai-mapper";
 import * as ml from "./mercadolivre";
+import * as localAuth from "./local-auth";
 
 export const appRouter = router({
   system: systemRouter,
@@ -18,6 +19,52 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+
+    // Local email/password registration
+    register: publicProcedure
+      .input(z.object({
+        email: z.string().email("Email inválido"),
+        password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
+        name: z.string().min(1, "Nome é obrigatório"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { user, sessionToken } = await localAuth.registerUser(
+          input.email,
+          input.password,
+          input.name
+        );
+        // Set session cookie
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        return { success: true, user: { id: user.id, name: user.name, email: user.email } };
+      }),
+
+    // Local email/password login
+    login: publicProcedure
+      .input(z.object({
+        email: z.string().email("Email inválido"),
+        password: z.string().min(1, "Senha é obrigatória"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { user, sessionToken } = await localAuth.loginUser(
+          input.email,
+          input.password
+        );
+        // Set session cookie
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        return { success: true, user: { id: user.id, name: user.name, email: user.email } };
+      }),
+
+    // Change password (requires authentication)
+    changePassword: protectedProcedure
+      .input(z.object({
+        currentPassword: z.string().min(1),
+        newPassword: z.string().min(6, "Nova senha deve ter no mínimo 6 caracteres"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return localAuth.changePassword(ctx.user.id, input.currentPassword, input.newPassword);
+      }),
   }),
 
   // ============ SETTINGS ============
