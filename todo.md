@@ -80,3 +80,4 @@
 - [x] Frontend: tela de conexão de contas ML via OAuth
 - [x] Frontend: exportação direta para ML com preview de anúncio
 - [x] Testes da integração ML
+- [x] BUG: OAuth ML falha porque redirect_uri usa domínio de dev em vez do domínio de produção (baselinker-marketplace-exporter.manus.space) - corrigido: sempre usa domínio de produção fixo

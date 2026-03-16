@@ -557,9 +557,11 @@ export const appRouter = router({
     getAuthUrl: protectedProcedure
       .input(z.object({ origin: z.string() }))
       .mutation(async ({ ctx, input }) => {
-        const redirectUri = `${input.origin}/api/ml/callback`;
+        // Always use the production domain for redirect_uri to match ML app configuration
+        const productionDomain = "https://baselinker-marketplace-exporter.manus.space";
+        const redirectUri = `${productionDomain}/api/ml/callback`;
         const state = Buffer.from(
-          JSON.stringify({ userId: ctx.user.id, returnPath: "/ml-accounts" })
+          JSON.stringify({ userId: ctx.user.id, returnPath: "/ml-accounts", origin: input.origin })
         ).toString("base64");
         const authUrl = ml.getAuthorizationUrl(redirectUri, state);
         return { authUrl };

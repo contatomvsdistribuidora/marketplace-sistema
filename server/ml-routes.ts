@@ -36,15 +36,17 @@ export function registerMlRoutes(app: Express) {
         return res.redirect("/ml-accounts?ml_error=missing_code");
       }
 
-      // Parse state to get userId and return path
+      // Parse state to get userId, return path, and original origin
       let userId: number | null = null;
       let returnPath = "/ml-accounts";
+      let originUrl = ""; // The origin where user started the flow
 
       if (state) {
         try {
           const stateData = JSON.parse(Buffer.from(String(state), "base64").toString());
           userId = stateData.userId;
           returnPath = stateData.returnPath || returnPath;
+          originUrl = stateData.origin || "";
         } catch {
           // Try getting userId from cookie
           userId = await getUserIdFromRequest(req);
@@ -54,11 +56,12 @@ export function registerMlRoutes(app: Express) {
       }
 
       if (!userId) {
-        return res.redirect("/ml-accounts?ml_error=not_authenticated");
+        const errorRedirect = originUrl ? `${originUrl}/ml-accounts?ml_error=not_authenticated` : "/ml-accounts?ml_error=not_authenticated";
+        return res.redirect(errorRedirect);
       }
 
       // Build redirect URI (must match exactly what was configured in ML app)
-      // Use the production domain for consistency
+      // Always use the production domain for token exchange
       const redirectUri = "https://baselinker-marketplace-exporter.manus.space/api/ml/callback";
 
       // Exchange code for token
@@ -75,8 +78,9 @@ export function registerMlRoutes(app: Express) {
 
       console.log(`[ML OAuth] Account connected: ML user ${tokenData.userId} for app user ${userId}`);
 
-      // Redirect back to the app
-      return res.redirect(`${returnPath}?ml_connected=true`);
+      // Redirect back to the original origin (dev or prod)
+      const redirectBase = originUrl || "";
+      return res.redirect(`${redirectBase}${returnPath}?ml_connected=true`);
     } catch (error: any) {
       console.error("[ML OAuth] Callback error:", error);
       return res.redirect(`/ml-accounts?ml_error=${encodeURIComponent(error.message || "unknown_error")}`);
