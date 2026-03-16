@@ -61,3 +61,22 @@
 - [x] Configurar agente BaseLinker ML com modo rascunho e filtro por tag (configurado com tag HIGIPACK, modo rascunho, IA habilitada)
 - [x] Implementar adição de tag nos produtos exportados via API (EXPORT_{MARKETPLACE}_{ACCOUNT_ID}) - já implementado em exportProductToMarketplace()
 - [x] Integrar fluxo completo: BL Exporter → tag → agente BaseLinker → rascunho ML (agente configurado e salvo com sucesso)
+- [x] Ativar agente BaseLinker ML para teste de listagem automática (ativado com sucesso)
+- [x] Alterar agente BaseLinker ML de modo rascunho para modo produção (publicar anúncios diretamente)
+- [x] Teste de produção: alterar agente para tag 'manus teste' e modo produção (listar anúncios imediatamente) - SALVO COM SUCESSO
+- [ ] Corrigir anúncios invalidados na Gestão de anúncios do BaseLinker até todos estarem validados
+- [x] Abrir ticket de suporte no BaseLinker sobre erro family_name na integração com Mercado Livre (ticket #99rjv3gf4b14187 enviado em 2026-03-15)
+- [ ] Testar exportação de produtos para Amazon via BL Exporter
+- [ ] Configurar Agente de listagem IA da Amazon Bidushop no BaseLinker (similar ao ML)
+- [ ] Integração direta com Mercado Livre API (bypass BaseLinker agents)
+- [x] Salvar credenciais ML (App ID + Client Secret) no sistema
+- [x] Implementar OAuth flow completo (authorization code + refresh token)
+- [x] Criar endpoint /api/ml/callback para OAuth callback
+- [x] Criar endpoint /api/ml/notifications para notificações ML
+- [x] Criar tabela ml_accounts no banco para armazenar tokens de múltiplas contas
+- [x] Implementar category prediction via ML API (domain_discovery)
+- [x] Implementar criação de anúncios via ML API (/items)
+- [x] Implementar preenchimento automático de atributos obrigatórios com IA
+- [x] Frontend: tela de conexão de contas ML via OAuth
+- [x] Frontend: exportação direta para ML com preview de anúncio
+- [x] Testes da integração ML

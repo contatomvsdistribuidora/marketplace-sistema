@@ -1,0 +1,40 @@
+CREATE TABLE `ml_accounts` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`mlUserId` bigint NOT NULL,
+	`nickname` varchar(256),
+	`email` varchar(320),
+	`accessToken` text NOT NULL,
+	`refreshToken` text NOT NULL,
+	`tokenExpiresAt` timestamp NOT NULL,
+	`scopes` text,
+	`siteId` varchar(10) NOT NULL DEFAULT 'MLB',
+	`isActive` int NOT NULL DEFAULT 1,
+	`lastUsedAt` timestamp,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `ml_accounts_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `ml_listings` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`mlAccountId` int NOT NULL,
+	`mlItemId` varchar(64),
+	`productId` varchar(128) NOT NULL,
+	`productName` varchar(512),
+	`title` varchar(256),
+	`categoryId` varchar(64),
+	`categoryName` varchar(512),
+	`price` varchar(32),
+	`currencyId` varchar(10) DEFAULT 'BRL',
+	`ml_listing_status` enum('draft','active','paused','closed','error') NOT NULL DEFAULT 'draft',
+	`listingType` varchar(64) DEFAULT 'gold_special',
+	`permalink` text,
+	`attributes` json,
+	`errorMessage` text,
+	`mlResponse` json,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `ml_listings_id` PRIMARY KEY(`id`)
+);

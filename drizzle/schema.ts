@@ -194,3 +194,50 @@ export const agentActions = mysqlTable("agent_actions", {
 
 export type AgentActionRow = typeof agentActions.$inferSelect;
 export type InsertAgentAction = typeof agentActions.$inferInsert;
+
+/** Connected Mercado Livre accounts via OAuth */
+export const mlAccounts = mysqlTable("ml_accounts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  mlUserId: bigint("mlUserId", { mode: "number" }).notNull(),
+  nickname: varchar("nickname", { length: 256 }),
+  email: varchar("email", { length: 320 }),
+  accessToken: text("accessToken").notNull(),
+  refreshToken: text("refreshToken").notNull(),
+  tokenExpiresAt: timestamp("tokenExpiresAt").notNull(),
+  scopes: text("scopes"),
+  siteId: varchar("siteId", { length: 10 }).default("MLB").notNull(),
+  isActive: int("isActive").default(1).notNull(),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MlAccount = typeof mlAccounts.$inferSelect;
+export type InsertMlAccount = typeof mlAccounts.$inferInsert;
+
+/** Mercado Livre item listings created through our system */
+export const mlListings = mysqlTable("ml_listings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  mlAccountId: int("mlAccountId").notNull(),
+  mlItemId: varchar("mlItemId", { length: 64 }),
+  productId: varchar("productId", { length: 128 }).notNull(),
+  productName: varchar("productName", { length: 512 }),
+  title: varchar("title", { length: 256 }),
+  categoryId: varchar("categoryId", { length: 64 }),
+  categoryName: varchar("categoryName", { length: 512 }),
+  price: varchar("price", { length: 32 }),
+  currencyId: varchar("currencyId", { length: 10 }).default("BRL"),
+  status: mysqlEnum("ml_listing_status", ["draft", "active", "paused", "closed", "error"]).default("draft").notNull(),
+  listingType: varchar("listingType", { length: 64 }).default("gold_special"),
+  permalink: text("permalink"),
+  attributes: json("attributes"),
+  errorMessage: text("errorMessage"),
+  mlResponse: json("mlResponse"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MlListing = typeof mlListings.$inferSelect;
+export type InsertMlListing = typeof mlListings.$inferInsert;

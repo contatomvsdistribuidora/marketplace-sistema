@@ -12,6 +12,8 @@ import Export from "./pages/Export";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
 import AgentMonitor from "./pages/AgentMonitor";
+import MlAccounts from "./pages/MlAccounts";
+import MlPublish from "./pages/MlPublish";
 
 function Router() {
   return (
@@ -24,6 +26,8 @@ function Router() {
         <Route path="/logs" component={Logs} />
         <Route path="/settings" component={Settings} />
         <Route path="/agent" component={AgentMonitor} />
+        <Route path="/ml-accounts" component={MlAccounts} />
+        <Route path="/ml-publish" component={MlPublish} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

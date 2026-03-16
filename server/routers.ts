@@ -6,6 +6,7 @@ import { z } from "zod";
 import * as db from "./db";
 import * as baselinker from "./baselinker";
 import * as aiMapper from "./ai-mapper";
+import * as ml from "./mercadolivre";
 
 export const appRouter = router({
   system: systemRouter,
@@ -543,6 +544,182 @@ export const appRouter = router({
       const recentJobs = await db.getExportJobs(ctx.user.id, 5);
       return { stats, recentLogs, recentJobs };
     }),
+  }),
+
+  // ============ MERCADO LIVRE (DIRECT API) ============
+  ml: router({
+    // Get connected ML accounts
+    accounts: protectedProcedure.query(async ({ ctx }) => {
+      return ml.getAccounts(ctx.user.id);
+    }),
+
+    // Get auth URL for connecting a new ML account
+    getAuthUrl: protectedProcedure
+      .input(z.object({ origin: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        const redirectUri = `${input.origin}/api/ml/callback`;
+        const state = Buffer.from(
+          JSON.stringify({ userId: ctx.user.id, returnPath: "/ml-accounts" })
+        ).toString("base64");
+        const authUrl = ml.getAuthorizationUrl(redirectUri, state);
+        return { authUrl };
+      }),
+
+    // Disconnect an ML account
+    disconnect: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        return ml.disconnectAccount(ctx.user.id, input.accountId);
+      }),
+
+    // Delete an ML account permanently
+    deleteAccount: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        return ml.deleteAccount(ctx.user.id, input.accountId);
+      }),
+
+    // Predict category for a product name
+    predictCategory: protectedProcedure
+      .input(z.object({ query: z.string() }))
+      .query(async ({ input }) => {
+        return ml.predictCategory(input.query);
+      }),
+
+    // Get category attributes
+    getCategoryAttributes: protectedProcedure
+      .input(z.object({ categoryId: z.string() }))
+      .query(async ({ input }) => {
+        return ml.getCategoryAttributes(input.categoryId);
+      }),
+
+    // Get category info
+    getCategoryInfo: protectedProcedure
+      .input(z.object({ categoryId: z.string() }))
+      .query(async ({ input }) => {
+        return ml.getCategoryInfo(input.categoryId);
+      }),
+
+    // Publish a product directly to ML
+    publishProduct: protectedProcedure
+      .input(
+        z.object({
+          accountId: z.number(),
+          productId: z.string(),
+          name: z.string(),
+          description: z.string().optional(),
+          price: z.number(),
+          stock: z.number(),
+          ean: z.string().optional(),
+          sku: z.string().optional(),
+          brand: z.string().optional(),
+          images: z.array(z.string()).optional(),
+          features: z.record(z.string(), z.string()).optional(),
+          categoryId: z.string().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        return ml.publishProduct(ctx.user.id, input.accountId, {
+          productId: input.productId,
+          name: input.name,
+          description: input.description,
+          price: input.price,
+          stock: input.stock,
+          ean: input.ean,
+          sku: input.sku,
+          brand: input.brand,
+          images: input.images,
+          features: input.features,
+          categoryId: input.categoryId,
+        });
+      }),
+
+    // Batch publish multiple products
+    batchPublish: protectedProcedure
+      .input(
+        z.object({
+          accountId: z.number(),
+          products: z.array(
+            z.object({
+              productId: z.string(),
+              name: z.string(),
+              description: z.string().optional(),
+              price: z.number(),
+              stock: z.number(),
+              ean: z.string().optional(),
+              sku: z.string().optional(),
+              brand: z.string().optional(),
+              images: z.array(z.string()).optional(),
+              features: z.record(z.string(), z.string()).optional(),
+              categoryId: z.string().optional(),
+            })
+          ),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const results = [];
+        for (const product of input.products) {
+          const result = await ml.publishProduct(ctx.user.id, input.accountId, {
+            productId: product.productId,
+            name: product.name,
+            description: product.description,
+            price: product.price,
+            stock: product.stock,
+            ean: product.ean,
+            sku: product.sku,
+            brand: product.brand,
+            images: product.images,
+            features: product.features,
+            categoryId: product.categoryId,
+          });
+          results.push(result);
+          // Small delay between requests to avoid rate limiting
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        return { results, total: results.length, success: results.filter((r) => r.success).length };
+      }),
+
+    // Get listings created through our system
+    listings: protectedProcedure
+      .input(z.object({ accountId: z.number().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        return ml.getListings(ctx.user.id, input?.accountId);
+      }),
+
+    // Get seller items from ML API
+    sellerItems: protectedProcedure
+      .input(z.object({ accountId: z.number(), status: z.string().optional() }))
+      .query(async ({ input }) => {
+        return ml.getSellerItems(input.accountId, input.status);
+      }),
+
+    // Fill attributes with AI
+    fillAttributes: protectedProcedure
+      .input(
+        z.object({
+          product: z.object({
+            name: z.string(),
+            description: z.string().optional(),
+            ean: z.string().optional(),
+            sku: z.string().optional(),
+            brand: z.string().optional(),
+            features: z.record(z.string(), z.string()).optional(),
+          }),
+          requiredAttributes: z.array(
+            z.object({
+              id: z.string(),
+              name: z.string(),
+              type: z.string(),
+              values: z.array(z.object({ id: z.string(), name: z.string() })),
+              required: z.boolean(),
+              allowCustomValue: z.boolean(),
+            })
+          ),
+        })
+      )
+      .mutation(async ({ input }) => {
+        return ml.fillAttributesWithAI(input.product, input.requiredAttributes);
+      }),
   }),
 
   // ============ AGENT ============

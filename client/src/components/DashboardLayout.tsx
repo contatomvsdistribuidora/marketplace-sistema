@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot } from "lucide-react";
+import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot, Link2, Send } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -35,6 +35,8 @@ const menuItems = [
   { icon: ScrollText, label: "Logs", path: "/logs" },
   { icon: Settings, label: "Configurações", path: "/settings" },
   { icon: Bot, label: "Monitor do Agente", path: "/agent" },
+  { icon: Link2, label: "Contas ML", path: "/ml-accounts" },
+  { icon: Send, label: "Publicar no ML", path: "/ml-publish" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
