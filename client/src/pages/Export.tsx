@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -32,6 +33,7 @@ interface MappedProduct {
   name: string;
   optimizedTitle?: string;
   titleReasoning?: string;
+  titlesPerType?: Record<ListingType, { title: string; reasoning: string }>;
   description: string;
   category: string;
   features: Record<string, string>;
@@ -91,11 +93,12 @@ export default function ExportPage() {
   const [reExportMappedData, setReExportMappedData] = useState<Record<string, { mappedCategory: string | null; mappedAttributes: any }>>({});
 
   // Batch action states
-  const [batchListingType, setBatchListingType] = useState<ListingType>("gold_special");
+  const [selectedListingTypes, setSelectedListingTypes] = useState<ListingType[]>(["gold_special"]);
   const [batchTitleStyle, setBatchTitleStyle] = useState<string>("seo");
   const [customTitleInstruction, setCustomTitleInstruction] = useState("");
   const [isGeneratingTitles, setIsGeneratingTitles] = useState(false);
   const [titleGenProgress, setTitleGenProgress] = useState(0);
+  const [titlePerType, setTitlePerType] = useState(false);
   const [loadingImagesFor, setLoadingImagesFor] = useState<Set<string>>(new Set());
   const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
   const [loadingAttrsFor, setLoadingAttrsFor] = useState<Set<string>>(new Set());
@@ -324,13 +327,30 @@ export default function ExportPage() {
     ));
   }, []);
 
-  // ===== BATCH LISTING TYPE =====
-  const applyBatchListingType = useCallback((type: ListingType) => {
-    setBatchListingType(type);
-    setMappedProducts(prev => prev.map(p => p.selected ? { ...p, listingType: type } : p));
-    const count = mappedProducts.filter(p => p.selected).length;
-    toast.success(`Tipo de anúncio "${LISTING_TYPE_OPTIONS.find(o => o.value === type)?.label}" aplicado a ${count} produto(s).`);
-  }, [mappedProducts]);
+  // ===== TOGGLE LISTING TYPE =====
+  const toggleListingType = useCallback((type: ListingType) => {
+    setSelectedListingTypes(prev => {
+      if (prev.includes(type)) {
+        // Don't allow removing the last one
+        if (prev.length === 1) {
+          toast.error("Selecione pelo menos 1 tipo de anúncio.");
+          return prev;
+        }
+        return prev.filter(t => t !== type);
+      } else {
+        if (prev.length >= 3) {
+          toast.error("Máximo de 3 tipos de anúncio simultâneos.");
+          return prev;
+        }
+        return [...prev, type];
+      }
+    });
+  }, []);
+
+  // Total publications count
+  const totalPublications = useMemo(() => {
+    return selectedProducts.filter(p => p.status === "mapped").length * selectedListingTypes.length;
+  }, [selectedProducts, selectedListingTypes]);
 
   // ===== BATCH TITLE GENERATION =====
   const handleBatchGenerateTitles = useCallback(async () => {
@@ -346,39 +366,101 @@ export default function ExportPage() {
     const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
     const marketplaceName = marketplace?.name || "Marketplace";
     const accountName = selectedAccountInfo?.name || "";
+    const mkLabel = `${marketplaceName} (${accountName})`;
 
     try {
-      const results = await batchGenerateTitlesMutation.mutateAsync({
-        products: selected.map(p => ({
-          id: p.id,
-          name: p.name,
-          description: p.description || "",
-          features: p.features || {},
-          category: p.suggestedCategory?.name || p.category || "",
-          ean: p.ean,
-        })),
-        marketplace: `${marketplaceName} (${accountName})`,
-        style: batchTitleStyle as any,
-        customInstruction: batchTitleStyle === "custom" ? customTitleInstruction : undefined,
-      });
+      if (titlePerType && selectedListingTypes.length > 1) {
+        // Generate different titles for each listing type
+        const typeLabels: Record<ListingType, string> = {
+          free: "Grátis (título curto e direto)",
+          gold_special: "Clássico (título descritivo)",
+          gold_pro: "Premium (título SEO completo com palavras-chave)",
+        };
 
-      setMappedProducts(prev => prev.map(p => {
-        const result = results[p.id];
-        if (result) {
-          return { ...p, optimizedTitle: result.title, titleReasoning: result.reasoning };
+        let completedTypes = 0;
+        const perTypeResults: Record<ListingType, Record<string, { title: string; reasoning: string }>> = {} as any;
+
+        for (const lt of selectedListingTypes) {
+          const styleInstruction = `Gere um título otimizado para anúncio tipo ${typeLabels[lt]}. ${batchTitleStyle === "custom" && customTitleInstruction ? customTitleInstruction : ""}`;
+
+          const results = await batchGenerateTitlesMutation.mutateAsync({
+            products: selected.map(p => ({
+              id: p.id,
+              name: p.name,
+              description: p.description || "",
+              features: p.features || {},
+              category: p.suggestedCategory?.name || p.category || "",
+              ean: p.ean,
+            })),
+            marketplace: mkLabel,
+            style: "custom" as any,
+            customInstruction: styleInstruction,
+          });
+
+          perTypeResults[lt] = results;
+          completedTypes++;
+          setTitleGenProgress(Math.round((completedTypes / selectedListingTypes.length) * 100));
         }
-        return p;
-      }));
 
-      const successCount = Object.keys(results).length;
-      toast.success(`${successCount} título(s) gerado(s) com estilo "${TITLE_STYLE_OPTIONS.find(o => o.value === batchTitleStyle)?.label}".`);
+        // Update products with per-type titles
+        setMappedProducts(prev => prev.map(p => {
+          const titlesPerType: Record<ListingType, { title: string; reasoning: string }> = {} as any;
+          let mainTitle = p.optimizedTitle || p.name;
+          let mainReasoning = p.titleReasoning || "";
+
+          for (const lt of selectedListingTypes) {
+            const result = perTypeResults[lt]?.[p.id];
+            if (result) {
+              titlesPerType[lt] = result;
+              // Use first type's title as the main optimizedTitle
+              if (lt === selectedListingTypes[0]) {
+                mainTitle = result.title;
+                mainReasoning = result.reasoning;
+              }
+            }
+          }
+
+          if (Object.keys(titlesPerType).length > 0) {
+            return { ...p, optimizedTitle: mainTitle, titleReasoning: mainReasoning, titlesPerType };
+          }
+          return p;
+        }));
+
+        toast.success(`Títulos gerados para ${selected.length} produto(s) × ${selectedListingTypes.length} tipos de anúncio.`);
+      } else {
+        // Single title for all types
+        const results = await batchGenerateTitlesMutation.mutateAsync({
+          products: selected.map(p => ({
+            id: p.id,
+            name: p.name,
+            description: p.description || "",
+            features: p.features || {},
+            category: p.suggestedCategory?.name || p.category || "",
+            ean: p.ean,
+          })),
+          marketplace: mkLabel,
+          style: batchTitleStyle as any,
+          customInstruction: batchTitleStyle === "custom" ? customTitleInstruction : undefined,
+        });
+
+        setMappedProducts(prev => prev.map(p => {
+          const result = results[p.id];
+          if (result) {
+            return { ...p, optimizedTitle: result.title, titleReasoning: result.reasoning, titlesPerType: undefined };
+          }
+          return p;
+        }));
+
+        const successCount = Object.keys(results).length;
+        toast.success(`${successCount} título(s) gerado(s) com estilo "${TITLE_STYLE_OPTIONS.find(o => o.value === batchTitleStyle)?.label}".`);
+      }
     } catch (error: any) {
       toast.error(`Erro ao gerar títulos: ${error.message}`);
     } finally {
       setIsGeneratingTitles(false);
       setTitleGenProgress(0);
     }
-  }, [mappedProducts, selectedMarketplace, selectedAccountInfo, marketplaces, batchTitleStyle, customTitleInstruction]);
+  }, [mappedProducts, selectedMarketplace, selectedAccountInfo, marketplaces, batchTitleStyle, customTitleInstruction, titlePerType, selectedListingTypes]);
 
   // ===== LOAD ALL IMAGES FOR A PRODUCT =====
   const loadAllImages = useCallback(async (productId: string) => {
@@ -651,8 +733,8 @@ export default function ExportPage() {
       for (let i = 0; i < mappedProducts.length; i++) {
         const product = mappedProducts[i];
         try {
-          // Run category mapping, attribute fill, and title generation in parallel
-          const [categorySuggestions, attributeSuggestions, titleResult] = await Promise.all([
+          // Run category mapping and attribute fill in parallel (titles are generated on-demand in Review step)
+          const [categorySuggestions, attributeSuggestions] = await Promise.all([
             mapCategoryMutation.mutateAsync({
               product: {
                 name: product.name,
@@ -680,16 +762,6 @@ export default function ExportPage() {
               ],
               marketplace: `${marketplaceName} (${accountName})`,
             }),
-            generateTitleMutation.mutateAsync({
-              product: {
-                name: product.name,
-                description: product.description,
-                features: product.features,
-                category: product.category,
-                ean: product.ean,
-              },
-              marketplace: `${marketplaceName} (${accountName})`,
-            }),
           ]);
 
           setMappedProducts((prev) =>
@@ -697,8 +769,6 @@ export default function ExportPage() {
               p.id === product.id
                 ? {
                     ...p,
-                    optimizedTitle: titleResult?.title || product.name,
-                    titleReasoning: titleResult?.reasoning || "",
                     suggestedCategory: categorySuggestions?.[0] ? {
                         id: categorySuggestions[0].categoryId,
                         name: categorySuggestions[0].categoryName,
@@ -754,12 +824,27 @@ export default function ExportPage() {
       return;
     }
 
+    // Build publication tasks: each product x each selected listing type
+    const pubTasks: { product: MappedProduct; listingType: ListingType; title: string }[] = [];
+    for (const product of productsToExport) {
+      for (const lt of selectedListingTypes) {
+        // If titlePerType is on and we have per-type titles, use them
+        let title = product.optimizedTitle || product.name;
+        if (titlePerType && product.titlesPerType && product.titlesPerType[lt]) {
+          title = product.titlesPerType[lt].title;
+        }
+        pubTasks.push({ product, listingType: lt, title });
+      }
+    }
+
+    const totalTasks = pubTasks.length;
+
     setStep("exporting");
     setExportProgress(0);
 
     const { jobId } = await createExportMutation.mutateAsync({
       marketplaceId: marketplace.id,
-      totalProducts: productsToExport.length,
+      totalProducts: totalTasks,
       tagFilter: preSelectedTag || undefined,
     });
 
@@ -771,13 +856,14 @@ export default function ExportPage() {
     setExportJobId(jobId);
     await updateExportMutation.mutateAsync({ jobId, status: "processing" });
 
-    toast.info(`Publicando diretamente via API do ${marketplace.name}...`, { duration: 3000 });
+    const typesLabel = selectedListingTypes.map(t => LISTING_TYPE_OPTIONS.find(o => o.value === t)?.label).join(" + ");
+    toast.info(`Publicando ${totalTasks} anúncios (${productsToExport.length} produtos × ${selectedListingTypes.length} tipos: ${typesLabel}) via API do ${marketplace.name}...`, { duration: 5000 });
 
     let successCount = 0;
     let errorCount = 0;
 
-    for (let i = 0; i < productsToExport.length; i++) {
-      const product = productsToExport[i];
+    for (let i = 0; i < pubTasks.length; i++) {
+      const { product, listingType, title } = pubTasks[i];
 
       try {
         // Build features from suggested attributes
@@ -794,7 +880,6 @@ export default function ExportPage() {
         let images: string[] = [];
         if (product.allImages && product.allImages.length > 0) {
           const coverIdx = product.coverImageIndex || 0;
-          // Put cover image first, then rest in order
           images = [product.allImages[coverIdx]];
           for (let j = 0; j < product.allImages.length; j++) {
             if (j !== coverIdx) images.push(product.allImages[j]);
@@ -803,23 +888,22 @@ export default function ExportPage() {
           images = [product.imageUrl];
         }
 
+        const typeLabel = LISTING_TYPE_OPTIONS.find(o => o.value === listingType)?.label || listingType;
+
         if (mpCode === "mercadolivre") {
           // ===== DIRECT ML API EXPORT WITH LISTING TYPE FALLBACK =====
-          const listingTypeFallback: ListingType[] = [];
-          const primaryType = product.listingType || batchListingType;
-          listingTypeFallback.push(primaryType);
-          // Add fallback types
-          if (primaryType !== "gold_special") listingTypeFallback.push("gold_special");
-          if (primaryType !== "free") listingTypeFallback.push("free");
+          const listingTypeFallback: ListingType[] = [listingType];
+          if (listingType !== "gold_special") listingTypeFallback.push("gold_special");
+          if (listingType !== "free") listingTypeFallback.push("free");
 
           let mlResult: any = null;
-          let usedListingType = primaryType;
+          let usedListingType = listingType;
 
           for (const tryType of listingTypeFallback) {
             mlResult = await mlPublishMutation.mutateAsync({
               accountId: selectedAccountInfo.id,
               productId: product.id,
-              name: product.optimizedTitle || product.name,
+              name: title,
               description: product.description || undefined,
               price: product.mainPrice || 0,
               stock: product.totalStock || 1,
@@ -834,12 +918,10 @@ export default function ExportPage() {
 
             usedListingType = tryType;
 
-            // If success or error is NOT about listing type, stop trying
             if (mlResult.success || !mlResult.error?.includes("listing_type")) {
               break;
             }
 
-            // If listing type error, try next fallback
             if (tryType !== listingTypeFallback[listingTypeFallback.length - 1]) {
               const fallbackLabel = LISTING_TYPE_OPTIONS.find(o => o.value === listingTypeFallback[listingTypeFallback.indexOf(tryType) + 1])?.label;
               toast.info(`Tipo "${LISTING_TYPE_OPTIONS.find(o => o.value === tryType)?.label}" indisponível para "${product.name.substring(0, 25)}...", tentando "${fallbackLabel}"...`, { duration: 3000 });
@@ -850,7 +932,7 @@ export default function ExportPage() {
           await addLogMutation.mutateAsync({
             jobId,
             productId: product.id,
-            productName: product.name,
+            productName: `${product.name} [${typeLabel}]`,
             marketplaceId: marketplace.id,
             status: mlResult.success ? "success" : "error",
             errorMessage: mlResult.error || undefined,
@@ -859,14 +941,13 @@ export default function ExportPage() {
           if (mlResult.success) {
             successCount++;
             const permalink = mlResult.permalink ? ` - ${mlResult.permalink}` : "";
-            const typeLabel = LISTING_TYPE_OPTIONS.find(o => o.value === usedListingType)?.label || usedListingType;
-            toast.success(`"${product.name.substring(0, 30)}..." publicado no ML! (${typeLabel})${permalink}`, { duration: 4000 });
+            const usedLabel = LISTING_TYPE_OPTIONS.find(o => o.value === usedListingType)?.label || usedListingType;
+            toast.success(`"${product.name.substring(0, 25)}..." publicado (${usedLabel})${permalink}`, { duration: 4000 });
           } else {
             errorCount++;
-            toast.error(`Erro ML: "${product.name.substring(0, 30)}...": ${mlResult.error}`, { duration: 4000 });
+            toast.error(`Erro ML (${typeLabel}): "${product.name.substring(0, 25)}...": ${mlResult.error}`, { duration: 4000 });
           }
         } else if (mpCode === "tiktok") {
-          // ===== TIKTOK SHOP API (placeholder) =====
           errorCount++;
           await addLogMutation.mutateAsync({
             jobId,
@@ -878,7 +959,6 @@ export default function ExportPage() {
           });
           toast.error(`TikTok: Use a página dedicada para publicar "${product.name.substring(0, 30)}..."`, { duration: 4000 });
         } else {
-          // ===== MARKETPLACE SEM API DIRETA =====
           errorCount++;
           await addLogMutation.mutateAsync({
             jobId,
@@ -886,7 +966,7 @@ export default function ExportPage() {
             productName: product.name,
             marketplaceId: marketplace.id,
             status: "error",
-            errorMessage: `API direta para ${marketplace.name} ainda não disponível. Conecte a conta do marketplace primeiro.`,
+            errorMessage: `API direta para ${marketplace.name} ainda não disponível.`,
           });
         }
       } catch (error: any) {
@@ -902,7 +982,7 @@ export default function ExportPage() {
         toast.error(`Erro em "${product.name.substring(0, 30)}...": ${error.message}`, { duration: 3000 });
       }
 
-      setExportProgress(Math.round(((i + 1) / productsToExport.length) * 100));
+      setExportProgress(Math.round(((i + 1) / totalTasks) * 100));
       await updateExportMutation.mutateAsync({
         jobId,
         processedProducts: i + 1,
@@ -911,18 +991,18 @@ export default function ExportPage() {
       });
 
       // Small delay between API calls to avoid rate limiting
-      if (i < productsToExport.length - 1) {
+      if (i < pubTasks.length - 1) {
         await new Promise(r => setTimeout(r, 500));
       }
     }
 
     await updateExportMutation.mutateAsync({
       jobId,
-      status: errorCount === productsToExport.length ? "failed" : "completed",
+      status: errorCount === totalTasks ? "failed" : "completed",
     });
 
     setStep("done");
-    toast.success(`Exportação concluída! ${successCount} publicados, ${errorCount} erros.`);
+    toast.success(`Exportação concluída! ${successCount} publicados, ${errorCount} erros (de ${totalTasks} anúncios).`);
   };
 
   const updateProductAttribute = (productId: string, attrIndex: number, newValue: string) => {
@@ -950,7 +1030,7 @@ export default function ExportPage() {
     const coverIdx = product.coverImageIndex || 0;
     const displayImage = product.allImages?.[coverIdx] || product.imageUrl;
     const imageCount = product.allImages?.length || (product.imageUrl ? 1 : 0);
-    const listingTypeInfo = LISTING_TYPE_OPTIONS.find(o => o.value === (product.listingType || batchListingType));
+    const listingTypeInfo = LISTING_TYPE_OPTIONS.find(o => o.value === (product.listingType || selectedListingTypes[0]));
 
     return (
       <Card key={product.id} className={`overflow-hidden transition-all ${
@@ -1046,6 +1126,24 @@ export default function ExportPage() {
                         {product.titleReasoning}
                       </p>
                     )}
+                    {/* Per-type titles preview */}
+                    {product.titlesPerType && Object.keys(product.titlesPerType).length > 1 && (
+                      <div className="mt-1 space-y-0.5">
+                        {Object.entries(product.titlesPerType).map(([lt, data]) => {
+                          const typeOpt = LISTING_TYPE_OPTIONS.find(o => o.value === lt);
+                          return (
+                            <div key={lt} className="flex items-center gap-1 text-[10px]">
+                              <span className={`font-medium shrink-0 ${typeOpt?.color || ""}`}>
+                                {typeOpt?.icon} {typeOpt?.label}:
+                              </span>
+                              <span className="truncate text-muted-foreground" title={data.title}>
+                                {data.title}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1063,18 +1161,27 @@ export default function ExportPage() {
                 )}
               </div>
 
-              {/* Category + Listing Type row */}
+              {/* Category + Listing Types row */}
               <div className="flex flex-wrap items-center gap-2">
                 {product.suggestedCategory && (
                   <Badge variant={product.suggestedCategory.confidence >= 80 ? "default" : "secondary"} className="text-[10px] h-5">
                     {product.suggestedCategory.confidence}% &bull; {product.suggestedCategory.name}
                   </Badge>
                 )}
-                {listingTypeInfo && (
-                  <Badge variant="outline" className={`text-[10px] h-5 gap-1 ${listingTypeInfo.color}`}>
-                    {listingTypeInfo.icon}
-                    {listingTypeInfo.label}
-                  </Badge>
+                {/* Show all selected listing types */}
+                {selectedListingTypes.map(lt => {
+                  const opt = LISTING_TYPE_OPTIONS.find(o => o.value === lt);
+                  return opt ? (
+                    <Badge key={lt} variant="outline" className={`text-[10px] h-5 gap-1 ${opt.color}`}>
+                      {opt.icon}
+                      {opt.label}
+                    </Badge>
+                  ) : null;
+                })}
+                {selectedListingTypes.length > 1 && (
+                  <span className="text-[10px] text-muted-foreground">
+                    ({selectedListingTypes.length} anúncios)
+                  </span>
                 )}
               </div>
             </div>
@@ -1098,33 +1205,6 @@ export default function ExportPage() {
                 >
                   {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                 </Button>
-              </div>
-              {/* Individual listing type selector - more visible */}
-              <div className="flex gap-0.5 mt-1">
-                {LISTING_TYPE_OPTIONS.map(opt => {
-                  const isActive = (product.listingType || batchListingType) === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      onClick={() => {
-                        setMappedProducts(prev => prev.map(p =>
-                          p.id === product.id ? { ...p, listingType: opt.value } : p
-                        ));
-                      }}
-                      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium border transition-all ${
-                        isActive
-                          ? opt.value === "gold_pro" ? "bg-purple-100 border-purple-400 text-purple-700"
-                            : opt.value === "gold_special" ? "bg-amber-100 border-amber-400 text-amber-700"
-                            : "bg-gray-100 border-gray-400 text-gray-700"
-                          : "bg-transparent border-transparent text-muted-foreground hover:bg-muted"
-                      }`}
-                      title={opt.description}
-                    >
-                      {opt.icon}
-                      {opt.label}
-                    </button>
-                  );
-                })}
               </div>
               {/* Quick cover image change buttons */}
               {product.allImages && product.allImages.length > 1 && (
@@ -1862,7 +1942,7 @@ export default function ExportPage() {
               </div>
               <Button onClick={handleExport} disabled={selectedProducts.filter(p => p.status === "mapped").length === 0}>
                 <Upload className="mr-2 h-4 w-4" />
-                Publicar {selectedProducts.filter(p => p.status === "mapped").length} no {getMarketplaceDisplayName()}
+                Publicar {totalPublications} anúncio(s) no {getMarketplaceDisplayName()}
               </Button>
             </div>
           </div>
@@ -1900,28 +1980,44 @@ export default function ExportPage() {
                       Tipo de Anúncio:
                     </Label>
                     <div className="flex gap-1">
-                      {LISTING_TYPE_OPTIONS.map(opt => (
-                        <Button
-                          key={opt.value}
-                          variant={batchListingType === opt.value ? "default" : "outline"}
-                          size="sm"
-                          className={`h-7 text-[11px] gap-1 ${batchListingType !== opt.value ? opt.color : ""}`}
-                          onClick={() => applyBatchListingType(opt.value)}
-                        >
-                          {opt.icon}
-                          {opt.label}
-                        </Button>
-                      ))}
+                      {LISTING_TYPE_OPTIONS.map(opt => {
+                        const isActive = selectedListingTypes.includes(opt.value);
+                        return (
+                          <Button
+                            key={opt.value}
+                            variant={isActive ? "default" : "outline"}
+                            size="sm"
+                            className={`h-7 text-[11px] gap-1 ${!isActive ? opt.color : ""}`}
+                            onClick={() => toggleListingType(opt.value)}
+                          >
+                            {opt.icon}
+                            {opt.label}
+                            {isActive && <CheckCircle className="h-3 w-3 ml-0.5" />}
+                          </Button>
+                        );
+                      })}
                     </div>
                     <Tooltip>
                       <TooltipTrigger>
                         <Info className="h-3.5 w-3.5 text-muted-foreground" />
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs">
-                        <p className="text-xs">Aplica o tipo de anúncio para todos os produtos selecionados. Você pode alterar individualmente em cada card.</p>
+                        <p className="text-xs">Selecione até 3 tipos de anúncio. Cada produto será publicado uma vez para cada tipo selecionado.</p>
                       </TooltipContent>
                     </Tooltip>
                   </div>
+
+                  {/* Total publications info */}
+                  {selectedListingTypes.length > 1 && (
+                    <div className="flex items-center gap-1.5 text-xs bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-2.5 py-1 rounded-md border border-blue-200 dark:border-blue-800">
+                      <Info className="h-3 w-3 shrink-0" />
+                      <span>
+                        <strong>{selectedProducts.filter(p => p.status === "mapped").length}</strong> produtos ×{" "}
+                        <strong>{selectedListingTypes.length}</strong> tipos ={" "}
+                        <strong>{totalPublications}</strong> anúncios
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Row 2: Title Generation */}
@@ -1965,11 +2061,34 @@ export default function ExportPage() {
                     disabled={isGeneratingTitles || selectedProducts.filter(p => p.status === "mapped").length === 0}
                   >
                     {isGeneratingTitles ? (
-                      <><Loader2 className="h-3 w-3 animate-spin" />Gerando...</>
+                      <><Loader2 className="h-3 w-3 animate-spin" />{titleGenProgress > 0 ? `${titleGenProgress}%` : "Gerando..."}</>
                     ) : (
-                      <><Wand2 className="h-3 w-3" />Gerar para {selectedProducts.filter(p => p.status === "mapped").length} selecionados</>
+                      <><Wand2 className="h-3 w-3" />Gerar Títulos ({selectedProducts.filter(p => p.status === "mapped").length})</>
                     )}
                   </Button>
+
+                  {/* Title per type toggle - only show when multiple types selected */}
+                  {selectedListingTypes.length > 1 && (
+                    <div className="flex items-center gap-2 ml-2">
+                      <Switch
+                        id="titlePerType"
+                        checked={titlePerType}
+                        onCheckedChange={setTitlePerType}
+                        className="scale-75"
+                      />
+                      <Label htmlFor="titlePerType" className="text-[11px] text-muted-foreground cursor-pointer">
+                        Título diferente por tipo
+                      </Label>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Info className="h-3 w-3 text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="text-xs">Quando ativado, gera um título otimizado para cada tipo de anúncio (ex: título curto para Grátis, completo para Premium).</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -1985,7 +2104,7 @@ export default function ExportPage() {
             <div className="flex justify-end">
               <Button onClick={handleExport} disabled={selectedProducts.filter(p => p.status === "mapped").length === 0} size="lg">
                 <Upload className="mr-2 h-4 w-4" />
-                Publicar {selectedProducts.filter(p => p.status === "mapped").length} no {getMarketplaceDisplayName()}
+                Publicar {totalPublications} anúncio(s) no {getMarketplaceDisplayName()}
               </Button>
             </div>
           )}
@@ -2010,7 +2129,10 @@ export default function ExportPage() {
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>{exportProgress}% concluído</span>
               <span>
-                {Math.round((exportProgress / 100) * mappedProducts.filter(p => p.selected !== false && p.status === "mapped").length)} de {mappedProducts.filter(p => p.selected !== false && p.status === "mapped").length} produtos
+                {Math.round((exportProgress / 100) * totalPublications)} de {totalPublications} anúncio(s)
+                {selectedListingTypes.length > 1 && (
+                  <span className="ml-1">({selectedProducts.filter(p => p.status === "mapped").length} produtos × {selectedListingTypes.length} tipos)</span>
+                )}
               </span>
             </div>
           </CardContent>

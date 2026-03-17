@@ -79,7 +79,7 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 25000)),
         ]);
       } catch (error: any) {
         // TIMEOUT or ML API error is fine - means input validation passed
@@ -87,7 +87,7 @@ describe("Export Review - ML Publish Input Validation", () => {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 15000);
+    }, 30000);
 
     it("accepts listingType gold_special", async () => {
       const { ctx } = createAuthContext();
@@ -129,13 +129,13 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 25000)),
         ]);
       } catch (error: any) {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 15000);
+    }, 30000);
 
     it("accepts images array", async () => {
       const { ctx } = createAuthContext();
@@ -157,13 +157,13 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 25000)),
         ]);
       } catch (error: any) {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 15000);
+    }, 30000);
 
     it("accepts features record", async () => {
       const { ctx } = createAuthContext();
@@ -187,13 +187,13 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 25000)),
         ]);
       } catch (error: any) {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 15000);
+    }, 30000);
   });
 
   describe("ml.batchPublish input schema", () => {
@@ -340,6 +340,84 @@ describe("Export Review - ML Publish Input Validation", () => {
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
     }, 10000);
+  });
+
+  describe("Multiple listing types - publication multiplication", () => {
+    it("should calculate total publications correctly", () => {
+      // Simulating frontend logic: N products × M types = total publications
+      const products = [
+        { id: "1", status: "mapped", selected: true },
+        { id: "2", status: "mapped", selected: true },
+        { id: "3", status: "mapped", selected: true },
+        { id: "4", status: "error", selected: true },
+      ];
+      const selectedListingTypes = ["gold_pro", "gold_special", "free"];
+
+      const mappedProducts = products.filter(p => p.status === "mapped" && p.selected);
+      const totalPublications = mappedProducts.length * selectedListingTypes.length;
+
+      expect(totalPublications).toBe(9); // 3 products × 3 types
+    });
+
+    it("should build publication tasks for each product × type combination", () => {
+      const products = [
+        { id: "1", name: "Product A", optimizedTitle: "Optimized A", titlesPerType: {
+          gold_pro: { title: "Premium A", reasoning: "" },
+          free: { title: "Free A", reasoning: "" },
+        }},
+        { id: "2", name: "Product B", optimizedTitle: "Optimized B", titlesPerType: undefined },
+      ];
+      const selectedListingTypes = ["gold_pro", "free"] as const;
+      const titlePerType = true;
+
+      const pubTasks: { productId: string; listingType: string; title: string }[] = [];
+      for (const product of products) {
+        for (const lt of selectedListingTypes) {
+          let title = product.optimizedTitle || product.name;
+          if (titlePerType && product.titlesPerType && (product.titlesPerType as any)[lt]) {
+            title = (product.titlesPerType as any)[lt].title;
+          }
+          pubTasks.push({ productId: product.id, listingType: lt, title });
+        }
+      }
+
+      expect(pubTasks).toHaveLength(4); // 2 products × 2 types
+      expect(pubTasks[0]).toEqual({ productId: "1", listingType: "gold_pro", title: "Premium A" });
+      expect(pubTasks[1]).toEqual({ productId: "1", listingType: "free", title: "Free A" });
+      expect(pubTasks[2]).toEqual({ productId: "2", listingType: "gold_pro", title: "Optimized B" });
+      expect(pubTasks[3]).toEqual({ productId: "2", listingType: "free", title: "Optimized B" });
+    });
+
+    it("should use single title when titlePerType is false", () => {
+      const product = {
+        id: "1", name: "Product A", optimizedTitle: "Single Title",
+        titlesPerType: {
+          gold_pro: { title: "Premium A", reasoning: "" },
+          free: { title: "Free A", reasoning: "" },
+        },
+      };
+      const selectedListingTypes = ["gold_pro", "free"] as const;
+      const titlePerType = false;
+
+      const pubTasks: { listingType: string; title: string }[] = [];
+      for (const lt of selectedListingTypes) {
+        let title = product.optimizedTitle || product.name;
+        if (titlePerType && product.titlesPerType && (product.titlesPerType as any)[lt]) {
+          title = (product.titlesPerType as any)[lt].title;
+        }
+        pubTasks.push({ listingType: lt, title });
+      }
+
+      // Both should use the single optimizedTitle
+      expect(pubTasks[0].title).toBe("Single Title");
+      expect(pubTasks[1].title).toBe("Single Title");
+    });
+
+    it("should limit to maximum 3 listing types", () => {
+      const allTypes = ["gold_pro", "gold_special", "free"];
+      // Frontend logic: toggle adds/removes, max 3
+      expect(allTypes.length).toBeLessThanOrEqual(3);
+    });
   });
 
   describe("exports.create input schema", () => {

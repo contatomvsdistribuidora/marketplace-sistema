@@ -151,3 +151,8 @@
 - [x] Permitir selecionar tipo de anúncio diferente por produto (ex: alguns Premium, outros Grátis, outros Clássico) - IMPLEMENTADO: seletor individual por card + batch apply
 - [x] Botão de gerar foto de capa com IA visível e funcional na etapa de Review - IMPLEMENTADO: botão Gerar Foto IA na galeria expandida com 4 estilos
 - [x] Garantir galeria de fotos com troca de capa visível e funcional por produto - IMPLEMENTADO: auto-load de imagens ao entrar no Review, galeria com seleção de capa
+- [x] Seleção de até 3 tipos de anúncio simultâneos (Grátis/Clássico/Premium) - cada tipo gera um anúncio separado por produto
+- [x] Títulos NÃO gerados automaticamente - só quando usuário clicar "Gerar Títulos com IA"
+- [x] Opção "Gerar título diferente por tipo de anúncio" quando mais de 1 tipo selecionado
+- [x] Exportação multiplicada: N produtos × M tipos = N×M publicações com progresso correto
+- [x] Galeria de fotos, troca de capa e gerar foto IA visíveis e funcionais no card de Review
