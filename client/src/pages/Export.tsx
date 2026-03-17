@@ -120,17 +120,61 @@ export default function ExportPage() {
     return accounts;
   }, [integrationsData]);
 
-  // Filter accounts by search
-  const displayedAccounts = useMemo(() => {
-    if (!accountSearch) return allAccounts;
-    const search = accountSearch.toLowerCase();
+  // Get selected marketplace info
+  const selectedMarketplaceInfo = useMemo(() => {
+    if (!selectedMarketplace || !marketplaces) return null;
+    return (marketplaces as any[]).find((m: any) => String(m.id) === selectedMarketplace) || null;
+  }, [selectedMarketplace, marketplaces]);
+
+  // Map marketplace codes to BaseLinker integration codes for filtering
+  const MARKETPLACE_CODE_TO_INTEGRATION: Record<string, string[]> = {
+    mercadolivre: ["melibr", "mercadolivre"],
+    shopee: ["shopeebr", "shopee"],
+    amazon: ["amazon"],
+    tiktok: ["tiktok", "tiktokshop"],
+    madeiramadeira: ["madeiramadeira"],
+    magalu: ["magaluopenapi", "magalu"],
+    leroymerlin: ["leroymerlinbr", "leroymerlin"],
+    americanas: ["americanas", "b2w"],
+    casasbahia: ["viavarejo", "casasbahia"],
+    carrefour: ["carrefourbr", "carrefour"],
+    kabum: ["kabum"],
+    shein: ["shein"],
+    olist: ["olist"],
+    aliexpress: ["aliexpress"],
+    dafiti: ["dafiti"],
+    netshoes: ["netshoes"],
+    centauro: ["centauro"],
+    fastshop: ["fastshop"],
+    rihappy: ["rihappy"],
+    olxbr: ["olxbr", "olx"],
+    privalia: ["privalia"],
+    webcontinental: ["webcontinental"],
+  };
+
+  // Filter accounts by selected marketplace
+  const filteredAccounts = useMemo(() => {
+    if (!selectedMarketplaceInfo) return allAccounts;
+    const mpCode = (selectedMarketplaceInfo as any).code?.toLowerCase();
+    if (!mpCode) return allAccounts;
+    const integrationCodes = MARKETPLACE_CODE_TO_INTEGRATION[mpCode];
+    if (!integrationCodes) return allAccounts; // No mapping, show all
     return allAccounts.filter(a =>
+      integrationCodes.some(code => a.integrationCode.toLowerCase() === code || a.integrationCode.toLowerCase().includes(code))
+    );
+  }, [allAccounts, selectedMarketplaceInfo]);
+
+  // Filter displayed accounts by search within filtered accounts
+  const displayedAccounts = useMemo(() => {
+    if (!accountSearch) return filteredAccounts;
+    const search = accountSearch.toLowerCase();
+    return filteredAccounts.filter(a =>
       a.accountName.toLowerCase().includes(search) ||
       a.integrationLabel.toLowerCase().includes(search) ||
       a.accountId.toLowerCase().includes(search) ||
       a.integrationCode.toLowerCase().includes(search)
     );
-  }, [allAccounts, accountSearch]);
+  }, [filteredAccounts, accountSearch]);
 
   // Get selected account info
   const selectedAccountInfo = useMemo(() => {
@@ -882,46 +926,70 @@ export default function ExportPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Store className="h-4 w-4" />
-                Marketplace e Conta de Destino
+                Marketplace de Destino
               </CardTitle>
-              <CardDescription>Selecione o marketplace e a conta/integração para onde deseja exportar</CardDescription>
+              <CardDescription>Selecione o marketplace para onde deseja exportar</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Marketplace selection */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Marketplace</label>
-                <Select 
-                  value={selectedMarketplace} 
-                  onValueChange={(val) => {
-                    setSelectedMarketplace(val);
-                    setSelectedAccount(""); // Reset account when marketplace changes
-                    setAccountSearch("");
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um marketplace" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(marketplaces || []).map((mp: any) => (
-                      <SelectItem key={mp.id} value={String(mp.id)}>
+              {/* Marketplace selection - Visual cards with logos */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {(marketplaces || []).map((mp: any) => {
+                  const isSelected = selectedMarketplace === String(mp.id);
+                  return (
+                    <button
+                      key={mp.id}
+                      onClick={() => {
+                        setSelectedMarketplace(String(mp.id));
+                        setSelectedAccount("");
+                        setAccountSearch("");
+                      }}
+                      className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 hover:shadow-md cursor-pointer ${
+                        isSelected
+                          ? "border-primary bg-primary/5 shadow-md ring-2 ring-primary/20"
+                          : "border-border hover:border-primary/40 bg-card"
+                      }`}
+                    >
+                      {isSelected && (
+                        <div className="absolute top-1.5 right-1.5">
+                          <CheckCircle className="h-4 w-4 text-primary" />
+                        </div>
+                      )}
+                      <div className="h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center overflow-hidden">
+                        {mp.icon ? (
+                          <img src={mp.icon} alt={mp.name} className="h-8 w-8 object-contain" />
+                        ) : (
+                          <Store className="h-5 w-5 text-muted-foreground" />
+                        )}
+                      </div>
+                      <span className={`text-xs font-medium text-center leading-tight ${
+                        isSelected ? "text-primary" : "text-foreground"
+                      }`}>
                         {mp.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Account/Integration selection */}
+              {/* Account/Integration selection - filtered by marketplace */}
               {selectedMarketplace && (
-                <div className="space-y-2">
+                <div className="space-y-3 pt-2 border-t">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium flex items-center gap-2">
                       <Link2 className="h-3.5 w-3.5" />
-                      Conta / Integração
+                      Conta de Destino
+                      {selectedMarketplaceInfo && (
+                        <Badge variant="secondary" className="text-[10px] h-5 gap-1">
+                          {selectedMarketplaceInfo.icon && (
+                            <img src={selectedMarketplaceInfo.icon} alt="" className="h-3 w-3 object-contain" />
+                          )}
+                          {selectedMarketplaceInfo.name}
+                        </Badge>
+                      )}
                     </label>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        {allAccounts.length} integrações encontradas
+                        {filteredAccounts.length} conta(s)
                       </span>
                       <Button 
                         variant="ghost" 
@@ -938,72 +1006,70 @@ export default function ExportPage() {
                   {integrationsLoading ? (
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      <span className="text-sm text-muted-foreground">Carregando integrações de marketplace...</span>
+                      <span className="text-sm text-muted-foreground">Carregando contas...</span>
                     </div>
-                  ) : allAccounts.length > 0 ? (
+                  ) : filteredAccounts.length > 0 ? (
                     <>
-                      {/* Search field for accounts */}
-                      <Input
-                        placeholder="Buscar conta por nome, marketplace ou ID..."
-                        value={accountSearch}
-                        onChange={(e) => setAccountSearch(e.target.value)}
-                        className="h-8 text-sm"
-                      />
-
-                      {displayedAccounts.length > 0 ? (
-                        <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione a conta de destino" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-[300px]">
-                            {displayedAccounts.map((a) => (
-                              <SelectItem key={`${a.integrationCode}:${a.accountId}`} value={`${a.integrationCode}:${a.accountId}`}>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-[10px] h-4 px-1 shrink-0">
-                                    {a.integrationLabel}
-                                  </Badge>
-                                  <span>{a.accountName}</span>
-                                  <span className="text-xs text-muted-foreground">(#{a.accountId})</span>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                          <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                          <p className="text-xs text-amber-700">
-                            Nenhuma conta encontrada com "{accountSearch}". Tente outro termo.
-                          </p>
-                        </div>
+                      {filteredAccounts.length > 5 && (
+                        <Input
+                          placeholder="Buscar conta por nome ou ID..."
+                          value={accountSearch}
+                          onChange={(e) => setAccountSearch(e.target.value)}
+                          className="h-8 text-sm"
+                        />
                       )}
+
+                      <div className="space-y-1.5 max-h-[250px] overflow-y-auto">
+                        {displayedAccounts.map((a) => {
+                          const accountKey = `${a.integrationCode}:${a.accountId}`;
+                          const isAccSelected = selectedAccount === accountKey;
+                          return (
+                            <button
+                              key={accountKey}
+                              onClick={() => setSelectedAccount(accountKey)}
+                              className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${
+                                isAccSelected
+                                  ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                                  : "border-border hover:border-primary/30 hover:bg-muted/30"
+                              }`}
+                            >
+                              <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                                isAccSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                              }`}>
+                                {isAccSelected ? (
+                                  <CheckCircle className="h-4 w-4" />
+                                ) : (
+                                  <Store className="h-4 w-4" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium truncate ${
+                                  isAccSelected ? "text-primary" : ""
+                                }`}>
+                                  {a.accountName}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {a.integrationLabel} &bull; #{a.accountId}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </>
+                  ) : allAccounts.length > 0 ? (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                      <p className="text-xs text-amber-700">
+                        Nenhuma conta do tipo <strong>{selectedMarketplaceInfo?.name}</strong> encontrada no BaseLinker. Verifique se esta integração está configurada.
+                      </p>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
                       <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
                       <p className="text-xs text-amber-700">
-                        Nenhuma integração de marketplace encontrada. Verifique se os marketplaces estão conectados no BaseLinker e se o inventário correto está selecionado.
+                        Nenhuma integração de marketplace encontrada. Verifique se os marketplaces estão conectados no BaseLinker.
                       </p>
-                    </div>
-                  )}
-
-                  {/* Selected account info */}
-                  {selectedAccountInfo && (
-                    <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="h-4 w-4 text-primary shrink-0" />
-                        <div>
-                          <p className="text-sm font-medium">
-                            {selectedAccountInfo.accountName}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {selectedAccountInfo.integrationLabel} &bull; ID: {selectedAccountInfo.accountId}
-                            {selectedAccountInfo.langs.length > 0 && (
-                              <> &bull; Idiomas: {selectedAccountInfo.langs.join(", ")}</>
-                            )}
-                          </p>
-                        </div>
-                      </div>
                     </div>
                   )}
                 </div>

@@ -101,3 +101,6 @@
 - [x] Criar página de Política de Privacidade (/privacy-policy)
 - [x] BUG: OAuth ML callback retorna 404 em produção - corrigido: domínio atualizado de baselinker-marketplace-exporter.manus.space para blmarketexp-nqnujejx.manus.space em todos os arquivos
 - [x] Exportação direta para ML via API (sem fila do agente) quando conta ML está conectada
+- [x] Melhorar visual da seleção de marketplace com logos/ícones dos marketplaces
+- [x] Filtrar contas automaticamente por marketplace selecionado (ex: ML selecionado → só contas ML)
+- [x] Redesenhar seleção de contas com visual mais limpo e intuitivo
