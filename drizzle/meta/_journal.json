@@ -43,6 +43,13 @@
       "when": 1773693513501,
       "tag": "0005_premium_spectrum",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1773709354103,
+      "tag": "0006_equal_millenium_guard",
+      "breakpoints": true
     }
   ]
 }

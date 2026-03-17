@@ -10,4 +10,7 @@ export const ENV = {
   // Mercado Livre OAuth
   mlAppId: process.env.ML_APP_ID ?? "",
   mlClientSecret: process.env.ML_CLIENT_SECRET ?? "",
+  // TikTok Shop
+  tiktokAppKey: process.env.TIKTOK_APP_KEY ?? "",
+  tiktokAppSecret: process.env.TIKTOK_APP_SECRET ?? "",
 };

@@ -1,0 +1,8 @@
+{
+  "query": "UPDATE users SET password_hash = '$2b$12$Cm8SytJyWxjACdCDIZxH3urjBPQSkBwBUkqJslgUnTjzU7lxTIrAG' WHERE email = 'contato.mvsdistribuidora@gmail.com';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute UPDATE users SET password_hash = '$2b$12$Cm8SytJyWxjACdCDIZxH3urjBPQSkBwBUkqJslgUnTjzU7lxTIrAG' WHERE email = 'contato.mvsdistribuidora@gmail.com';",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'password_hash' in 'field list'"
+  ]
+}

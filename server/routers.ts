@@ -8,6 +8,7 @@ import * as baselinker from "./baselinker";
 import * as aiMapper from "./ai-mapper";
 import * as ml from "./mercadolivre";
 import * as localAuth from "./local-auth";
+import * as tiktok from "./tiktokshop";
 
 export const appRouter = router({
   system: systemRouter,
@@ -900,6 +901,114 @@ export const appRouter = router({
           metadata: input.metadata || null,
         });
         return { id };
+      }),
+  }),
+
+  // ============ TIKTOK SHOP ============
+  tiktok: router({
+    // Get authorization URL
+    getAuthUrl: protectedProcedure
+      .input(z.object({ region: z.enum(["US", "GLOBAL"]).optional() }))
+      .query(({ ctx, input }) => {
+        const state = Buffer.from(JSON.stringify({ userId: ctx.user.id })).toString("base64");
+        const url = tiktok.getAuthorizationUrl(state, input.region || "GLOBAL");
+        return { url };
+      }),
+
+    // List connected accounts
+    accounts: protectedProcedure.query(async ({ ctx }) => {
+      return tiktok.getUserTiktokAccounts(ctx.user.id);
+    }),
+
+    // Disconnect account
+    disconnect: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await tiktok.disconnectTiktokAccount(ctx.user.id, input.accountId);
+        return { success: true };
+      }),
+
+    // Get authorized shops for an account
+    getShops: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .query(async ({ input }) => {
+        const token = await tiktok.getValidToken(input.accountId);
+        return tiktok.getAuthorizedShops(token);
+      }),
+
+    // Get categories for a shop
+    getCategories: protectedProcedure
+      .input(z.object({ accountId: z.number(), shopCipher: z.string() }))
+      .query(async ({ input }) => {
+        const token = await tiktok.getValidToken(input.accountId);
+        return tiktok.getCategories(token, input.shopCipher);
+      }),
+
+    // Recommend category for a product
+    recommendCategory: protectedProcedure
+      .input(z.object({ accountId: z.number(), shopCipher: z.string(), productTitle: z.string() }))
+      .query(async ({ input }) => {
+        const token = await tiktok.getValidToken(input.accountId);
+        return tiktok.recommendCategory(token, input.shopCipher, input.productTitle);
+      }),
+
+    // Get category attributes
+    getCategoryAttributes: protectedProcedure
+      .input(z.object({ accountId: z.number(), shopCipher: z.string(), categoryId: z.string() }))
+      .query(async ({ input }) => {
+        const token = await tiktok.getValidToken(input.accountId);
+        return tiktok.getCategoryAttributes(token, input.shopCipher, input.categoryId);
+      }),
+
+    // Upload product image
+    uploadImage: protectedProcedure
+      .input(z.object({ accountId: z.number(), shopCipher: z.string(), imageUrl: z.string() }))
+      .mutation(async ({ input }) => {
+        const token = await tiktok.getValidToken(input.accountId);
+        return tiktok.uploadProductImage(token, input.shopCipher, input.imageUrl);
+      }),
+
+    // Create product on TikTok Shop
+    createProduct: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        shopCipher: z.string(),
+        product: z.object({
+          title: z.string(),
+          description: z.string(),
+          categoryId: z.string(),
+          brandId: z.string().optional(),
+          images: z.array(z.string()),
+          skus: z.array(z.object({
+            sellerSku: z.string(),
+            price: z.string(),
+            stock: z.number(),
+            salesAttributes: z.array(z.object({
+              attributeId: z.string(),
+              valueId: z.string().optional(),
+              customValue: z.string().optional(),
+            })).optional(),
+          })),
+          productAttributes: z.array(z.object({
+            attributeId: z.string(),
+            attributeValues: z.array(z.object({
+              valueId: z.string().optional(),
+              valueName: z.string().optional(),
+            })),
+          })).optional(),
+          packageWeight: z.string().optional(),
+          packageLength: z.number().optional(),
+          packageWidth: z.number().optional(),
+          packageHeight: z.number().optional(),
+        }),
+        // BaseLinker product reference
+        blProductId: z.string(),
+        blProductName: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const token = await tiktok.getValidToken(input.accountId);
+        const result = await tiktok.createProduct(token, input.shopCipher, input.product);
+        return { success: true, productId: result.productId, skuIds: result.skuIds };
       }),
   }),
 });

@@ -87,3 +87,12 @@
 - [x] Tela de login/registro no frontend
 - [x] Proteção de rotas para usuários autenticados
 - [x] Testes do sistema de autenticação
+- [x] Definir senha para a conta existente do marcos dias (contato.mvsdistribuidora@gmail.com)
+- [x] Integração com TikTok Shop
+- [x] Pesquisar API do TikTok Shop (OAuth, criação de produtos, requisitos)
+- [x] Criar tabela tiktok_accounts no banco para armazenar tokens
+- [x] Implementar OAuth flow do TikTok Shop
+- [x] Implementar criação de produtos via TikTok Shop API
+- [x] Frontend: tela de conexão de contas TikTok Shop
+- [x] Frontend: publicação de produtos no TikTok Shop
+- [x] Testes da integração TikTok Shop

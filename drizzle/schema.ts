@@ -242,3 +242,50 @@ export const mlListings = mysqlTable("ml_listings", {
 
 export type MlListing = typeof mlListings.$inferSelect;
 export type InsertMlListing = typeof mlListings.$inferInsert;
+
+/** Connected TikTok Shop accounts via OAuth */
+export const tiktokAccounts = mysqlTable("tiktok_accounts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  ttOpenId: varchar("ttOpenId", { length: 256 }).notNull(),
+  sellerName: varchar("sellerName", { length: 256 }),
+  sellerBaseRegion: varchar("sellerBaseRegion", { length: 10 }),
+  accessToken: text("accessToken").notNull(),
+  refreshToken: text("refreshToken").notNull(),
+  accessTokenExpiresAt: timestamp("accessTokenExpiresAt").notNull(),
+  refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt").notNull(),
+  shopId: varchar("shopId", { length: 128 }),
+  shopName: varchar("shopName", { length: 256 }),
+  shopRegion: varchar("shopRegion", { length: 10 }),
+  shopCipher: varchar("shopCipher", { length: 512 }),
+  isActive: int("isActive").default(1).notNull(),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type TiktokAccount = typeof tiktokAccounts.$inferSelect;
+export type InsertTiktokAccount = typeof tiktokAccounts.$inferInsert;
+
+/** TikTok Shop product listings created through our system */
+export const tiktokListings = mysqlTable("tiktok_listings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  tiktokAccountId: int("tiktokAccountId").notNull(),
+  ttProductId: varchar("ttProductId", { length: 128 }),
+  productId: varchar("productId", { length: 128 }).notNull(),
+  productName: varchar("productName", { length: 512 }),
+  title: varchar("title", { length: 256 }),
+  categoryId: varchar("categoryId", { length: 128 }),
+  categoryName: varchar("categoryName", { length: 512 }),
+  price: varchar("price", { length: 32 }),
+  currency: varchar("currency", { length: 10 }).default("BRL"),
+  status: mysqlEnum("tt_listing_status", ["draft", "pending", "active", "failed", "deactivated", "deleted"]).default("draft").notNull(),
+  ttResponse: json("ttResponse"),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type TiktokListing = typeof tiktokListings.$inferSelect;
+export type InsertTiktokListing = typeof tiktokListings.$inferInsert;

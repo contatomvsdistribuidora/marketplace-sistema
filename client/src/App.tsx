@@ -14,6 +14,8 @@ import Settings from "./pages/Settings";
 import AgentMonitor from "./pages/AgentMonitor";
 import MlAccounts from "./pages/MlAccounts";
 import MlPublish from "./pages/MlPublish";
+import TikTokAccounts from "./pages/TikTokAccounts";
+import TikTokPublish from "./pages/TikTokPublish";
 import Login from "./pages/Login";
 
 function DashboardRouter() {
@@ -29,6 +31,8 @@ function DashboardRouter() {
         <Route path="/agent" component={AgentMonitor} />
         <Route path="/ml-accounts" component={MlAccounts} />
         <Route path="/ml-publish" component={MlPublish} />
+        <Route path="/tiktok-accounts" component={TikTokAccounts} />
+        <Route path="/tiktok-publish" component={TikTokPublish} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

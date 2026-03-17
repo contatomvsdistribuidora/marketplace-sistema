@@ -1,0 +1,40 @@
+CREATE TABLE `tiktok_accounts` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`ttOpenId` varchar(256) NOT NULL,
+	`sellerName` varchar(256),
+	`sellerBaseRegion` varchar(10),
+	`accessToken` text NOT NULL,
+	`refreshToken` text NOT NULL,
+	`accessTokenExpiresAt` timestamp NOT NULL,
+	`refreshTokenExpiresAt` timestamp NOT NULL,
+	`shopId` varchar(128),
+	`shopName` varchar(256),
+	`shopRegion` varchar(10),
+	`shopCipher` varchar(512),
+	`isActive` int NOT NULL DEFAULT 1,
+	`lastUsedAt` timestamp,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `tiktok_accounts_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `tiktok_listings` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`tiktokAccountId` int NOT NULL,
+	`ttProductId` varchar(128),
+	`productId` varchar(128) NOT NULL,
+	`productName` varchar(512),
+	`title` varchar(256),
+	`categoryId` varchar(128),
+	`categoryName` varchar(512),
+	`price` varchar(32),
+	`currency` varchar(10) DEFAULT 'BRL',
+	`tt_listing_status` enum('draft','pending','active','failed','deactivated','deleted') NOT NULL DEFAULT 'draft',
+	`ttResponse` json,
+	`errorMessage` text,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `tiktok_listings_id` PRIMARY KEY(`id`)
+);
