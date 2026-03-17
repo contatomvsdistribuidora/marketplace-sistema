@@ -746,20 +746,26 @@ export const appRouter = router({
 
     // ============ CATEGORIES (LOCAL DB) ============
     
-    // Sync all ML categories to local database
+    // Start background sync of ML categories
     syncCategories: protectedProcedure
       .mutation(async () => {
         const count = await mlCat.getCategoryCount();
         if (count > 0) {
-          return { total: count, duration: 0, message: `${count} categorias já sincronizadas. Use forceSync para re-sincronizar.` };
+          return { started: false, message: `${count} categorias já sincronizadas. Use Re-sincronizar para atualizar.` };
         }
-        return mlCat.syncAllCategories();
+        return mlCat.startBackgroundSync();
       }),
 
     // Force re-sync all categories
     forceSyncCategories: protectedProcedure
       .mutation(async () => {
-        return mlCat.syncAllCategories();
+        return mlCat.startBackgroundSync(true);
+      }),
+
+    // Get sync status (for polling)
+    syncStatus: protectedProcedure
+      .query(async () => {
+        return mlCat.getSyncStatus();
       }),
 
     // Get category count

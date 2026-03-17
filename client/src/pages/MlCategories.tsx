@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { Loader2, RefreshCw, Search, FolderTree, ChevronRight, Database, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -12,6 +13,7 @@ export default function MlCategories() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedParent, setSelectedParent] = useState<string | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<Array<{ id: string; name: string }>>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Debounce search
   useEffect(() => {
@@ -21,6 +23,28 @@ export default function MlCategories() {
 
   const categoryCount = trpc.ml.categoryCount.useQuery();
   
+  // Poll sync status while syncing
+  const syncStatusQuery = trpc.ml.syncStatus.useQuery(undefined, {
+    enabled: isSyncing,
+    refetchInterval: isSyncing ? 2000 : false,
+  });
+
+  // Watch sync status changes
+  useEffect(() => {
+    if (!syncStatusQuery.data) return;
+    const status = syncStatusQuery.data;
+    
+    if (status.phase === "done" && isSyncing) {
+      setIsSyncing(false);
+      categoryCount.refetch();
+      rootCategories.refetch();
+      toast.success(`${status.total.toLocaleString("pt-BR")} categorias sincronizadas!`);
+    } else if (status.phase === "error" && isSyncing) {
+      setIsSyncing(false);
+      toast.error(`Erro na sincronização: ${status.error}`);
+    }
+  }, [syncStatusQuery.data]);
+
   const searchResults = trpc.ml.searchCategories.useQuery(
     { query: debouncedQuery, leafOnly: false, limit: 30 },
     { enabled: debouncedQuery.length >= 2 }
@@ -37,11 +61,12 @@ export default function MlCategories() {
 
   const syncMutation = trpc.ml.syncCategories.useMutation({
     onSuccess: (data) => {
-      categoryCount.refetch();
-      if ('message' in data && data.message) {
-        toast.info(data.message as string);
-      } else {
-        toast.success(`${data.total} categorias sincronizadas em ${data.duration}s`);
+      if (data.message) {
+        toast.info(data.message);
+        categoryCount.refetch();
+      } else if (data.started) {
+        setIsSyncing(true);
+        toast.info("Sincronização iniciada em segundo plano...");
       }
     },
     onError: (error) => {
@@ -51,9 +76,12 @@ export default function MlCategories() {
 
   const forceSyncMutation = trpc.ml.forceSyncCategories.useMutation({
     onSuccess: (data) => {
-      categoryCount.refetch();
-      rootCategories.refetch();
-      toast.success(`${data.total} categorias sincronizadas em ${data.duration}s`);
+      if (data.started) {
+        setIsSyncing(true);
+        toast.info("Re-sincronização iniciada em segundo plano...");
+      } else if (data.message) {
+        toast.info(data.message);
+      }
     },
     onError: (error) => {
       toast.error(`Erro ao sincronizar: ${error.message}`);
@@ -78,13 +106,42 @@ export default function MlCategories() {
   };
 
   const count = categoryCount.data?.count || 0;
-  const isSyncing = syncMutation.isPending || forceSyncMutation.isPending;
+  const syncStatus = syncStatusQuery.data;
+  const isButtonDisabled = isSyncing || syncMutation.isPending || forceSyncMutation.isPending;
 
   const displayCategories = debouncedQuery.length >= 2
     ? searchResults.data || []
     : selectedParent
     ? childCategories.data || []
     : rootCategories.data || [];
+
+  // Calculate progress percentage
+  const getProgressPercent = () => {
+    if (!syncStatus || !isSyncing) return 0;
+    if (syncStatus.phase === "downloading") {
+      // Estimate ~15000 total categories
+      return Math.min(90, Math.round((syncStatus.downloaded / 15000) * 90));
+    }
+    if (syncStatus.phase === "saving") {
+      if (syncStatus.total === 0) return 90;
+      return 90 + Math.round((syncStatus.saved / syncStatus.total) * 10);
+    }
+    if (syncStatus.phase === "done") return 100;
+    return 0;
+  };
+
+  const getPhaseLabel = () => {
+    if (!syncStatus || !isSyncing) return "";
+    if (syncStatus.phase === "downloading") {
+      return `Baixando categorias... ${syncStatus.downloaded.toLocaleString("pt-BR")} baixadas`;
+    }
+    if (syncStatus.phase === "saving") {
+      return `Salvando no banco... ${syncStatus.saved.toLocaleString("pt-BR")}/${syncStatus.total.toLocaleString("pt-BR")}`;
+    }
+    if (syncStatus.phase === "done") return "Concluído!";
+    if (syncStatus.phase === "error") return `Erro: ${syncStatus.error}`;
+    return "";
+  };
 
   return (
     <div className="container py-6 max-w-5xl">
@@ -109,13 +166,13 @@ export default function MlCategories() {
                   {categoryCount.isLoading ? "..." : count.toLocaleString("pt-BR")}
                 </Badge>
               </div>
-              {count > 0 && (
+              {count > 0 && !isSyncing && (
                 <div className="flex items-center gap-1 text-green-600">
                   <CheckCircle2 className="h-4 w-4" />
                   <span className="text-sm">Sincronizado</span>
                 </div>
               )}
-              {count === 0 && !categoryCount.isLoading && (
+              {count === 0 && !categoryCount.isLoading && !isSyncing && (
                 <div className="flex items-center gap-1 text-amber-600">
                   <AlertCircle className="h-4 w-4" />
                   <span className="text-sm">Não sincronizado</span>
@@ -123,54 +180,47 @@ export default function MlCategories() {
               )}
             </div>
             <div className="flex gap-2">
-              {count === 0 ? (
+              {count === 0 && !isSyncing ? (
                 <Button
                   onClick={() => syncMutation.mutate()}
-                  disabled={isSyncing}
+                  disabled={isButtonDisabled}
                 >
-                  {isSyncing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Sincronizando...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Sincronizar Categorias
-                    </>
-                  )}
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Sincronizar Categorias
                 </Button>
-              ) : (
+              ) : !isSyncing ? (
                 <Button
                   variant="outline"
                   onClick={() => forceSyncMutation.mutate()}
-                  disabled={isSyncing}
+                  disabled={isButtonDisabled}
                 >
-                  {isSyncing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Re-sincronizando...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Re-sincronizar
-                    </>
-                  )}
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Re-sincronizar
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
+
+          {/* Progress bar during sync */}
           {isSyncing && (
-            <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
-              Baixando todas as categorias do Mercado Livre... Isso pode levar alguns minutos.
-              A árvore completa tem aproximadamente 15.000 categorias.
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm font-medium text-primary">
+                  {getPhaseLabel()}
+                </span>
+              </div>
+              <Progress value={getProgressPercent()} className="h-2" />
+              <p className="text-xs text-muted-foreground">
+                Baixando todas as categorias do Mercado Livre em segundo plano. 
+                A árvore completa tem aproximadamente 15.000 categorias. Você pode navegar em outras páginas enquanto espera.
+              </p>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {count > 0 && (
+      {count > 0 && !isSyncing && (
         <>
           {/* Search */}
           <div className="relative mb-4">

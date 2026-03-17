@@ -1,6 +1,7 @@
 /**
  * Mercado Livre Categories Module
  * Downloads and caches the entire ML category tree in our database.
+ * Uses concurrent fetching and background processing for speed.
  * Provides local search and validation of category IDs.
  */
 
@@ -10,6 +11,7 @@ import { mlCategories } from "../drizzle/schema";
 
 const ML_API_BASE = "https://api.mercadolibre.com";
 const ML_SITE_ID = "MLB";
+const CONCURRENCY = 15; // Parallel API requests
 
 // Known root category IDs for MLB (Mercado Livre Brasil)
 const MLB_ROOT_CATEGORIES = [
@@ -43,140 +45,199 @@ const MLB_ROOT_CATEGORIES = [
   "MLB264586", // Saúde
 ];
 
+// ─── Background sync state ───────────────────────────────────────────────────
+interface SyncStatus {
+  running: boolean;
+  downloaded: number;
+  saved: number;
+  total: number;
+  phase: "idle" | "downloading" | "saving" | "done" | "error";
+  currentRoot: string;
+  error: string | null;
+  startedAt: number | null;
+  completedAt: number | null;
+}
+
+let syncStatus: SyncStatus = {
+  running: false,
+  downloaded: 0,
+  saved: 0,
+  total: 0,
+  phase: "idle",
+  currentRoot: "",
+  error: null,
+  startedAt: null,
+  completedAt: null,
+};
+
+export function getSyncStatus(): SyncStatus {
+  return { ...syncStatus };
+}
+
 function getDb() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
   return drizzle(process.env.DATABASE_URL);
 }
 
-/**
- * Fetch a single category from ML API
- */
-async function fetchCategory(categoryId: string): Promise<any> {
-  const url = `${ML_API_BASE}/categories/${categoryId}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    console.error(`[ML Categories] Failed to fetch ${categoryId}: ${response.status}`);
-    return null;
-  }
-  return response.json();
-}
+// ─── Concurrent fetching with queue ──────────────────────────────────────────
 
 /**
- * Recursively download all categories from a root category
+ * Fetch a single category from ML API with retry
  */
-async function downloadCategoryTree(
-  categoryId: string,
-  parentId: string | null,
-  level: number,
-  pathNames: string[],
-  pathIds: string[],
-  onProgress?: (count: number, name: string) => void
-): Promise<Array<{
-  mlCategoryId: string;
-  name: string;
-  parentId: string | null;
-  pathFromRoot: string;
-  pathIds: string;
-  totalItems: number;
-  hasChildren: number;
-  isLeaf: number;
-  level: number;
-  picture: string | null;
-}>> {
-  const data = await fetchCategory(categoryId);
-  if (!data || !data.id) return [];
-
-  const currentPathNames = [...pathNames, data.name];
-  const currentPathIds = [...pathIds, data.id];
-  const children = data.children_categories || [];
-
-  const result: any[] = [{
-    mlCategoryId: data.id,
-    name: data.name,
-    parentId,
-    pathFromRoot: currentPathNames.join(" > "),
-    pathIds: currentPathIds.join(","),
-    totalItems: data.total_items_in_this_category || 0,
-    hasChildren: children.length > 0 ? 1 : 0,
-    isLeaf: children.length === 0 ? 1 : 0,
-    level,
-    picture: data.picture || null,
-  }];
-
-  onProgress?.(1, data.name);
-
-  // Small delay to avoid rate limiting
-  await new Promise((r) => setTimeout(r, 50));
-
-  // Recursively fetch children
-  for (const child of children) {
-    const childResults = await downloadCategoryTree(
-      child.id,
-      data.id,
-      level + 1,
-      currentPathNames,
-      currentPathIds,
-      onProgress
-    );
-    result.push(...childResults);
-  }
-
-  return result;
-}
-
-/**
- * Sync all ML categories to our database
- * Downloads the entire category tree recursively and saves to DB
- */
-export async function syncAllCategories(
-  onProgress?: (downloaded: number, total: number, currentName: string) => void
-): Promise<{ total: number; duration: number }> {
-  const startTime = Date.now();
-  const db = getDb();
-  let totalDownloaded = 0;
-
-  console.log(`[ML Categories] Starting full category sync...`);
-
-  const allCategories: any[] = [];
-
-  for (const rootId of MLB_ROOT_CATEGORIES) {
-    console.log(`[ML Categories] Downloading tree for ${rootId}...`);
-    const categories = await downloadCategoryTree(
-      rootId,
-      null,
-      0,
-      [],
-      [],
-      (count, name) => {
-        totalDownloaded += count;
-        onProgress?.(totalDownloaded, 0, name);
-        if (totalDownloaded % 100 === 0) {
-          console.log(`[ML Categories] Downloaded ${totalDownloaded} categories...`);
-        }
+async function fetchCategory(categoryId: string, retries = 2): Promise<any> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const url = `${ML_API_BASE}/categories/${categoryId}`;
+      const response = await fetch(url);
+      if (response.status === 429) {
+        // Rate limited - wait and retry
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
       }
-    );
-    allCategories.push(...categories);
+      if (!response.ok) {
+        console.error(`[ML Categories] Failed to fetch ${categoryId}: ${response.status}`);
+        return null;
+      }
+      return response.json();
+    } catch (e) {
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
   }
+  return null;
+}
 
-  console.log(`[ML Categories] Downloaded ${allCategories.length} categories. Saving to database...`);
+/**
+ * Process a queue of category IDs concurrently using a worker pool
+ */
+async function processQueue(
+  queue: Array<{ id: string; parentId: string | null; level: number; pathNames: string[]; pathIds: string[] }>,
+  results: any[],
+  concurrency: number
+): Promise<void> {
+  let index = 0;
 
-  // Clear existing categories and insert new ones in batches
-  await db.delete(mlCategories);
+  async function worker() {
+    while (index < queue.length) {
+      const current = queue[index++];
+      if (!current) break;
 
-  // Insert in batches of 100
-  const batchSize = 100;
-  for (let i = 0; i < allCategories.length; i += batchSize) {
-    const batch = allCategories.slice(i, i + batchSize);
-    await db.insert(mlCategories).values(batch);
-    if ((i / batchSize) % 10 === 0) {
-      console.log(`[ML Categories] Inserted ${Math.min(i + batchSize, allCategories.length)}/${allCategories.length}...`);
+      const data = await fetchCategory(current.id);
+      if (!data || !data.id) continue;
+
+      const currentPathNames = [...current.pathNames, data.name];
+      const currentPathIds = [...current.pathIds, data.id];
+      const children = data.children_categories || [];
+
+      results.push({
+        mlCategoryId: data.id,
+        name: data.name,
+        parentId: current.parentId,
+        pathFromRoot: currentPathNames.join(" > "),
+        pathIds: currentPathIds.join(","),
+        totalItems: data.total_items_in_this_category || 0,
+        hasChildren: children.length > 0 ? 1 : 0,
+        isLeaf: children.length === 0 ? 1 : 0,
+        level: current.level,
+        picture: data.picture || null,
+      });
+
+      syncStatus.downloaded = results.length;
+
+      // Add children to the queue
+      for (const child of children) {
+        queue.push({
+          id: child.id,
+          parentId: data.id,
+          level: current.level + 1,
+          pathNames: currentPathNames,
+          pathIds: currentPathIds,
+        });
+      }
     }
   }
 
-  const duration = Math.round((Date.now() - startTime) / 1000);
+  // Start worker pool
+  const workers = Array.from({ length: concurrency }, () => worker());
+  await Promise.all(workers);
+}
+
+/**
+ * Start background sync of all ML categories
+ * Returns immediately, use getSyncStatus() to check progress
+ */
+export function startBackgroundSync(force = false): { started: boolean; message?: string } {
+  if (syncStatus.running) {
+    return { started: false, message: "Sincronização já em andamento" };
+  }
+
+  syncStatus = {
+    running: true,
+    downloaded: 0,
+    saved: 0,
+    total: 0,
+    phase: "downloading",
+    currentRoot: "",
+    error: null,
+    startedAt: Date.now(),
+    completedAt: null,
+  };
+
+  // Run in background (fire and forget)
+  doSync().catch((err) => {
+    console.error("[ML Categories] Background sync error:", err);
+    syncStatus.phase = "error";
+    syncStatus.error = err.message || String(err);
+    syncStatus.running = false;
+  });
+
+  return { started: true };
+}
+
+async function doSync() {
+  const db = getDb();
+
+  console.log(`[ML Categories] Starting concurrent category sync (concurrency=${CONCURRENCY})...`);
+
+  // Build initial queue from root categories
+  const queue: Array<{ id: string; parentId: string | null; level: number; pathNames: string[]; pathIds: string[] }> = 
+    MLB_ROOT_CATEGORIES.map((id) => ({
+      id,
+      parentId: null,
+      level: 0,
+      pathNames: [],
+      pathIds: [],
+    }));
+
+  const allCategories: any[] = [];
+  syncStatus.phase = "downloading";
+
+  // Process the queue concurrently
+  await processQueue(queue, allCategories, CONCURRENCY);
+
+  console.log(`[ML Categories] Downloaded ${allCategories.length} categories. Saving to database...`);
+  syncStatus.phase = "saving";
+  syncStatus.total = allCategories.length;
+
+  // Clear existing categories
+  await db.delete(mlCategories);
+
+  // Insert in batches of 200
+  const batchSize = 200;
+  for (let i = 0; i < allCategories.length; i += batchSize) {
+    const batch = allCategories.slice(i, i + batchSize);
+    await db.insert(mlCategories).values(batch);
+    syncStatus.saved = Math.min(i + batchSize, allCategories.length);
+  }
+
+  const duration = Math.round((Date.now() - (syncStatus.startedAt || Date.now())) / 1000);
   console.log(`[ML Categories] Sync complete: ${allCategories.length} categories in ${duration}s`);
 
-  return { total: allCategories.length, duration };
+  syncStatus.phase = "done";
+  syncStatus.running = false;
+  syncStatus.completedAt = Date.now();
+  syncStatus.total = allCategories.length;
 }
 
 /**
@@ -217,10 +278,14 @@ export async function getLocalCategoryInfo(mlCategoryId: string) {
 /**
  * Search categories by name (full-text search)
  */
-export async function searchCategories(query: string, limit: number = 20) {
+export async function searchCategories(query: string, limit: number = 20, leafOnly = false) {
   const db = getDb();
   
-  // Search for leaf categories (the ones you can actually list in)
+  const conditions = [like(mlCategories.name, `%${query}%`)];
+  if (leafOnly) {
+    conditions.push(eq(mlCategories.isLeaf, 1));
+  }
+
   const results = await db
     .select({
       mlCategoryId: mlCategories.mlCategoryId,
@@ -231,7 +296,7 @@ export async function searchCategories(query: string, limit: number = 20) {
       level: mlCategories.level,
     })
     .from(mlCategories)
-    .where(like(mlCategories.name, `%${query}%`))
+    .where(conditions.length > 1 ? and(...conditions) : conditions[0])
     .orderBy(desc(mlCategories.totalItems))
     .limit(limit);
 
@@ -242,28 +307,7 @@ export async function searchCategories(query: string, limit: number = 20) {
  * Search categories by name, prioritizing leaf categories
  */
 export async function searchLeafCategories(query: string, limit: number = 20) {
-  const db = getDb();
-  
-  const results = await db
-    .select({
-      mlCategoryId: mlCategories.mlCategoryId,
-      name: mlCategories.name,
-      pathFromRoot: mlCategories.pathFromRoot,
-      totalItems: mlCategories.totalItems,
-      isLeaf: mlCategories.isLeaf,
-      level: mlCategories.level,
-    })
-    .from(mlCategories)
-    .where(
-      and(
-        like(mlCategories.name, `%${query}%`),
-        eq(mlCategories.isLeaf, 1)
-      )
-    )
-    .orderBy(desc(mlCategories.totalItems))
-    .limit(limit);
-
-  return results;
+  return searchCategories(query, limit, true);
 }
 
 /**
@@ -338,7 +382,7 @@ export async function findBestCategory(productName: string): Promise<{
             source: "domain_discovery",
           };
         } else {
-          console.warn(`[ML findBestCategory] domain_discovery ID ${predictedId} NOT found in local DB, trying local search...`);
+          console.warn(`[ML findBestCategory] domain_discovery ID ${predictedId} NOT found in local DB, trying API validation...`);
           
           // Try to validate directly with ML API as fallback
           try {
