@@ -438,7 +438,13 @@ describe("Export Review - ML Publish Input Validation", () => {
 
       for (const style of ["seo", "detailed", "short"] as const) {
         const promise = caller.ai.generateDescription({
-          productName: "Test Product",
+          product: {
+            name: "Test Product",
+            description: "A test product description",
+            features: {},
+            category: "Test Category",
+          },
+          marketplace: "mercadolivre",
           style,
         });
 
@@ -459,10 +465,14 @@ describe("Export Review - ML Publish Input Validation", () => {
       const caller = appRouter.createCaller(ctx);
 
       const promise = caller.ai.generateDescription({
-        productName: "Test Product",
-        productDescription: "Original description",
-        features: { Marca: "TestBrand", Cor: "Preto" },
-        categoryName: "Eletr\u00f4nicos",
+        product: {
+          name: "Test Product",
+          description: "Original description",
+          features: { Marca: "TestBrand", Cor: "Preto" },
+          category: "Eletr\u00f4nicos",
+          ean: "7891234567890",
+        },
+        marketplace: "mercadolivre",
         style: "detailed",
       });
 

@@ -162,3 +162,5 @@
 - [x] Descrição do produto visível e editável no card expandido da etapa de Review - IMPLEMENTADO: seção de descrição entre galeria e atributos
 - [x] Gerar descrição por IA otimizada para ML (botão no card expandido) - IMPLEMENTADO: endpoint ai.generateDescription com 3 estilos (SEO/Detalhada/Curta)
 - [x] Mostrar títulos gerados por tipo de anúncio claramente no card (ex: "Clássico: título X", "Premium: título Y") - IMPLEMENTADO: preview de títulos por tipo no card quando titlesPerType disponível
+- [x] BUG: Só puxa 1 foto do produto na exportação - CORRIGIDO: useEffect auto-load dispara quando step muda para review, usando ref para acessar estado mais recente
+- [x] Botão de trocar foto de capa visível no card (sem precisar expandir) - IMPLEMENTADO: overlay com setas ◀ ▶ ao hover sobre a imagem + loading indicator

@@ -21,7 +21,7 @@ import {
   ChevronDown, ChevronUp, Image as ImageIcon, ChevronLeft, ChevronRight, Crown, Tag, Wand2,
   Star, ImagePlus, Type, Settings2, SquareCheck, Square, FileText, Images
 } from "lucide-react";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
@@ -82,6 +82,7 @@ export default function ExportPage() {
   const [selectedMarketplace, setSelectedMarketplace] = useState<string>("");
   const [selectedAccount, setSelectedAccount] = useState<string>(""); // "marketplace:accountId"
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
+  const mappedProductsRef = useRef<MappedProduct[]>([]);
   const [mappingProgress, setMappingProgress] = useState(0);
   const [isMappingInProgress, setIsMappingInProgress] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -295,6 +296,11 @@ export default function ExportPage() {
       sessionStorage.removeItem("export_tag");
     }
   }, [preSelectedProducts]);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    mappedProductsRef.current = mappedProducts;
+  }, [mappedProducts]);
 
   const mapCategoryMutation = trpc.ai.mapCategory.useMutation();
   const fillAttributesMutation = trpc.ai.fillAttributes.useMutation();
@@ -530,6 +536,23 @@ export default function ExportPage() {
       });
     }
   }, [inventoryId]);
+
+  // Auto-load images for all products when entering review step
+  useEffect(() => {
+    if (step === "review" && inventoryId) {
+      const loadImages = async () => {
+        const products = mappedProductsRef.current;
+        for (const product of products) {
+          if (!product.allImages) {
+            loadAllImages(product.id);
+            // Small delay to avoid overwhelming the API
+            await new Promise(r => setTimeout(r, 300));
+          }
+        }
+      };
+      loadImages();
+    }
+  }, [step, inventoryId, loadAllImages]);
 
   // ===== LOAD ML CATEGORY ATTRIBUTES =====
   const loadCategoryAttributes = useCallback(async (productId: string, categoryId: string) => {
@@ -902,16 +925,7 @@ export default function ExportPage() {
     setStep("review");
     toast.success("Mapeamento concluído! Revise os resultados antes de exportar.");
 
-    // Auto-load images for all products when entering review
-    if (inventoryId) {
-      for (const product of mappedProducts) {
-        if (!product.allImages) {
-          loadAllImages(product.id);
-          // Small delay to avoid overwhelming the API
-          await new Promise(r => setTimeout(r, 200));
-        }
-      }
-    }
+    // Images will be auto-loaded by the useEffect below when step changes to "review"
   };
 
   const handleExport = async () => {
@@ -1181,6 +1195,31 @@ export default function ExportPage() {
                 {product.status === "error" && <XCircle className="h-4 w-4 text-destructive bg-white rounded-full" />}
                 {product.status === "pending" && <AlertCircle className="h-4 w-4 text-amber-500 bg-white rounded-full" />}
               </div>
+              {/* Cover image navigation overlay */}
+              {product.allImages && product.allImages.length > 1 && (
+                <div className="absolute inset-0 flex items-center justify-between px-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCoverImage(product.id, Math.max(0, (product.coverImageIndex || 0) - 1)); }}
+                    disabled={(product.coverImageIndex || 0) === 0}
+                    className="h-6 w-6 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 disabled:opacity-30 transition-all"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCoverImage(product.id, Math.min(product.allImages!.length - 1, (product.coverImageIndex || 0) + 1)); }}
+                    disabled={(product.coverImageIndex || 0) === product.allImages.length - 1}
+                    className="h-6 w-6 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 disabled:opacity-30 transition-all"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              {/* Loading images indicator */}
+              {isLoadingImages && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-lg">
+                  <Loader2 className="h-5 w-5 text-white animate-spin" />
+                </div>
+              )}
             </div>
 
             {/* Main content */}
@@ -1309,27 +1348,11 @@ export default function ExportPage() {
                   {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                 </Button>
               </div>
-              {/* Quick cover image change buttons */}
+              {/* Cover image info */}
               {product.allImages && product.allImages.length > 1 && (
-                <div className="flex items-center gap-1 mt-1">
-                  <button
-                    onClick={() => setCoverImage(product.id, Math.max(0, (product.coverImageIndex || 0) - 1))}
-                    disabled={(product.coverImageIndex || 0) === 0}
-                    className="h-5 w-5 rounded border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 transition-colors"
-                  >
-                    <ChevronLeft className="h-3 w-3" />
-                  </button>
-                  <span className="text-[9px] text-muted-foreground">
-                    Capa {(product.coverImageIndex || 0) + 1}/{product.allImages.length}
-                  </span>
-                  <button
-                    onClick={() => setCoverImage(product.id, Math.min(product.allImages!.length - 1, (product.coverImageIndex || 0) + 1))}
-                    disabled={(product.coverImageIndex || 0) === product.allImages.length - 1}
-                    className="h-5 w-5 rounded border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 transition-colors"
-                  >
-                    <ChevronRight className="h-3 w-3" />
-                  </button>
-                </div>
+                <span className="text-[9px] text-muted-foreground mt-0.5">
+                  Capa {(product.coverImageIndex || 0) + 1}/{product.allImages.length}
+                </span>
               )}
             </div>
           </div>
