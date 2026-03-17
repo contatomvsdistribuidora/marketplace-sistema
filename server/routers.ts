@@ -768,6 +768,13 @@ export const appRouter = router({
         return mlCat.getSyncStatus();
       }),
 
+    // Reset stuck sync status
+    resetSync: protectedProcedure
+      .mutation(async () => {
+        mlCat.resetSyncStatus();
+        return { reset: true };
+      }),
+
     // Get category count
     categoryCount: protectedProcedure
       .query(async () => {

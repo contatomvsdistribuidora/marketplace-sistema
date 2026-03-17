@@ -14,6 +14,7 @@ export default function MlCategories() {
   const [selectedParent, setSelectedParent] = useState<string | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<Array<{ id: string; name: string }>>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
 
   // Debounce search
   useEffect(() => {
@@ -23,6 +24,21 @@ export default function MlCategories() {
 
   const categoryCount = trpc.ml.categoryCount.useQuery();
   
+  // Check sync status on mount to detect ongoing syncs
+  const initialSyncCheck = trpc.ml.syncStatus.useQuery(undefined, {
+    enabled: !initialCheckDone,
+  });
+
+  // If server says sync is running when we load, start polling
+  useEffect(() => {
+    if (initialSyncCheck.data && !initialCheckDone) {
+      setInitialCheckDone(true);
+      if (initialSyncCheck.data.running && (initialSyncCheck.data.phase === "downloading" || initialSyncCheck.data.phase === "saving")) {
+        setIsSyncing(true);
+      }
+    }
+  }, [initialSyncCheck.data, initialCheckDone]);
+
   // Poll sync status while syncing
   const syncStatusQuery = trpc.ml.syncStatus.useQuery(undefined, {
     enabled: isSyncing,
@@ -41,9 +57,17 @@ export default function MlCategories() {
       toast.success(`${status.total.toLocaleString("pt-BR")} categorias sincronizadas!`);
     } else if (status.phase === "error" && isSyncing) {
       setIsSyncing(false);
-      toast.error(`Erro na sincronização: ${status.error}`);
+      toast.error(`Erro na sincroniza\u00e7\u00e3o: ${status.error}`);
     }
   }, [syncStatusQuery.data]);
+
+  const resetSyncMutation = trpc.ml.resetSync.useMutation({
+    onSuccess: () => {
+      setIsSyncing(false);
+      toast.info("Estado de sincroniza\u00e7\u00e3o resetado. Tente novamente.");
+      categoryCount.refetch();
+    },
+  });
 
   const searchResults = trpc.ml.searchCategories.useQuery(
     { query: debouncedQuery, leafOnly: false, limit: 30 },
@@ -204,11 +228,21 @@ export default function MlCategories() {
           {/* Progress bar during sync */}
           {isSyncing && (
             <div className="mt-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                <span className="text-sm font-medium text-primary">
-                  {getPhaseLabel()}
-                </span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span className="text-sm font-medium text-primary">
+                    {getPhaseLabel()}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => resetSyncMutation.mutate()}
+                  className="text-xs text-muted-foreground hover:text-destructive"
+                >
+                  Cancelar
+                </Button>
               </div>
               <Progress value={getProgressPercent()} className="h-2" />
               <p className="text-xs text-muted-foreground">

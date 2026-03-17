@@ -71,7 +71,34 @@ let syncStatus: SyncStatus = {
 };
 
 export function getSyncStatus(): SyncStatus {
+  // Auto-reset stuck state: if running for more than 10 minutes, consider it failed
+  if (syncStatus.running && syncStatus.startedAt) {
+    const elapsed = Date.now() - syncStatus.startedAt;
+    if (elapsed > 10 * 60 * 1000) {
+      console.warn(`[ML Categories] Sync appears stuck (${Math.round(elapsed / 1000)}s). Resetting state.`);
+      syncStatus.running = false;
+      syncStatus.phase = "error";
+      syncStatus.error = "Sincronização expirou (timeout de 10 minutos)";
+    }
+  }
   return { ...syncStatus };
+}
+
+/**
+ * Reset sync status (useful when state gets stuck)
+ */
+export function resetSyncStatus(): void {
+  syncStatus = {
+    running: false,
+    downloaded: 0,
+    saved: 0,
+    total: 0,
+    phase: "idle",
+    currentRoot: "",
+    error: null,
+    startedAt: null,
+    completedAt: null,
+  };
 }
 
 function getDb() {
@@ -168,6 +195,15 @@ async function processQueue(
  * Returns immediately, use getSyncStatus() to check progress
  */
 export function startBackgroundSync(force = false): { started: boolean; message?: string } {
+  // If stuck (running but started > 5 min ago), auto-reset
+  if (syncStatus.running && syncStatus.startedAt) {
+    const elapsed = Date.now() - syncStatus.startedAt;
+    if (elapsed > 5 * 60 * 1000) {
+      console.warn(`[ML Categories] Force-resetting stuck sync state (${Math.round(elapsed / 1000)}s old)`);
+      syncStatus.running = false;
+    }
+  }
+  
   if (syncStatus.running) {
     return { started: false, message: "Sincronização já em andamento" };
   }

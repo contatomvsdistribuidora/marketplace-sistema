@@ -121,3 +121,4 @@
 - [x] Usar categorias locais para validar/buscar na exportação (substituir domain_discovery como fonte primária)
 - [x] UI para busca/seleção de categorias ML na etapa de mapeamento
 - [x] BUG: Erro ao clicar em Sincronizar Categorias - corrigido: sync agora roda em background com polling de progresso (concorrência 15x, barra de progresso)
+- [x] BUG: Sync de categorias fica travado como "em andamento" - corrigido: auto-reset após 5min, botão cancelar, verificação inicial do estado ao carregar página
