@@ -109,3 +109,4 @@
 - [x] Remover fluxo de exportação via BaseLinker (tags, agente, etc.)
 - [x] Exportação para ML sempre via API direta do ML (sem BaseLinker)
 - [x] Quando marketplace não tem API direta conectada, mostrar aviso ao usuário
+- [x] BUG: Exportação ML falha com "Failed to get category info for MLB1..." - corrigido: não passar categoryId do mapeamento IA genérico, deixar domain_discovery do ML predizer a categoria correta

@@ -522,7 +522,8 @@ export default function ExportPage() {
             brand: features["Marca"] || features["brand"] || undefined,
             images: product.imageUrl ? [product.imageUrl] : undefined,
             features,
-            categoryId: product.suggestedCategory?.id || undefined,
+            // Don't pass AI-mapped categoryId - let ML's domain_discovery predict the correct category
+            // categoryId: product.suggestedCategory?.id || undefined,
           });
 
           await addLogMutation.mutateAsync({
