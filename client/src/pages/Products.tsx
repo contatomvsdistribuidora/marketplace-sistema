@@ -23,6 +23,7 @@ type Filters = {
   categoryId?: number;
   manufacturerId?: number;
   searchName?: string;
+  searchNameMode?: "contains" | "not_contains";
   searchEan?: string;
   searchSku?: string;
   priceMin?: number;
@@ -46,6 +47,7 @@ export default function ProductsPage() {
   // Filter state
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [draftName, setDraftName] = useState("");
+  const [nameMode, setNameMode] = useState<"contains" | "not_contains">("contains");
   const [draftEan, setDraftEan] = useState("");
   const [draftSku, setDraftSku] = useState("");
   const [draftPriceMin, setDraftPriceMin] = useState("");
@@ -110,7 +112,10 @@ export default function ProductsPage() {
     if (selectedTag !== "all") f.tagName = selectedTag;
     if (selectedCategory !== "all") f.categoryId = Number(selectedCategory);
     if (selectedManufacturer !== "all") f.manufacturerId = Number(selectedManufacturer);
-    if (draftName.trim()) f.searchName = draftName.trim();
+    if (draftName.trim()) {
+      f.searchName = draftName.trim();
+      f.searchNameMode = nameMode;
+    }
     if (draftEan.trim()) f.searchEan = draftEan.trim();
     if (draftSku.trim()) f.searchSku = draftSku.trim();
     if (draftPriceMin) f.priceMin = Number(draftPriceMin);
@@ -120,7 +125,7 @@ export default function ProductsPage() {
     if (draftWeightMin) f.weightMin = Number(draftWeightMin);
     if (draftWeightMax) f.weightMax = Number(draftWeightMax);
     return f;
-  }, [selectedTag, selectedCategory, selectedManufacturer, draftName, draftEan, draftSku,
+  }, [selectedTag, selectedCategory, selectedManufacturer, draftName, nameMode, draftEan, draftSku,
     draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax]);
 
   // Use the advanced filter endpoint
@@ -163,7 +168,7 @@ export default function ProductsPage() {
   useEffect(() => {
     setPage(1);
     setSelectedProducts(new Set());
-  }, [selectedTag, selectedCategory, selectedManufacturer, draftName, draftEan, draftSku,
+  }, [selectedTag, selectedCategory, selectedManufacturer, draftName, nameMode, draftEan, draftSku,
     draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax, pageSize]);
 
   const products = productsData?.products || [];
@@ -219,6 +224,7 @@ export default function ProductsPage() {
     setSelectedCategory("all");
     setSelectedManufacturer("all");
     setDraftName("");
+    setNameMode("contains");
     setDraftEan("");
     setDraftSku("");
     setDraftPriceMin("");
@@ -442,12 +448,23 @@ export default function ProductsPage() {
 
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-muted-foreground">Nome do produto</Label>
-                  <Input
-                    className="h-9"
-                    placeholder="Buscar por nome..."
-                    value={draftName}
-                    onChange={e => setDraftName(e.target.value)}
-                  />
+                  <div className="flex gap-1.5">
+                    <Select value={nameMode} onValueChange={(v: "contains" | "not_contains") => setNameMode(v)}>
+                      <SelectTrigger className="h-9 w-[130px] shrink-0 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contains" className="text-xs">Contém</SelectItem>
+                        <SelectItem value="not_contains" className="text-xs">Não contém</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      className="h-9"
+                      placeholder={nameMode === "contains" ? "Ex: tintas" : "Ex: tintas"}
+                      value={draftName}
+                      onChange={e => setDraftName(e.target.value)}
+                    />
+                  </div>
                 </div>
 
                 {/* Row 2: EAN, SKU, Price range */}

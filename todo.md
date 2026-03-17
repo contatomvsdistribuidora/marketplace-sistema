@@ -156,3 +156,4 @@
 - [x] Opção "Gerar título diferente por tipo de anúncio" quando mais de 1 tipo selecionado
 - [x] Exportação multiplicada: N produtos × M tipos = N×M publicações com progresso correto
 - [x] Galeria de fotos, troca de capa e gerar foto IA visíveis e funcionais no card de Review
+- [x] Filtro de nome com opção "contém" e "não contém" na página de Produtos (ex: nome contém "tintas" ou nome não contém "tintas")

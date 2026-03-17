@@ -10,7 +10,7 @@
  * Background sync updates only new/changed products.
  */
 
-import { eq, and, sql, inArray, gte, lte, like } from "drizzle-orm";
+import { eq, and, sql, inArray, gte, lte, like, notLike, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { productCache, cacheSync } from "../drizzle/schema";
 
@@ -409,6 +409,7 @@ export type ProductFilters = {
   categoryId?: number;
   manufacturerId?: number;
   searchName?: string;
+  searchNameMode?: "contains" | "not_contains";
   searchEan?: string;
   searchSku?: string;
   priceMin?: number;
@@ -712,9 +713,13 @@ export async function filterProductsFromCache(
     conditions.push(eq(productCache.manufacturerId, filters.manufacturerId));
   }
 
-  // Name search
+  // Name search (contains / not contains)
   if (filters.searchName) {
-    conditions.push(like(productCache.name, `%${filters.searchName}%`));
+    if (filters.searchNameMode === "not_contains") {
+      conditions.push(not(like(productCache.name, `%${filters.searchName}%`)));
+    } else {
+      conditions.push(like(productCache.name, `%${filters.searchName}%`));
+    }
   }
 
   // EAN search

@@ -235,6 +235,7 @@ export const appRouter = router({
           categoryId: z.number().optional(),
           manufacturerId: z.number().optional(),
           searchName: z.string().optional(),
+          searchNameMode: z.enum(["contains", "not_contains"]).optional(),
           searchEan: z.string().optional(),
           searchSku: z.string().optional(),
           priceMin: z.number().optional(),
