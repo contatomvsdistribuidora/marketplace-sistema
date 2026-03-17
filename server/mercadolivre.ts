@@ -794,6 +794,7 @@ export async function publishProduct(
     images?: string[];
     features?: Record<string, string>;
     categoryId?: string; // If already known
+    listingType?: "gold_pro" | "gold_special" | "free";
   }
 ) {
   try {
@@ -934,6 +935,7 @@ export async function publishProduct(
       pictures,
       attributes: filledAttributes,
       isUserProduct: isUP,
+      listingTypeId: product.listingType || "gold_special",
     });
 
     // 6. Save listing in our DB

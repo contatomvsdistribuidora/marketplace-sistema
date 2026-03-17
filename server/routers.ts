@@ -368,10 +368,47 @@ export const appRouter = router({
             ean: z.string().optional(),
           }),
           marketplace: z.string(),
+          style: z.enum(["seo", "descriptive", "short", "custom"]).default("seo"),
+          customInstruction: z.string().optional(),
         })
       )
       .mutation(async ({ input }) => {
-        return aiMapper.generateOptimizedTitle(input.product, input.marketplace);
+        return aiMapper.generateOptimizedTitle(input.product, input.marketplace, input.style, input.customInstruction);
+      }),
+
+    // Batch generate titles for multiple products
+    batchGenerateTitles: protectedProcedure
+      .input(
+        z.object({
+          products: z.array(
+            z.object({
+              id: z.string(),
+              name: z.string(),
+              description: z.string().default(""),
+              features: z.record(z.string(), z.string()).default({}),
+              category: z.string().default(""),
+              ean: z.string().optional(),
+            })
+          ),
+          marketplace: z.string(),
+          style: z.enum(["seo", "descriptive", "short", "custom"]).default("seo"),
+          customInstruction: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const results: Record<string, { title: string; reasoning: string }> = {};
+        for (const product of input.products) {
+          try {
+            const result = await aiMapper.generateOptimizedTitle(
+              product, input.marketplace, input.style, input.customInstruction
+            );
+            results[product.id] = result;
+          } catch (error: any) {
+            results[product.id] = { title: product.name, reasoning: `Erro: ${error.message}` };
+          }
+          await new Promise(r => setTimeout(r, 300));
+        }
+        return results;
       }),
 
     batchMapCategories: protectedProcedure
@@ -684,6 +721,7 @@ export const appRouter = router({
           images: z.array(z.string()).optional(),
           features: z.record(z.string(), z.string()).optional(),
           categoryId: z.string().optional(),
+          listingType: z.enum(["gold_pro", "gold_special", "free"]).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -699,6 +737,7 @@ export const appRouter = router({
           images: input.images,
           features: input.features,
           categoryId: input.categoryId,
+          listingType: input.listingType,
         });
       }),
 
@@ -720,6 +759,7 @@ export const appRouter = router({
               images: z.array(z.string()).optional(),
               features: z.record(z.string(), z.string()).optional(),
               categoryId: z.string().optional(),
+              listingType: z.enum(["gold_pro", "gold_special", "free"]).optional(),
             })
           ),
         })
@@ -739,6 +779,7 @@ export const appRouter = router({
             images: product.images,
             features: product.features,
             categoryId: product.categoryId,
+            listingType: product.listingType,
           });
           results.push(result);
           // Small delay between requests to avoid rate limiting

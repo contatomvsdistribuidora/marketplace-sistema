@@ -5,16 +5,27 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Upload, Store, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
-  ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw, ExternalLink
+  ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw, ExternalLink,
+  ChevronDown, ChevronUp, Image as ImageIcon, ChevronLeft, ChevronRight, Crown, Tag, Wand2,
+  Star, ImagePlus, Type, Settings2, SquareCheck, Square
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
 type ExportStep = "select" | "mapping" | "review" | "exporting" | "done";
+
+type ListingType = "gold_pro" | "gold_special" | "free";
 
 interface MappedProduct {
   id: string;
@@ -31,8 +42,11 @@ interface MappedProduct {
   imageUrl?: string;
   allImages?: string[];
   coverImageIndex?: number;
+  listingType?: ListingType;
+  selected?: boolean;
   suggestedCategory?: { id: string; name: string; path: string; confidence: number };
   suggestedAttributes?: { attributeName: string; attributeId: string; value: string; confidence: number; source: string; required?: boolean }[];
+  mlCategoryAttributes?: { id: string; name: string; type: string; values: { id: string; name: string }[]; required: boolean; allowCustomValue: boolean }[];
   status: "pending" | "mapped" | "error";
   errorMessage?: string;
 }
@@ -45,6 +59,19 @@ interface ConnectedAccount {
   isActive: boolean;
   icon?: string;
 }
+
+const LISTING_TYPE_OPTIONS: { value: ListingType; label: string; description: string; icon: React.ReactNode; color: string }[] = [
+  { value: "free", label: "Grátis", description: "Sem custo, menor visibilidade", icon: <Tag className="h-3.5 w-3.5" />, color: "text-gray-600" },
+  { value: "gold_special", label: "Clássico", description: "Custo padrão, boa visibilidade", icon: <Star className="h-3.5 w-3.5" />, color: "text-amber-600" },
+  { value: "gold_pro", label: "Premium", description: "Maior custo, máxima visibilidade + frete grátis", icon: <Crown className="h-3.5 w-3.5" />, color: "text-purple-600" },
+];
+
+const TITLE_STYLE_OPTIONS = [
+  { value: "seo", label: "SEO", description: "Otimizado para busca" },
+  { value: "descriptive", label: "Descritivo", description: "Detalhes do produto" },
+  { value: "short", label: "Curto", description: "Conciso e direto" },
+  { value: "custom", label: "Personalizado", description: "Instrução própria" },
+];
 
 export default function ExportPage() {
   const [, setLocation] = useLocation();
@@ -62,6 +89,16 @@ export default function ExportPage() {
   const [reExportJobId, setReExportJobId] = useState<number | null>(null);
   const [reExportMarketplaceId, setReExportMarketplaceId] = useState<number | null>(null);
   const [reExportMappedData, setReExportMappedData] = useState<Record<string, { mappedCategory: string | null; mappedAttributes: any }>>({});
+
+  // Batch action states
+  const [batchListingType, setBatchListingType] = useState<ListingType>("gold_special");
+  const [batchTitleStyle, setBatchTitleStyle] = useState<string>("seo");
+  const [customTitleInstruction, setCustomTitleInstruction] = useState("");
+  const [isGeneratingTitles, setIsGeneratingTitles] = useState(false);
+  const [titleGenProgress, setTitleGenProgress] = useState(0);
+  const [loadingImagesFor, setLoadingImagesFor] = useState<Set<string>>(new Set());
+  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
+  const [loadingAttrsFor, setLoadingAttrsFor] = useState<Set<string>>(new Set());
 
   const { data: tokenData } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
@@ -159,6 +196,11 @@ export default function ExportPage() {
     return connectedAccounts.find(a => a.marketplace === marketplace && a.id === accountId) || null;
   }, [selectedAccount, connectedAccounts]);
 
+  // Selection helpers
+  const selectedProducts = useMemo(() => mappedProducts.filter(p => p.selected), [mappedProducts]);
+  const allSelected = useMemo(() => mappedProducts.length > 0 && mappedProducts.every(p => p.selected), [mappedProducts]);
+  const someSelected = useMemo(() => mappedProducts.some(p => p.selected), [mappedProducts]);
+
   // Load pre-selected product IDs from sessionStorage
   useEffect(() => {
     const reExportId = sessionStorage.getItem("reexport_job_id");
@@ -238,6 +280,8 @@ export default function ExportPage() {
           mainPrice: p.mainPrice || 0,
           totalStock: p.totalStock || 0,
           imageUrl: p.imageUrl || "",
+          selected: true,
+          listingType: "gold_special" as ListingType,
           status: "pending" as const,
         }))
       );
@@ -249,6 +293,7 @@ export default function ExportPage() {
   const mapCategoryMutation = trpc.ai.mapCategory.useMutation();
   const fillAttributesMutation = trpc.ai.fillAttributes.useMutation();
   const generateTitleMutation = trpc.ai.generateTitle.useMutation();
+  const batchGenerateTitlesMutation = trpc.ai.batchGenerateTitles.useMutation();
   const createExportMutation = trpc.exports.create.useMutation();
   const updateExportMutation = trpc.exports.updateStatus.useMutation();
   const addLogMutation = trpc.exports.addLog.useMutation();
@@ -263,6 +308,189 @@ export default function ExportPage() {
   const hasPreviousMappedData = useMemo(() => {
     return Object.keys(reExportMappedData).length > 0;
   }, [reExportMappedData]);
+
+  // ===== TOGGLE SELECTION =====
+  const toggleSelectAll = useCallback(() => {
+    const newVal = !allSelected;
+    setMappedProducts(prev => prev.map(p => ({ ...p, selected: newVal })));
+  }, [allSelected]);
+
+  const toggleSelectProduct = useCallback((productId: string) => {
+    setMappedProducts(prev => prev.map(p =>
+      p.id === productId ? { ...p, selected: !p.selected } : p
+    ));
+  }, []);
+
+  // ===== BATCH LISTING TYPE =====
+  const applyBatchListingType = useCallback((type: ListingType) => {
+    setBatchListingType(type);
+    setMappedProducts(prev => prev.map(p => p.selected ? { ...p, listingType: type } : p));
+    const count = mappedProducts.filter(p => p.selected).length;
+    toast.success(`Tipo de anúncio "${LISTING_TYPE_OPTIONS.find(o => o.value === type)?.label}" aplicado a ${count} produto(s).`);
+  }, [mappedProducts]);
+
+  // ===== BATCH TITLE GENERATION =====
+  const handleBatchGenerateTitles = useCallback(async () => {
+    const selected = mappedProducts.filter(p => p.selected && p.status === "mapped");
+    if (selected.length === 0) {
+      toast.error("Selecione pelo menos um produto mapeado para gerar títulos.");
+      return;
+    }
+
+    setIsGeneratingTitles(true);
+    setTitleGenProgress(0);
+
+    const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
+    const marketplaceName = marketplace?.name || "Marketplace";
+    const accountName = selectedAccountInfo?.name || "";
+
+    try {
+      const results = await batchGenerateTitlesMutation.mutateAsync({
+        products: selected.map(p => ({
+          id: p.id,
+          name: p.name,
+          description: p.description || "",
+          features: p.features || {},
+          category: p.suggestedCategory?.name || p.category || "",
+          ean: p.ean,
+        })),
+        marketplace: `${marketplaceName} (${accountName})`,
+        style: batchTitleStyle as any,
+        customInstruction: batchTitleStyle === "custom" ? customTitleInstruction : undefined,
+      });
+
+      setMappedProducts(prev => prev.map(p => {
+        const result = results[p.id];
+        if (result) {
+          return { ...p, optimizedTitle: result.title, titleReasoning: result.reasoning };
+        }
+        return p;
+      }));
+
+      const successCount = Object.keys(results).length;
+      toast.success(`${successCount} título(s) gerado(s) com estilo "${TITLE_STYLE_OPTIONS.find(o => o.value === batchTitleStyle)?.label}".`);
+    } catch (error: any) {
+      toast.error(`Erro ao gerar títulos: ${error.message}`);
+    } finally {
+      setIsGeneratingTitles(false);
+      setTitleGenProgress(0);
+    }
+  }, [mappedProducts, selectedMarketplace, selectedAccountInfo, marketplaces, batchTitleStyle, customTitleInstruction]);
+
+  // ===== LOAD ALL IMAGES FOR A PRODUCT =====
+  const loadAllImages = useCallback(async (productId: string) => {
+    if (!inventoryId) return;
+    const numId = parseInt(productId);
+    if (isNaN(numId)) return;
+
+    setLoadingImagesFor(prev => new Set(prev).add(productId));
+    try {
+      const details = await new Promise<any>((resolve, reject) => {
+        // Use a direct fetch since we need imperative access
+        const url = `/api/trpc/baselinker.getProductDetails?input=${encodeURIComponent(JSON.stringify({ inventoryId, productIds: [numId] }))}`;
+        fetch(url)
+          .then(r => r.json())
+          .then(data => resolve(data?.result?.data || {}))
+          .catch(reject);
+      });
+
+      const fullProduct = details ? Object.values(details)[0] as any : null;
+      const images: string[] = [];
+      if (fullProduct?.images) {
+        const entries = Object.entries(fullProduct.images).sort(([a], [b]) => Number(a) - Number(b));
+        for (const [, url] of entries) {
+          if (url) images.push(url as string);
+        }
+      }
+
+      // Also extract features from text_fields
+      let extractedFeatures: Record<string, string> = {};
+      if (fullProduct?.text_fields?.features) {
+        try {
+          const parsed = typeof fullProduct.text_fields.features === "string"
+            ? JSON.parse(fullProduct.text_fields.features)
+            : fullProduct.text_fields.features;
+          extractedFeatures = parsed;
+        } catch { /* ignore */ }
+      }
+
+      setMappedProducts(prev => prev.map(p => {
+        if (p.id !== productId) return p;
+        const product = p;
+        const currentImage = product.imageUrl;
+        // If no images found, keep the current imageUrl
+        if (images.length === 0 && currentImage) {
+          return { ...p, allImages: [currentImage], coverImageIndex: 0, features: { ...p.features, ...extractedFeatures } };
+        }
+        return { ...p, allImages: images, coverImageIndex: 0, features: { ...p.features, ...extractedFeatures } };
+      }));
+    } catch (error: any) {
+      console.error("Error loading images:", error);
+      toast.error(`Erro ao carregar imagens do produto ${productId}`);
+    } finally {
+      setLoadingImagesFor(prev => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+    }
+  }, [inventoryId]);
+
+  // ===== LOAD ML CATEGORY ATTRIBUTES =====
+  const loadCategoryAttributes = useCallback(async (productId: string, categoryId: string) => {
+    if (!categoryId || !categoryId.match(/^MLB\d+$/)) return;
+
+    setLoadingAttrsFor(prev => new Set(prev).add(productId));
+    try {
+      const url = `/api/trpc/ml.getCategoryAttributes?input=${encodeURIComponent(JSON.stringify({ categoryId }))}`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      const attrs = data?.result?.data || [];
+
+      setMappedProducts(prev => prev.map(p => {
+        if (p.id !== productId) return p;
+        return { ...p, mlCategoryAttributes: attrs };
+      }));
+    } catch (error: any) {
+      console.error("Error loading category attributes:", error);
+    } finally {
+      setLoadingAttrsFor(prev => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+    }
+  }, []);
+
+  // ===== CHANGE COVER IMAGE =====
+  const setCoverImage = useCallback((productId: string, imageIndex: number) => {
+    setMappedProducts(prev => prev.map(p =>
+      p.id === productId ? { ...p, coverImageIndex: imageIndex } : p
+    ));
+    toast.success("Foto de capa alterada!");
+  }, []);
+
+  // ===== TOGGLE EXPANDED =====
+  const toggleExpanded = useCallback((productId: string) => {
+    setExpandedProducts(prev => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+        // Auto-load images when expanding
+        const product = mappedProducts.find(p => p.id === productId);
+        if (product && !product.allImages) {
+          loadAllImages(productId);
+        }
+        // Auto-load ML category attributes when expanding
+        if (product && product.suggestedCategory?.id && !product.mlCategoryAttributes) {
+          loadCategoryAttributes(productId, product.suggestedCategory.id);
+        }
+      }
+      return next;
+    });
+  }, [mappedProducts, loadAllImages, loadCategoryAttributes]);
 
   const handleStartMapping = async () => {
     if (!selectedMarketplace) {
@@ -472,12 +700,19 @@ export default function ExportPage() {
 
     const mpCode = (selectedMarketplaceInfo as any)?.code?.toLowerCase() || "";
 
+    // Only export selected + mapped products
+    const productsToExport = mappedProducts.filter(p => p.selected !== false && p.status === "mapped");
+    if (productsToExport.length === 0) {
+      toast.error("Nenhum produto selecionado e mapeado para exportar.");
+      return;
+    }
+
     setStep("exporting");
     setExportProgress(0);
 
     const { jobId } = await createExportMutation.mutateAsync({
       marketplaceId: marketplace.id,
-      totalProducts: mappedProducts.length,
+      totalProducts: productsToExport.length,
       tagFilter: preSelectedTag || undefined,
     });
 
@@ -494,27 +729,8 @@ export default function ExportPage() {
     let successCount = 0;
     let errorCount = 0;
 
-    for (let i = 0; i < mappedProducts.length; i++) {
-      const product = mappedProducts[i];
-
-      if (product.status !== "mapped") {
-        await addLogMutation.mutateAsync({
-          jobId,
-          productId: product.id,
-          productName: product.name,
-          marketplaceId: marketplace.id,
-          status: "skipped",
-          errorMessage: product.status === "error" ? product.errorMessage : "Produto não mapeado",
-        });
-        setExportProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
-        await updateExportMutation.mutateAsync({
-          jobId,
-          processedProducts: i + 1,
-          successCount,
-          errorCount,
-        });
-        continue;
-      }
+    for (let i = 0; i < productsToExport.length; i++) {
+      const product = productsToExport[i];
 
       try {
         // Build features from suggested attributes
@@ -525,6 +741,19 @@ export default function ExportPage() {
               features[attr.attributeName] = attr.value;
             }
           }
+        }
+
+        // Build images array with cover image first
+        let images: string[] = [];
+        if (product.allImages && product.allImages.length > 0) {
+          const coverIdx = product.coverImageIndex || 0;
+          // Put cover image first, then rest in order
+          images = [product.allImages[coverIdx]];
+          for (let j = 0; j < product.allImages.length; j++) {
+            if (j !== coverIdx) images.push(product.allImages[j]);
+          }
+        } else if (product.imageUrl) {
+          images = [product.imageUrl];
         }
 
         if (mpCode === "mercadolivre") {
@@ -539,9 +768,10 @@ export default function ExportPage() {
             ean: product.ean || undefined,
             sku: product.sku || undefined,
             brand: features["Marca"] || features["brand"] || undefined,
-            images: product.imageUrl ? [product.imageUrl] : undefined,
+            images: images.length > 0 ? images : undefined,
             features,
             categoryId: product.suggestedCategory?.id || undefined,
+            listingType: product.listingType || batchListingType,
           });
 
           await addLogMutation.mutateAsync({
@@ -563,8 +793,6 @@ export default function ExportPage() {
           }
         } else if (mpCode === "tiktok") {
           // ===== TIKTOK SHOP API (placeholder) =====
-          // TikTok createProduct requires shopCipher and specific product format
-          // For now, log as error with message to use TikTok publish page
           errorCount++;
           await addLogMutation.mutateAsync({
             jobId,
@@ -600,7 +828,7 @@ export default function ExportPage() {
         toast.error(`Erro em "${product.name.substring(0, 30)}...": ${error.message}`, { duration: 3000 });
       }
 
-      setExportProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
+      setExportProgress(Math.round(((i + 1) / productsToExport.length) * 100));
       await updateExportMutation.mutateAsync({
         jobId,
         processedProducts: i + 1,
@@ -609,14 +837,14 @@ export default function ExportPage() {
       });
 
       // Small delay between API calls to avoid rate limiting
-      if (i < mappedProducts.length - 1) {
+      if (i < productsToExport.length - 1) {
         await new Promise(r => setTimeout(r, 500));
       }
     }
 
     await updateExportMutation.mutateAsync({
       jobId,
-      status: errorCount === mappedProducts.length ? "failed" : "completed",
+      status: errorCount === productsToExport.length ? "failed" : "completed",
     });
 
     setStep("done");
@@ -637,6 +865,386 @@ export default function ExportPage() {
   const getMarketplaceDisplayName = () => {
     if (!selectedMarketplaceInfo) return "Marketplace";
     return (selectedMarketplaceInfo as any).name || "Marketplace";
+  };
+
+  // ===== RENDER PRODUCT CARD (REVIEW STEP) =====
+  const renderProductCard = (product: MappedProduct, index: number) => {
+    const isExpanded = expandedProducts.has(product.id);
+    const isEditing = editingProduct === product.id;
+    const isLoadingImages = loadingImagesFor.has(product.id);
+    const isLoadingAttrs = loadingAttrsFor.has(product.id);
+    const coverIdx = product.coverImageIndex || 0;
+    const displayImage = product.allImages?.[coverIdx] || product.imageUrl;
+    const imageCount = product.allImages?.length || (product.imageUrl ? 1 : 0);
+    const listingTypeInfo = LISTING_TYPE_OPTIONS.find(o => o.value === (product.listingType || batchListingType));
+
+    return (
+      <Card key={product.id} className={`overflow-hidden transition-all ${
+        product.status === "error" ? "border-destructive/50" :
+        product.status === "mapped" ? "border-green-200" : "border-amber-200"
+      } ${!product.selected ? "opacity-60" : ""}`}>
+        <CardContent className="p-0">
+          {/* Header row with checkbox, image, title, and quick actions */}
+          <div className="flex items-start gap-3 p-4 pb-3">
+            {/* Checkbox */}
+            <div className="pt-1 shrink-0">
+              <Checkbox
+                checked={product.selected !== false}
+                onCheckedChange={() => toggleSelectProduct(product.id)}
+              />
+            </div>
+
+            {/* Cover image with gallery indicator */}
+            <div className="relative shrink-0 group">
+              {displayImage ? (
+                <img
+                  src={displayImage}
+                  alt={product.name}
+                  className="h-20 w-20 rounded-lg object-cover border shadow-sm cursor-pointer transition-transform hover:scale-105"
+                  onClick={() => toggleExpanded(product.id)}
+                />
+              ) : (
+                <div
+                  className="h-20 w-20 rounded-lg bg-muted flex items-center justify-center border cursor-pointer"
+                  onClick={() => toggleExpanded(product.id)}
+                >
+                  <Package className="h-6 w-6 text-muted-foreground" />
+                </div>
+              )}
+              {/* Image count badge */}
+              {imageCount > 0 && (
+                <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                  <ImageIcon className="h-2.5 w-2.5" />
+                  {product.allImages ? product.allImages.length : "?"}
+                </div>
+              )}
+              {/* Status indicator */}
+              <div className="absolute -top-1 -left-1">
+                {product.status === "mapped" && <CheckCircle className="h-4 w-4 text-green-500 bg-white rounded-full" />}
+                {product.status === "error" && <XCircle className="h-4 w-4 text-destructive bg-white rounded-full" />}
+                {product.status === "pending" && <AlertCircle className="h-4 w-4 text-amber-500 bg-white rounded-full" />}
+              </div>
+            </div>
+
+            {/* Main content */}
+            <div className="flex-1 min-w-0 space-y-1.5">
+              {/* Title section */}
+              <div>
+                {isEditing ? (
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">Título para o anúncio:</Label>
+                    <Input
+                      className="h-8 text-sm font-medium"
+                      value={product.optimizedTitle || product.name}
+                      onChange={(e) => {
+                        setMappedProducts(prev => prev.map(p =>
+                          p.id === product.id ? { ...p, optimizedTitle: e.target.value } : p
+                        ));
+                      }}
+                      maxLength={60}
+                    />
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] text-muted-foreground">
+                        {(product.optimizedTitle || product.name).length}/60 caracteres
+                      </p>
+                      {product.titleReasoning && (
+                        <p className="text-[10px] text-blue-600 flex items-center gap-0.5">
+                          <Sparkles className="h-2.5 w-2.5" />
+                          {product.titleReasoning}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground line-through truncate">Original: {product.name}</p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-sm font-semibold text-primary truncate" title={product.optimizedTitle || product.name}>
+                      {product.optimizedTitle || product.name}
+                    </p>
+                    {product.optimizedTitle && product.optimizedTitle !== product.name && (
+                      <p className="text-[10px] text-muted-foreground line-through truncate">
+                        {product.name}
+                      </p>
+                    )}
+                    {product.titleReasoning && (
+                      <p className="text-[10px] text-blue-600 flex items-center gap-0.5 mt-0.5">
+                        <Sparkles className="h-2.5 w-2.5" />
+                        {product.titleReasoning}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Info row */}
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                <span>ID: <strong className="text-foreground">{product.id}</strong></span>
+                {product.sku && <span>SKU: <strong className="text-foreground">{product.sku}</strong></span>}
+                {product.ean && <span>EAN: <strong className="text-foreground">{product.ean}</strong></span>}
+                {product.mainPrice != null && product.mainPrice > 0 && (
+                  <span>Preço: <strong className="text-foreground">R$ {product.mainPrice.toFixed(2)}</strong></span>
+                )}
+                {product.totalStock != null && (
+                  <span>Estoque: <strong className="text-foreground">{product.totalStock}</strong></span>
+                )}
+              </div>
+
+              {/* Category + Listing Type row */}
+              <div className="flex flex-wrap items-center gap-2">
+                {product.suggestedCategory && (
+                  <Badge variant={product.suggestedCategory.confidence >= 80 ? "default" : "secondary"} className="text-[10px] h-5">
+                    {product.suggestedCategory.confidence}% &bull; {product.suggestedCategory.name}
+                  </Badge>
+                )}
+                {listingTypeInfo && (
+                  <Badge variant="outline" className={`text-[10px] h-5 gap-1 ${listingTypeInfo.color}`}>
+                    {listingTypeInfo.icon}
+                    {listingTypeInfo.label}
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            {/* Right side actions */}
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setEditingProduct(isEditing ? null : product.id)}
+                >
+                  {isEditing ? <><Save className="h-3 w-3 mr-1" />Salvar</> : <><Edit3 className="h-3 w-3 mr-1" />Editar</>}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => toggleExpanded(product.id)}
+                >
+                  {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+              </div>
+              {/* Individual listing type selector */}
+              <Select
+                value={product.listingType || batchListingType}
+                onValueChange={(val) => {
+                  setMappedProducts(prev => prev.map(p =>
+                    p.id === product.id ? { ...p, listingType: val as ListingType } : p
+                  ));
+                }}
+              >
+                <SelectTrigger className="h-6 text-[10px] w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LISTING_TYPE_OPTIONS.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                      <span className={`flex items-center gap-1 ${opt.color}`}>
+                        {opt.icon} {opt.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Error message */}
+          {product.status === "error" && product.errorMessage && (
+            <div className="mx-4 mb-3 p-2 rounded bg-destructive/10 border border-destructive/20">
+              <p className="text-xs text-destructive">{product.errorMessage}</p>
+            </div>
+          )}
+
+          {/* Expanded section: Gallery + Attributes */}
+          {isExpanded && (
+            <div className="border-t bg-muted/30">
+              <div className="p-4 space-y-4">
+                {/* Image Gallery */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      Galeria de Fotos
+                      {product.allImages && <span className="text-muted-foreground font-normal">({product.allImages.length} fotos)</span>}
+                    </Label>
+                    {!product.allImages && !isLoadingImages && (
+                      <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => loadAllImages(product.id)}>
+                        <ImagePlus className="h-3 w-3 mr-1" />
+                        Carregar fotos
+                      </Button>
+                    )}
+                  </div>
+
+                  {isLoadingImages ? (
+                    <div className="flex gap-2">
+                      {[1,2,3,4].map(i => <Skeleton key={i} className="h-20 w-20 rounded-lg" />)}
+                    </div>
+                  ) : product.allImages && product.allImages.length > 0 ? (
+                    <div className="flex gap-2 flex-wrap">
+                      {product.allImages.map((img, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setCoverImage(product.id, idx)}
+                          className={`relative h-20 w-20 rounded-lg overflow-hidden border-2 transition-all hover:scale-105 ${
+                            idx === (product.coverImageIndex || 0)
+                              ? "border-primary ring-2 ring-primary/30 shadow-md"
+                              : "border-border hover:border-primary/40"
+                          }`}
+                        >
+                          <img src={img} alt={`Foto ${idx + 1}`} className="h-full w-full object-cover" />
+                          {idx === (product.coverImageIndex || 0) && (
+                            <div className="absolute top-0.5 left-0.5 bg-primary text-primary-foreground text-[8px] px-1 py-0.5 rounded font-bold">
+                              CAPA
+                            </div>
+                          )}
+                          <div className="absolute bottom-0.5 right-0.5 bg-black/60 text-white text-[8px] px-1 rounded">
+                            {idx + 1}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">Nenhuma foto disponível</p>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Attributes section */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <Settings2 className="h-3.5 w-3.5" />
+                      Atributos do Produto
+                    </Label>
+                    {product.suggestedCategory?.id && !product.mlCategoryAttributes && !isLoadingAttrs && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-[10px]"
+                        onClick={() => loadCategoryAttributes(product.id, product.suggestedCategory!.id)}
+                      >
+                        Buscar atributos ML
+                      </Button>
+                    )}
+                  </div>
+
+                  {isLoadingAttrs ? (
+                    <div className="space-y-2">
+                      {[1,2,3].map(i => <Skeleton key={i} className="h-6 w-full rounded" />)}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {/* Required attributes */}
+                      {(() => {
+                        const requiredAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required !== false);
+                        if (requiredAttrs.length === 0) return null;
+                        return (
+                          <div className="space-y-1.5">
+                            <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide">Obrigatórios</p>
+                            {requiredAttrs.map((attr: any) => {
+                              const origIdx = (product.suggestedAttributes || []).indexOf(attr);
+                              return isEditing ? (
+                                <div key={origIdx} className="flex items-center gap-1.5">
+                                  <span className="text-[11px] font-medium text-red-600 w-20 shrink-0 truncate" title={attr.attributeName}>
+                                    {attr.attributeName}*
+                                  </span>
+                                  <Input
+                                    className="h-6 text-xs border-red-200 focus:border-red-400"
+                                    value={attr.value}
+                                    onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
+                                  />
+                                </div>
+                              ) : (
+                                <p key={origIdx} className="text-xs">
+                                  <span className="text-red-600 font-medium">{attr.attributeName}*:</span>{" "}
+                                  {attr.value || <span className="text-red-400 italic">vazio</span>}
+                                </p>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Optional attributes */}
+                      {(() => {
+                        const optionalAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required === false);
+                        if (optionalAttrs.length === 0) return null;
+                        return (
+                          <div className="space-y-1.5">
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Opcionais</p>
+                            {(isEditing ? optionalAttrs : optionalAttrs.slice(0, 6)).map((attr: any) => {
+                              const origIdx = (product.suggestedAttributes || []).indexOf(attr);
+                              return isEditing ? (
+                                <div key={origIdx} className="flex items-center gap-1.5">
+                                  <span className="text-[11px] text-muted-foreground w-20 shrink-0 truncate" title={attr.attributeName}>
+                                    {attr.attributeName}
+                                  </span>
+                                  <Input
+                                    className="h-6 text-xs"
+                                    value={attr.value}
+                                    onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
+                                  />
+                                </div>
+                              ) : (
+                                <p key={origIdx} className="text-xs">
+                                  <span className="text-muted-foreground">{attr.attributeName}:</span> {attr.value || "—"}
+                                </p>
+                              );
+                            })}
+                            {!isEditing && optionalAttrs.length > 6 && (
+                              <p className="text-[10px] text-muted-foreground">+{optionalAttrs.length - 6} mais</p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* ML Category Attributes (from API) */}
+                  {product.mlCategoryAttributes && product.mlCategoryAttributes.length > 0 && (
+                    <Collapsible className="mt-3">
+                      <CollapsibleTrigger className="flex items-center gap-1.5 text-[11px] text-blue-600 hover:text-blue-800 font-medium">
+                        <ChevronDown className="h-3 w-3" />
+                        Atributos da categoria ML ({product.mlCategoryAttributes.filter(a => a.required).length} obrigatórios, {product.mlCategoryAttributes.filter(a => !a.required).length} opcionais)
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-2">
+                        <div className="bg-blue-50/50 rounded-lg p-3 border border-blue-100">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                            {product.mlCategoryAttributes
+                              .filter(a => a.required)
+                              .slice(0, 20)
+                              .map((attr, idx) => (
+                                <div key={idx} className="flex items-center gap-1">
+                                  <span className="text-red-600 font-medium truncate flex-1" title={attr.name}>
+                                    {attr.name}*
+                                  </span>
+                                  {attr.values.length > 0 && (
+                                    <Badge variant="outline" className="text-[8px] h-4 shrink-0">
+                                      {attr.values.length} opções
+                                    </Badge>
+                                  )}
+                                </div>
+                              ))}
+                          </div>
+                          {product.mlCategoryAttributes.filter(a => a.required).length > 20 && (
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              +{product.mlCategoryAttributes.filter(a => a.required).length - 20} mais atributos obrigatórios
+                            </p>
+                          )}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
   };
 
   return (
@@ -883,9 +1491,9 @@ export default function ExportPage() {
                         </Badge>
                       )}
                     </label>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="h-7 text-xs"
                       onClick={() => {
                         refetchMlAccounts();
@@ -1074,6 +1682,7 @@ export default function ExportPage() {
       {/* Step: Review */}
       {step === "review" && (
         <div className="space-y-4">
+          {/* Top bar: Back + Stats + Publish */}
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-3">
               <Button variant="outline" size="sm" onClick={() => setStep("select")}>
@@ -1083,208 +1692,148 @@ export default function ExportPage() {
               <Badge variant="secondary">
                 {mappedProducts.filter((p) => p.status === "mapped").length} mapeado(s)
               </Badge>
-              <Badge variant="destructive">
-                {mappedProducts.filter((p) => p.status === "error").length} erro(s)
-              </Badge>
+              {mappedProducts.filter((p) => p.status === "error").length > 0 && (
+                <Badge variant="destructive">
+                  {mappedProducts.filter((p) => p.status === "error").length} erro(s)
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-2">
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-muted-foreground hidden sm:block">
                 Destino: <strong>{selectedAccountInfo?.name}</strong>
                 <Badge variant="default" className="ml-2 text-[10px] bg-green-600">
                   API Direta {getMarketplaceDisplayName()}
                 </Badge>
               </div>
-              <Button onClick={handleExport}>
+              <Button onClick={handleExport} disabled={selectedProducts.filter(p => p.status === "mapped").length === 0}>
                 <Upload className="mr-2 h-4 w-4" />
-                Publicar no {getMarketplaceDisplayName()}
+                Publicar {selectedProducts.filter(p => p.status === "mapped").length} no {getMarketplaceDisplayName()}
               </Button>
             </div>
           </div>
 
-          {/* Product review cards */}
-          <div className="space-y-4">
-            {mappedProducts.map((product) => (
-              <Card key={product.id} className={`overflow-hidden ${
-                product.status === "error" ? "border-destructive/50" : 
-                product.status === "mapped" ? "border-green-200" : "border-amber-200"
-              }`}>
-                <CardContent className="p-4">
-                  <div className="flex gap-4">
-                    {/* Product image */}
-                    <div className="shrink-0">
-                      {product.imageUrl ? (
-                        <img 
-                          src={product.imageUrl} 
-                          alt={product.name} 
-                          className="h-24 w-24 rounded-lg object-cover border shadow-sm" 
-                        />
-                      ) : (
-                        <div className="h-24 w-24 rounded-lg bg-muted flex items-center justify-center border">
-                          <Package className="h-8 w-8 text-muted-foreground" />
-                        </div>
-                      )}
-                      <div className="flex items-center gap-1 mt-1">
-                        {product.status === "mapped" && <CheckCircle className="h-3 w-3 text-green-500" />}
-                        {product.status === "error" && <XCircle className="h-3 w-3 text-destructive" />}
-                        {product.status === "pending" && <AlertCircle className="h-3 w-3 text-amber-500" />}
-                        <span className="text-[10px] text-muted-foreground">
-                          {product.status === "mapped" ? "Mapeado" : product.status === "error" ? "Erro" : "Pendente"}
-                        </span>
-                      </div>
+          {/* ===== BATCH ACTIONS BAR ===== */}
+          <Card className="bg-muted/30 border-dashed">
+            <CardContent className="p-4">
+              <div className="flex flex-col gap-4">
+                {/* Row 1: Select All + Listing Type */}
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* Select all */}
+                  <button
+                    onClick={toggleSelectAll}
+                    className="flex items-center gap-2 text-sm font-medium hover:text-primary transition-colors"
+                  >
+                    {allSelected ? (
+                      <SquareCheck className="h-4 w-4 text-primary" />
+                    ) : someSelected ? (
+                      <div className="h-4 w-4 border-2 border-primary rounded-[3px] bg-primary/20" />
+                    ) : (
+                      <Square className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    {allSelected ? "Desmarcar todos" : "Selecionar todos"}
+                    <Badge variant="outline" className="text-[10px] h-5">
+                      {selectedProducts.length}/{mappedProducts.length}
+                    </Badge>
+                  </button>
+
+                  <Separator orientation="vertical" className="h-6" />
+
+                  {/* Batch listing type */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-medium flex items-center gap-1 whitespace-nowrap">
+                      <Crown className="h-3.5 w-3.5" />
+                      Tipo de Anúncio:
+                    </Label>
+                    <div className="flex gap-1">
+                      {LISTING_TYPE_OPTIONS.map(opt => (
+                        <Button
+                          key={opt.value}
+                          variant={batchListingType === opt.value ? "default" : "outline"}
+                          size="sm"
+                          className={`h-7 text-[11px] gap-1 ${batchListingType !== opt.value ? opt.color : ""}`}
+                          onClick={() => applyBatchListingType(opt.value)}
+                        >
+                          {opt.icon}
+                          {opt.label}
+                        </Button>
+                      ))}
                     </div>
-
-                    {/* Product details */}
-                    <div className="flex-1 min-w-0 space-y-2">
-                      {/* Title section */}
-                      <div>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs text-muted-foreground">Nome original:</p>
-                            <p className="text-sm text-muted-foreground line-through truncate">{product.name}</p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="shrink-0"
-                            onClick={() => setEditingProduct(editingProduct === product.id ? null : product.id)}
-                          >
-                            {editingProduct === product.id ? (
-                              <><Save className="h-3 w-3 mr-1" /> Salvar</>
-                            ) : (
-                              <><Edit3 className="h-3 w-3 mr-1" /> Editar</>
-                            )}
-                          </Button>
-                        </div>
-                        {editingProduct === product.id ? (
-                          <div className="mt-1">
-                            <p className="text-xs text-muted-foreground mb-0.5">Título otimizado (IA):</p>
-                            <Input
-                              className="h-8 text-sm font-medium"
-                              value={product.optimizedTitle || product.name}
-                              onChange={(e) => {
-                                setMappedProducts(prev => prev.map(p => 
-                                  p.id === product.id ? { ...p, optimizedTitle: e.target.value } : p
-                                ));
-                              }}
-                            />
-                            {product.titleReasoning && (
-                              <p className="text-[10px] text-blue-600 mt-0.5 flex items-center gap-1">
-                                <Sparkles className="h-2.5 w-2.5" />
-                                {product.titleReasoning}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="mt-1">
-                            <p className="text-xs text-muted-foreground">Título para o anúncio:</p>
-                            <p className="text-sm font-semibold text-primary">
-                              {product.optimizedTitle || product.name}
-                            </p>
-                            {product.titleReasoning && (
-                              <p className="text-[10px] text-blue-600 mt-0.5 flex items-center gap-1">
-                                <Sparkles className="h-2.5 w-2.5" />
-                                {product.titleReasoning}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Info row: ID, SKU, EAN, Price, Stock */}
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <span>ID: <strong>{product.id}</strong></span>
-                        {product.sku && <span>SKU: <strong>{product.sku}</strong></span>}
-                        {product.ean && <span>EAN: <strong>{product.ean}</strong></span>}
-                        {product.mainPrice && <span>Preço: <strong className="text-foreground">R$ {product.mainPrice.toFixed(2)}</strong></span>}
-                        {product.totalStock != null && <span>Estoque: <strong className="text-foreground">{product.totalStock}</strong></span>}
-                      </div>
-
-                      {/* Category */}
-                      {product.suggestedCategory && (
-                        <div className="flex items-center gap-2">
-                          <Badge variant={product.suggestedCategory.confidence >= 80 ? "default" : "secondary"} className="text-[10px]">
-                            {product.suggestedCategory.confidence}%
-                          </Badge>
-                          <span className="text-xs">
-                            {product.suggestedCategory.path || product.suggestedCategory.name}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Attributes */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {/* Required attributes */}
-                        {(() => {
-                          const requiredAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required !== false);
-                          if (requiredAttrs.length === 0) return null;
-                          return (
-                            <div className="space-y-1">
-                              <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide">Obrigatórios</p>
-                              {requiredAttrs.map((attr: any) => {
-                                const origIdx = (product.suggestedAttributes || []).indexOf(attr);
-                                return editingProduct === product.id ? (
-                                  <div key={origIdx} className="flex items-center gap-1">
-                                    <span className="text-xs font-medium text-red-600 w-16 shrink-0 truncate">{attr.attributeName}*</span>
-                                    <Input
-                                      className="h-6 text-xs border-red-200 focus:border-red-400"
-                                      value={attr.value}
-                                      onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
-                                    />
-                                  </div>
-                                ) : (
-                                  <p key={origIdx} className="text-xs">
-                                    <span className="text-red-600 font-medium">{attr.attributeName}*:</span>{" "}
-                                    {attr.value || <span className="text-red-400 italic">vazio</span>}
-                                  </p>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                        {/* Optional attributes */}
-                        {(() => {
-                          const optionalAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required === false);
-                          if (optionalAttrs.length === 0) return null;
-                          return (
-                            <div className="space-y-1">
-                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Opcionais</p>
-                              {(editingProduct === product.id ? optionalAttrs : optionalAttrs.slice(0, 4)).map((attr: any) => {
-                                const origIdx = (product.suggestedAttributes || []).indexOf(attr);
-                                return editingProduct === product.id ? (
-                                  <div key={origIdx} className="flex items-center gap-1">
-                                    <span className="text-xs text-muted-foreground w-16 shrink-0 truncate">{attr.attributeName}</span>
-                                    <Input
-                                      className="h-6 text-xs"
-                                      value={attr.value}
-                                      onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
-                                    />
-                                  </div>
-                                ) : (
-                                  <p key={origIdx} className="text-xs">
-                                    <span className="text-muted-foreground">{attr.attributeName}:</span> {attr.value || "—"}
-                                  </p>
-                                );
-                              })}
-                              {editingProduct !== product.id && optionalAttrs.length > 4 && (
-                                <p className="text-[10px] text-muted-foreground">+{optionalAttrs.length - 4} mais</p>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Error message */}
-                      {product.status === "error" && product.errorMessage && (
-                        <div className="p-2 rounded bg-destructive/10 border border-destructive/20">
-                          <p className="text-xs text-destructive">{product.errorMessage}</p>
-                        </div>
-                      )}
-                    </div>
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        <p className="text-xs">Aplica o tipo de anúncio para todos os produtos selecionados. Você pode alterar individualmente em cada card.</p>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                </div>
+
+                {/* Row 2: Title Generation */}
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-medium flex items-center gap-1 whitespace-nowrap">
+                      <Type className="h-3.5 w-3.5" />
+                      Gerar Títulos:
+                    </Label>
+                    <Select value={batchTitleStyle} onValueChange={setBatchTitleStyle}>
+                      <SelectTrigger className="h-7 text-[11px] w-36">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TITLE_STYLE_OPTIONS.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                            <div>
+                              <span className="font-medium">{opt.label}</span>
+                              <span className="text-muted-foreground ml-1">— {opt.description}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {batchTitleStyle === "custom" && (
+                    <Input
+                      className="h-7 text-xs flex-1 min-w-[200px]"
+                      placeholder="Ex: Incluir marca e modelo, máximo 60 caracteres..."
+                      value={customTitleInstruction}
+                      onChange={(e) => setCustomTitleInstruction(e.target.value)}
+                    />
+                  )}
+
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1"
+                    onClick={handleBatchGenerateTitles}
+                    disabled={isGeneratingTitles || selectedProducts.filter(p => p.status === "mapped").length === 0}
+                  >
+                    {isGeneratingTitles ? (
+                      <><Loader2 className="h-3 w-3 animate-spin" />Gerando...</>
+                    ) : (
+                      <><Wand2 className="h-3 w-3" />Gerar para {selectedProducts.filter(p => p.status === "mapped").length} selecionados</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Product review cards */}
+          <div className="space-y-3">
+            {mappedProducts.map((product, index) => renderProductCard(product, index))}
           </div>
+
+          {/* Bottom publish button */}
+          {mappedProducts.length > 5 && (
+            <div className="flex justify-end">
+              <Button onClick={handleExport} disabled={selectedProducts.filter(p => p.status === "mapped").length === 0} size="lg">
+                <Upload className="mr-2 h-4 w-4" />
+                Publicar {selectedProducts.filter(p => p.status === "mapped").length} no {getMarketplaceDisplayName()}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1306,7 +1855,7 @@ export default function ExportPage() {
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>{exportProgress}% concluído</span>
               <span>
-                {Math.round((exportProgress / 100) * mappedProducts.length)} de {mappedProducts.length} produtos
+                {Math.round((exportProgress / 100) * mappedProducts.filter(p => p.selected !== false && p.status === "mapped").length)} de {mappedProducts.filter(p => p.selected !== false && p.status === "mapped").length} produtos
               </span>
             </div>
           </CardContent>
@@ -1326,7 +1875,7 @@ export default function ExportPage() {
             </p>
             <div className="flex items-center gap-4">
               <Badge variant="default" className="text-sm">
-                {mappedProducts.filter((p) => p.status === "mapped").length} publicado(s)
+                {mappedProducts.filter((p) => p.status === "mapped" && p.selected !== false).length} publicado(s)
               </Badge>
               <Badge variant="destructive" className="text-sm">
                 {mappedProducts.filter((p) => p.status === "error").length} erro(s)

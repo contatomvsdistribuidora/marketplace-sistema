@@ -310,7 +310,9 @@ export async function generateOptimizedTitle(
     category: string;
     ean?: string;
   },
-  marketplace: string
+  marketplace: string,
+  style: "seo" | "descriptive" | "short" | "custom" = "seo",
+  customInstruction?: string
 ): Promise<{ title: string; reasoning: string }> {
   const featuresText = Object.entries(product.features || {})
     .map(([k, v]) => `${k}: ${v}`)
@@ -321,14 +323,31 @@ export async function generateOptimizedTitle(
       {
         role: "system",
         content: `Você é um especialista em SEO para marketplaces brasileiros, especialmente ${marketplace}.
-Crie um título otimizado para o anúncio do produto seguindo estas regras:
-- Máximo 60 caracteres para Mercado Livre
-- Inclua marca, modelo e características principais
+Crie um título otimizado para o anúncio do produto.
+
+${style === "seo" ? `ESTILO: SEO Otimizado
+- Máximo 60 caracteres
+- Priorize palavras-chave de busca populares
+- Formato: Marca + Tipo Produto + Modelo + Característica diferencial
+- Foque em termos que compradores usam para buscar` 
+: style === "descriptive" ? `ESTILO: Descritivo Completo
+- Máximo 60 caracteres
+- Inclua o máximo de informações relevantes
+- Formato: Marca + Produto + Modelo + Cor/Tamanho + Material
+- Seja detalhado mas conciso`
+: style === "short" ? `ESTILO: Curto e Direto
+- Máximo 40 caracteres
+- Apenas o essencial: tipo de produto + marca + diferencial principal
+- Simples e fácil de ler`
+: `ESTILO: Personalizado
+Instrução do usuário: ${customInstruction || "Criar título otimizado"}
+- Máximo 60 caracteres
+- Siga a instrução do usuário para o estilo do título`}
+
+Regras gerais:
 - NÃO use caixa alta completa (ALL CAPS)
 - NÃO use caracteres especiais desnecessários
-- Use palavras-chave relevantes para busca
 - O título deve ser DIFERENTE do original mas descrever o mesmo produto
-- Priorize: Marca + Produto + Modelo + Característica principal
 Responda APENAS em JSON válido.`,
       },
       {

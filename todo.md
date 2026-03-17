@@ -129,7 +129,21 @@
 - [x] Atualizar publishProduct para usar formato correto do modelo User Products (isUserProduct flag + sale_terms padrão)
 - [x] Melhorar listagem de produtos: exibir fotos/galeria, todos os dados do produto, link para descrição
 - [x] Geração de título otimizado por IA no mapeamento (diferente do original, otimizado para ML/SEO)
-- [ ] Troca de foto de capa: permitir escolher qual foto será a principal do anúncio
+- [x] Troca de foto de capa: permitir escolher qual foto será a principal do anúncio - IMPLEMENTADO: galeria com seleção de capa no Review step
 - [x] Pesquisar e integrar IA de geração de fotos do Mercado Livre (se disponível via API) - NÃO tem API pública, só no painel do vendedor
 - [x] Exibir dados completos do produto na etapa de seleção/mapeamento (EAN, SKU, peso, dimensões, marca, etc.)
 - [x] BUG: Modal de detalhes do produto desconfigurado - corrigido: modal expandido para max-w-5xl, layout responsivo com flex-col/row, ScrollArea, tabela de características, info fields com background
+- [x] PESQUISA: Verificar viabilidade via API ML - tipo de anúncio (clássico/premium/grátis) - IMPLEMENTADO: listingType (gold_pro/gold_special/free) aceito pelo publishProduct
+- [ ] PESQUISA: Verificar viabilidade via API ML - sugestão de características (principais e secundárias)
+- [ ] PESQUISA: Verificar viabilidade via API ML - geração de fotos com IA
+- [x] PESQUISA: Verificar viabilidade via API ML - troca de foto de capa (reordenar imagens) - IMPLEMENTADO: galeria de fotos com seleção de capa, reordena array de imagens no publish
+- [ ] PESQUISA: Verificar viabilidade via API ML - descrição do produto
+- [x] Melhorar fluxo de exportação: seleção manual de quais produtos trocar título (não automático) - IMPLEMENTADO: checkbox por produto + batch actions
+- [x] Opções de sugestão de título pela IA (variações para o usuário escolher) - IMPLEMENTADO: 4 estilos (SEO/Descritivo/Curto/Personalizado)
+- [x] Tipo de anúncio em lote: seletor no topo (Grátis/Clássico/Premium) aplica para todos os produtos
+- [x] Troca de foto de capa: galeria de fotos por produto com seleção de capa individual (capa vai como primeira imagem no publish)
+- [x] Troca de título com estilos: checkbox por produto, seletor de estilo (SEO/Descritivo/Curto/Personalizado), gera títulos em lote
+- [x] Atributos obrigatórios por categoria: buscar da API ML ao expandir card, exibe obrigatórios/opcionais separados
+- [x] Integrar listing_type_id no publishProduct - já aceita listingType no input schema
+- [x] Endpoint para buscar atributos obrigatórios de uma categoria ML - ml.getCategoryAttributes já existe
+- [ ] Endpoint para gerar foto de capa com IA
