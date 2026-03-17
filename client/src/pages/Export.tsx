@@ -237,6 +237,27 @@ export default function ExportPage() {
   const addLogMutation = trpc.exports.addLog.useMutation();
   const exportProductMutation = trpc.exports.exportProduct.useMutation();
   const enqueueAgentMutation = trpc.agent.enqueue.useMutation();
+  const mlPublishMutation = trpc.ml.publishProduct.useMutation();
+
+  // Fetch ML accounts to check if direct ML publishing is available
+  const { data: mlAccounts } = trpc.ml.accounts.useQuery();
+  const activeMlAccounts = useMemo(
+    () => (mlAccounts || []).filter((a: any) => a.isActive),
+    [mlAccounts]
+  );
+
+  // Check if the selected integration is Mercado Livre and we have a connected ML account
+  const isMlDirectExport = useMemo(() => {
+    if (!selectedAccountInfo) return false;
+    const code = selectedAccountInfo.integrationCode.toLowerCase();
+    return (code === "melibr" || code === "mercadolivre" || code.includes("meli")) && activeMlAccounts.length > 0;
+  }, [selectedAccountInfo, activeMlAccounts]);
+
+  // Auto-select the first active ML account for direct export
+  const mlAccountForDirectExport = useMemo(() => {
+    if (!isMlDirectExport || activeMlAccounts.length === 0) return null;
+    return activeMlAccounts[0];
+  }, [isMlDirectExport, activeMlAccounts]);
 
   // Check if this is a re-export to the same marketplace type (can skip AI mapping)
   const canSkipMapping = useMemo(() => {
@@ -460,11 +481,12 @@ export default function ExportPage() {
     if (!marketplace || !selectedAccountInfo || !inventoryId) return;
 
     // Parse marketplace type and account ID from the selected account
-    // selectedAccount format: "marketplaceType:marketplaceType_accountId"
     const mktType = selectedAccountInfo.integrationCode; // e.g. "melibr"
     const rawAccountId = selectedAccountInfo.accountId; // e.g. "melibr_16544"
-    // Extract just the numeric account ID
     const numericAccountId = rawAccountId.includes("_") ? rawAccountId.split("_").pop()! : rawAccountId;
+
+    // Check if we should use direct ML API export
+    const useDirectMlExport = isMlDirectExport && mlAccountForDirectExport;
 
     setStep("exporting");
     setExportProgress(0);
@@ -476,12 +498,16 @@ export default function ExportPage() {
     });
 
     if (!jobId) {
-      toast.error("Erro ao criar job de exporta\u00e7\u00e3o");
+      toast.error("Erro ao criar job de exportação");
       return;
     }
 
     setExportJobId(jobId);
     await updateExportMutation.mutateAsync({ jobId, status: "processing" });
+
+    if (useDirectMlExport) {
+      toast.info("Publicação direta via API do Mercado Livre ativada!", { duration: 3000 });
+    }
 
     let successCount = 0;
     let errorCount = 0;
@@ -490,14 +516,13 @@ export default function ExportPage() {
       const product = mappedProducts[i];
 
       if (product.status !== "mapped") {
-        // Skip unmapped products
         await addLogMutation.mutateAsync({
           jobId,
           productId: product.id,
           productName: product.name,
           marketplaceId: marketplace.id,
           status: "skipped",
-          errorMessage: product.status === "error" ? product.errorMessage : "Produto n\u00e3o mapeado",
+          errorMessage: product.status === "error" ? product.errorMessage : "Produto não mapeado",
         });
         setExportProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
         await updateExportMutation.mutateAsync({
@@ -520,30 +545,68 @@ export default function ExportPage() {
           }
         }
 
-        // REAL EXPORT: Call the API to update the product in BaseLinker
-        const result = await exportProductMutation.mutateAsync({
-          inventoryId,
-          productId: product.id,
-          name: product.name,
-          description: product.description,
-          features,
-          ean: product.ean || undefined,
-          sku: product.sku || undefined,
-          price: product.mainPrice || undefined,
-          stock: product.totalStock || undefined,
-          images: product.imageUrl ? { "0": product.imageUrl } : undefined,
-          marketplaceType: mktType,
-          accountId: numericAccountId,
-          jobId,
-          marketplaceId: marketplace.id,
-        });
+        if (useDirectMlExport) {
+          // ===== DIRECT ML API EXPORT =====
+          // Publish directly to Mercado Livre via API (no agent queue)
+          const mlResult = await mlPublishMutation.mutateAsync({
+            accountId: mlAccountForDirectExport!.id,
+            productId: product.id,
+            name: product.name,
+            description: product.description || undefined,
+            price: product.mainPrice || 0,
+            stock: product.totalStock || 1,
+            ean: product.ean || undefined,
+            sku: product.sku || undefined,
+            brand: features["Marca"] || features["brand"] || undefined,
+            images: product.imageUrl ? [product.imageUrl] : undefined,
+            features,
+            categoryId: product.suggestedCategory?.id || undefined,
+          });
 
-        if (result.success) {
-          successCount++;
-          toast.success(`Produto "${product.name.substring(0, 30)}..." exportado!`, { duration: 2000 });
+          // Log the result
+          await addLogMutation.mutateAsync({
+            jobId,
+            productId: product.id,
+            productName: product.name,
+            marketplaceId: marketplace.id,
+            status: mlResult.success ? "success" : "error",
+            errorMessage: mlResult.error || undefined,
+          });
+
+          if (mlResult.success) {
+            successCount++;
+            const permalink = mlResult.permalink ? ` - ${mlResult.permalink}` : "";
+            toast.success(`"${product.name.substring(0, 30)}..." publicado no ML!${permalink}`, { duration: 4000 });
+          } else {
+            errorCount++;
+            toast.error(`Erro ML em "${product.name.substring(0, 30)}...": ${mlResult.error}`, { duration: 4000 });
+          }
         } else {
-          errorCount++;
-          toast.error(`Erro em "${product.name.substring(0, 30)}...": ${result.error}`, { duration: 3000 });
+          // ===== BASELINKER EXPORT (original flow) =====
+          const result = await exportProductMutation.mutateAsync({
+            inventoryId,
+            productId: product.id,
+            name: product.name,
+            description: product.description,
+            features,
+            ean: product.ean || undefined,
+            sku: product.sku || undefined,
+            price: product.mainPrice || undefined,
+            stock: product.totalStock || undefined,
+            images: product.imageUrl ? { "0": product.imageUrl } : undefined,
+            marketplaceType: mktType,
+            accountId: numericAccountId,
+            jobId,
+            marketplaceId: marketplace.id,
+          });
+
+          if (result.success) {
+            successCount++;
+            toast.success(`Produto "${product.name.substring(0, 30)}..." exportado!`, { duration: 2000 });
+          } else {
+            errorCount++;
+            toast.error(`Erro em "${product.name.substring(0, 30)}...": ${result.error}`, { duration: 3000 });
+          }
         }
       } catch (error: any) {
         errorCount++;
@@ -565,6 +628,11 @@ export default function ExportPage() {
         successCount,
         errorCount,
       });
+
+      // Small delay between ML API calls to avoid rate limiting
+      if (useDirectMlExport && i < mappedProducts.length - 1) {
+        await new Promise(r => setTimeout(r, 500));
+      }
     }
 
     await updateExportMutation.mutateAsync({
@@ -572,40 +640,46 @@ export default function ExportPage() {
       status: errorCount === mappedProducts.length ? "failed" : "completed",
     });
 
-    // Also enqueue products for the agent to list in the BaseLinker panel
-    try {
-      const productsForAgent = mappedProducts
-        .filter(p => p.status === "mapped")
-        .map(p => ({
-          productId: p.id,
-          productName: p.name,
-          sku: p.sku || undefined,
-          ean: p.ean || undefined,
-          price: p.mainPrice?.toString() || undefined,
-          stock: p.totalStock || 0,
-          imageUrl: p.imageUrl || undefined,
-          description: p.description || undefined,
-          mappedCategory: p.suggestedCategory?.name || undefined,
-          mappedAttributes: p.suggestedAttributes || undefined,
-        }));
+    // Only enqueue to agent if NOT using direct ML export
+    if (!useDirectMlExport) {
+      try {
+        const productsForAgent = mappedProducts
+          .filter(p => p.status === "mapped")
+          .map(p => ({
+            productId: p.id,
+            productName: p.name,
+            sku: p.sku || undefined,
+            ean: p.ean || undefined,
+            price: p.mainPrice?.toString() || undefined,
+            stock: p.totalStock || 0,
+            imageUrl: p.imageUrl || undefined,
+            description: p.description || undefined,
+            mappedCategory: p.suggestedCategory?.name || undefined,
+            mappedAttributes: p.suggestedAttributes || undefined,
+          }));
 
-      if (productsForAgent.length > 0) {
-        await enqueueAgentMutation.mutateAsync({
-          jobId,
-          products: productsForAgent,
-          marketplaceType: mktType,
-          accountId: rawAccountId,
-          accountName: selectedAccountInfo?.accountName || undefined,
-          inventoryId,
-        });
-        toast.info(`${productsForAgent.length} produtos adicionados \u00e0 fila do agente para listagem no marketplace.`);
+        if (productsForAgent.length > 0) {
+          await enqueueAgentMutation.mutateAsync({
+            jobId,
+            products: productsForAgent,
+            marketplaceType: mktType,
+            accountId: rawAccountId,
+            accountName: selectedAccountInfo?.accountName || undefined,
+            inventoryId,
+          });
+          toast.info(`${productsForAgent.length} produtos adicionados à fila do agente para listagem no marketplace.`);
+        }
+      } catch (agentError: any) {
+        console.error("Error enqueuing to agent:", agentError);
       }
-    } catch (agentError: any) {
-      console.error("Error enqueuing to agent:", agentError);
     }
 
     setStep("done");
-    toast.success(`Exporta\u00e7\u00e3o conclu\u00edda! ${successCount} produtos atualizados no BaseLinker, ${errorCount} erros.`);
+    if (useDirectMlExport) {
+      toast.success(`Exportação concluída! ${successCount} produtos publicados diretamente no Mercado Livre, ${errorCount} erros.`);
+    } else {
+      toast.success(`Exportação concluída! ${successCount} produtos atualizados no BaseLinker, ${errorCount} erros.`);
+    }
   };
 
   const updateProductAttribute = (productId: string, attrIndex: number, newValue: string) => {
@@ -935,6 +1009,16 @@ export default function ExportPage() {
                 </div>
               )}
 
+              {/* Info about direct ML export */}
+              {isMlDirectExport && mlAccountForDirectExport && (
+                <div className="p-3 rounded-lg bg-green-50 border border-green-200 flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-600 shrink-0" />
+                  <p className="text-xs text-green-700">
+                    <strong>Exportação direta via API do Mercado Livre ativada!</strong> Os produtos serão publicados diretamente no ML usando a conta <strong>{mlAccountForDirectExport.nickname}</strong>, sem passar pela fila do agente.
+                  </p>
+                </div>
+              )}
+
               {/* Info about re-export skip mapping */}
               {canSkipMapping && hasPreviousMappedData && (
                 <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 flex items-center gap-2">
@@ -1032,10 +1116,15 @@ export default function ExportPage() {
                 {selectedAccountInfo && (
                   <span className="ml-1">({selectedAccountInfo.integrationLabel})</span>
                 )}
+                {isMlDirectExport && mlAccountForDirectExport && (
+                  <Badge variant="default" className="ml-2 text-[10px] bg-green-600">
+                    API Direta ML ({mlAccountForDirectExport.nickname})
+                  </Badge>
+                )}
               </div>
               <Button onClick={handleExport}>
                 <Upload className="mr-2 h-4 w-4" />
-                Confirmar Exportação
+                {isMlDirectExport ? "Publicar Direto no ML" : "Confirmar Exporta\u00e7\u00e3o"}
               </Button>
             </div>
           </div>
