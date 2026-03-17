@@ -745,6 +745,7 @@ export default function ExportPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-12">#</TableHead>
+                        <TableHead className="w-14">Foto</TableHead>
                         <TableHead>Nome</TableHead>
                         <TableHead>SKU</TableHead>
                         <TableHead>EAN</TableHead>
@@ -756,6 +757,15 @@ export default function ExportPage() {
                       {mappedProducts.slice(0, 20).map((p, idx) => (
                         <TableRow key={p.id}>
                           <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
+                          <TableCell>
+                            {p.imageUrl ? (
+                              <img src={p.imageUrl} alt={p.name} className="h-10 w-10 rounded-md object-cover border" />
+                            ) : (
+                              <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center">
+                                <Package className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <p className="text-sm font-medium truncate max-w-[300px]">{p.name}</p>
                             <p className="text-xs text-muted-foreground">ID: {p.id}</p>
@@ -770,7 +780,7 @@ export default function ExportPage() {
                       ))}
                       {mappedProducts.length > 20 && (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-2">
+                          <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-2">
                             ... e mais {mappedProducts.length - 20} produto(s)
                           </TableCell>
                         </TableRow>
@@ -1017,6 +1027,13 @@ export default function ExportPage() {
             <div className="max-h-[400px] overflow-y-auto space-y-2">
               {mappedProducts.map((p) => (
                 <div key={p.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
+                  {p.imageUrl ? (
+                    <img src={p.imageUrl} alt={p.name} className="h-8 w-8 rounded object-cover border shrink-0" />
+                  ) : (
+                    <div className="h-8 w-8 rounded bg-muted-foreground/10 flex items-center justify-center shrink-0">
+                      <Package className="h-3 w-3 text-muted-foreground" />
+                    </div>
+                  )}
                   {p.status === "pending" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
                   {p.status === "mapped" && <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />}
                   {p.status === "error" && <XCircle className="h-4 w-4 text-destructive shrink-0" />}
@@ -1073,10 +1090,12 @@ export default function ExportPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Status</TableHead>
+                      <TableHead className="w-14">Foto</TableHead>
                       <TableHead>Produto</TableHead>
                       <TableHead>Categoria Sugerida</TableHead>
                       <TableHead>Confiança</TableHead>
-                      <TableHead>Atributos</TableHead>
+                      <TableHead>Atributos Obrigatórios</TableHead>
+                      <TableHead>Atributos Opcionais</TableHead>
                       <TableHead className="w-12">Editar</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1087,6 +1106,15 @@ export default function ExportPage() {
                           {product.status === "mapped" && <CheckCircle className="h-4 w-4 text-green-500" />}
                           {product.status === "error" && <XCircle className="h-4 w-4 text-destructive" />}
                           {product.status === "pending" && <AlertCircle className="h-4 w-4 text-amber-500" />}
+                        </TableCell>
+                        <TableCell>
+                          {product.imageUrl ? (
+                            <img src={product.imageUrl} alt={product.name} className="h-10 w-10 rounded-md object-cover border" />
+                          ) : (
+                            <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center">
+                              <Package className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="max-w-[200px]">
@@ -1114,38 +1142,74 @@ export default function ExportPage() {
                             </Badge>
                           )}
                         </TableCell>
+                        {/* Atributos Obrigatórios */}
                         <TableCell>
-                          {product.suggestedAttributes && product.suggestedAttributes.length > 0 ? (
-                            editingProduct === product.id ? (
+                          {(() => {
+                            const requiredAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required !== false);
+                            if (requiredAttrs.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                            return editingProduct === product.id ? (
                               <div className="space-y-1">
-                                {product.suggestedAttributes.map((attr, idx) => (
-                                  <div key={idx} className="flex items-center gap-1">
-                                    <span className="text-xs text-muted-foreground w-16 shrink-0">{attr.attributeName}:</span>
-                                    <Input
-                                      className="h-6 text-xs"
-                                      value={attr.value}
-                                      onChange={(e) => updateProductAttribute(product.id, idx, e.target.value)}
-                                    />
-                                  </div>
-                                ))}
+                                {requiredAttrs.map((attr: any) => {
+                                  const origIdx = (product.suggestedAttributes || []).indexOf(attr);
+                                  return (
+                                    <div key={origIdx} className="flex items-center gap-1">
+                                      <span className="text-xs font-medium text-red-600 w-20 shrink-0">{attr.attributeName}*</span>
+                                      <Input
+                                        className="h-6 text-xs border-red-200 focus:border-red-400"
+                                        value={attr.value}
+                                        onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
+                                      />
+                                    </div>
+                                  );
+                                })}
                               </div>
                             ) : (
                               <div className="space-y-0.5">
-                                {product.suggestedAttributes.slice(0, 3).map((attr, idx) => (
+                                {requiredAttrs.map((attr: any, idx: number) => (
                                   <p key={idx} className="text-xs">
-                                    <span className="text-muted-foreground">{attr.attributeName}:</span> {attr.value}
+                                    <span className="text-red-600 font-medium">{attr.attributeName}*:</span> {attr.value || <span className="text-red-400 italic">vazio</span>}
                                   </p>
                                 ))}
-                                {product.suggestedAttributes.length > 3 && (
+                              </div>
+                            );
+                          })()}
+                        </TableCell>
+                        {/* Atributos Opcionais */}
+                        <TableCell>
+                          {(() => {
+                            const optionalAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required === false);
+                            if (optionalAttrs.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                            return editingProduct === product.id ? (
+                              <div className="space-y-1">
+                                {optionalAttrs.map((attr: any) => {
+                                  const origIdx = (product.suggestedAttributes || []).indexOf(attr);
+                                  return (
+                                    <div key={origIdx} className="flex items-center gap-1">
+                                      <span className="text-xs text-muted-foreground w-20 shrink-0">{attr.attributeName}</span>
+                                      <Input
+                                        className="h-6 text-xs"
+                                        value={attr.value}
+                                        onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
+                                      />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="space-y-0.5">
+                                {optionalAttrs.slice(0, 3).map((attr: any, idx: number) => (
+                                  <p key={idx} className="text-xs">
+                                    <span className="text-muted-foreground">{attr.attributeName}:</span> {attr.value || "—"}
+                                  </p>
+                                ))}
+                                {optionalAttrs.length > 3 && (
                                   <p className="text-xs text-muted-foreground">
-                                    +{product.suggestedAttributes.length - 3} mais
+                                    +{optionalAttrs.length - 3} mais
                                   </p>
                                 )}
                               </div>
-                            )
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           {product.status === "mapped" && (

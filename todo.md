@@ -110,3 +110,6 @@
 - [x] Exportação para ML sempre via API direta do ML (sem BaseLinker)
 - [x] Quando marketplace não tem API direta conectada, mostrar aviso ao usuário
 - [x] BUG: Exportação ML falha com "Failed to get category info for MLB1..." - corrigido: não passar categoryId do mapeamento IA genérico, deixar domain_discovery do ML predizer a categoria correta
+- [x] Mostrar thumbnail/foto principal do produto em todas as listagens (seleção, mapeamento, review, logs)
+- [x] Exibir atributos obrigatórios vs opcionais na etapa de mapeamento IA (obrigatórios em destaque, opcionais colapsáveis)
+- [x] Permitir edição dos atributos mapeados antes de publicar
