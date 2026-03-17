@@ -1,0 +1,50 @@
+{
+  "query": "SELECT id, jobId, productName, status, errorMessage, errorDetails FROM export_logs ORDER BY id DESC LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, jobId, productName, status, errorMessage, errorDetails FROM export_logs ORDER BY id DESC LIMIT 5;",
+  "rows": [
+    {
+      "id": "30004",
+      "jobId": "30002",
+      "productName": "Super Banjipe Reclinável Com Capota Passeio E Pedal 586 Pink Pink",
+      "status": "error",
+      "errorMessage": "BaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.",
+      "errorDetails": "NULL"
+    },
+    {
+      "id": "30003",
+      "jobId": "30002",
+      "productName": "Carrinho De Passeio Reclinável Jipe Pedal Capota Infantil Preto",
+      "status": "error",
+      "errorMessage": "BaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.",
+      "errorDetails": "NULL"
+    },
+    {
+      "id": "30002",
+      "jobId": "30001",
+      "productName": "Triciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde",
+      "status": "error",
+      "errorMessage": "BaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.",
+      "errorDetails": "NULL"
+    },
+    {
+      "id": "30001",
+      "jobId": "30001",
+      "productName": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa",
+      "status": "error",
+      "errorMessage": "BaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.",
+      "errorDetails": "NULL"
+    },
+    {
+      "id": "250",
+      "jobId": "5",
+      "productName": "Saco De Lixo Anti Odor Branco C/ 30und+ Brinde 30l Reforçado",
+      "status": "success",
+      "errorMessage": "NULL",
+      "errorDetails": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tjobId\tproductName\tstatus\terrorMessage\terrorDetails\n30004\t30002\tSuper Banjipe Reclinável Com Capota Passeio E Pedal 586 Pink Pink\terror\tBaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.\tNULL\n30003\t30002\tCarrinho De Passeio Reclinável Jipe Pedal Capota Infantil Preto\terror\tBaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.\tNULL\n30002\t30001\tTriciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde\terror\tBaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.\tNULL\n30001\t30001\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa\terror\tBaseLinker API error: ERROR_INVALID_DATA - Tag with given name does not exists.\tNULL\n250\t5\tSaco De Lixo Anti Odor Branco C/ 30und+ Brinde 30l Reforçado\tsuccess\tNULL\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 366
+}

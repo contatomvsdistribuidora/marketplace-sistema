@@ -1,0 +1,26 @@
+{
+  "query": "SELECT * FROM export_jobs WHERE id = 30002;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT * FROM export_jobs WHERE id = 30002;",
+  "rows": [
+    {
+      "id": "30002",
+      "userId": "1",
+      "marketplaceId": "1",
+      "status": "failed",
+      "totalProducts": "2",
+      "processedProducts": "2",
+      "successCount": "0",
+      "errorCount": "2",
+      "tagFilter": "HIGIPACK",
+      "config": "NULL",
+      "startedAt": "2026-03-17 15:55:20",
+      "completedAt": "2026-03-17 15:55:22",
+      "createdAt": "2026-03-17 15:55:20",
+      "updatedAt": "2026-03-17 15:55:22"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuserId\tmarketplaceId\tstatus\ttotalProducts\tprocessedProducts\tsuccessCount\terrorCount\ttagFilter\tconfig\tstartedAt\tcompletedAt\tcreatedAt\tupdatedAt\n30002\t1\t1\tfailed\t2\t2\t0\t2\tHIGIPACK\tNULL\t2026-03-17 15:55:20\t2026-03-17 15:55:22\t2026-03-17 15:55:20\t2026-03-17 15:55:22\n",
+  "stderr": "",
+  "execution_time_ms": 357
+}

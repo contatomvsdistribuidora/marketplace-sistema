@@ -1,0 +1,16 @@
+{
+  "query": "SELECT id, nickname, isActive, accessToken IS NOT NULL as hasToken FROM ml_accounts LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, nickname, isActive, accessToken IS NOT NULL as hasToken FROM ml_accounts LIMIT 10;",
+  "rows": [
+    {
+      "id": "1",
+      "nickname": "MARCOSMUSCULACAOESUPLEMENTOS",
+      "isActive": "1",
+      "hasToken": "1"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tnickname\tisActive\thasToken\n1\tMARCOSMUSCULACAOESUPLEMENTOS\t1\t1\n",
+  "stderr": "",
+  "execution_time_ms": 386
+}

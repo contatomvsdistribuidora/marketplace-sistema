@@ -104,3 +104,8 @@
 - [x] Melhorar visual da seleção de marketplace com logos/ícones dos marketplaces
 - [x] Filtrar contas automaticamente por marketplace selecionado (ex: ML selecionado → só contas ML)
 - [x] Redesenhar seleção de contas com visual mais limpo e intuitivo
+- [x] BUG: Exportação para ML dá erro "BaseLinker API error: ERROR_INVALI..." - corrigido: fluxo reestruturado para usar API direta
+- [x] Reestruturar fluxo: BaseLinker apenas fonte de produtos, exportação vai direto para marketplaces via API própria
+- [x] Remover fluxo de exportação via BaseLinker (tags, agente, etc.)
+- [x] Exportação para ML sempre via API direta do ML (sem BaseLinker)
+- [x] Quando marketplace não tem API direta conectada, mostrar aviso ao usuário

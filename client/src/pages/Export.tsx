@@ -2,14 +2,13 @@ import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Upload, Store, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
-  ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw, Bot
+  ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw, ExternalLink
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
@@ -34,43 +33,20 @@ interface MappedProduct {
   errorMessage?: string;
 }
 
-// Flattened integration account for display
-interface IntegrationAccount {
-  integrationCode: string;
-  integrationLabel: string;
-  accountId: string;
-  accountName: string;
-  langs: string[];
+// Connected account from our system (ML, TikTok, etc.)
+interface ConnectedAccount {
+  id: number;
+  name: string;
+  marketplace: string; // "mercadolivre" | "tiktok"
+  isActive: boolean;
+  icon?: string;
 }
-
-// Map BaseLinker marketplace type codes to readable names
-const MARKETPLACE_TYPE_NAMES: Record<string, string> = {
-  shop: "Loja Virtual",
-  blconnect: "BL Connect",
-  amazon: "Amazon",
-  americanas: "Americanas",
-  omnik: "Omnik",
-  shopeebr: "Shopee",
-  carrefourbr: "Carrefour",
-  kabum: "KaBuM!",
-  leroymerlinbr: "Leroy Merlin",
-  madeiramadeira: "Madeira Madeira",
-  magaluopenapi: "Magazine Luiza",
-  webcontinental: "Webcontinental",
-  olist: "Olist",
-  shein: "Shein",
-  viavarejo: "Via Varejo",
-  melibr: "Mercado Livre",
-  mercadolivre: "Mercado Livre",
-  shopee: "Shopee",
-  magalu: "Magazine Luiza",
-};
 
 export default function ExportPage() {
   const [, setLocation] = useLocation();
   const [step, setStep] = useState<ExportStep>("select");
   const [selectedMarketplace, setSelectedMarketplace] = useState<string>("");
-  const [selectedAccount, setSelectedAccount] = useState<string>(""); // "integrationCode:accountId"
+  const [selectedAccount, setSelectedAccount] = useState<string>(""); // "marketplace:accountId"
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
   const [mappingProgress, setMappingProgress] = useState(0);
   const [isMappingInProgress, setIsMappingInProgress] = useState(false);
@@ -89,36 +65,42 @@ export default function ExportPage() {
 
   const { data: marketplaces } = trpc.marketplaces.list.useQuery();
 
-  // Fetch marketplace integrations (Mercado Livre, Amazon, Shopee, etc.)
-  const { data: integrationsData, isLoading: integrationsLoading, refetch: refetchIntegrations } = trpc.baselinker.getIntegrations.useQuery(
-    { inventoryId: inventoryId! },
-    { enabled: !!tokenData?.hasToken && !!inventoryId }
-  );
+  // Fetch connected accounts from our system (NOT BaseLinker)
+  const { data: mlAccounts, refetch: refetchMlAccounts } = trpc.ml.accounts.useQuery();
+  const { data: tiktokAccounts, refetch: refetchTiktokAccounts } = trpc.tiktok.accounts.useQuery();
 
-  // Search filter for accounts
-  const [accountSearch, setAccountSearch] = useState("");
+  // Build unified list of connected accounts from our system
+  const connectedAccounts = useMemo<ConnectedAccount[]>(() => {
+    const accounts: ConnectedAccount[] = [];
 
-  // Flatten marketplace accounts from getOrderSources into a list
-  const allAccounts = useMemo<IntegrationAccount[]>(() => {
-    if (!integrationsData) return [];
-    const accounts: IntegrationAccount[] = [];
-
-    // Process accounts from getOrderSources (the correct API method)
-    // integrationsData.accounts is already parsed by the server
-    if (integrationsData.accounts && Array.isArray(integrationsData.accounts)) {
-      for (const acc of integrationsData.accounts) {
+    // ML accounts
+    if (mlAccounts) {
+      for (const acc of mlAccounts as any[]) {
         accounts.push({
-          integrationCode: acc.marketplaceType,
-          integrationLabel: MARKETPLACE_TYPE_NAMES[acc.marketplaceType] || acc.marketplaceName || formatIntegrationName(acc.marketplaceType),
-          accountId: acc.id, // e.g. "melibr_16544"
-          accountName: acc.name,
-          langs: [],
+          id: acc.id,
+          name: acc.nickname || `ML Account #${acc.id}`,
+          marketplace: "mercadolivre",
+          isActive: acc.isActive,
+          icon: undefined,
+        });
+      }
+    }
+
+    // TikTok accounts
+    if (tiktokAccounts) {
+      for (const acc of tiktokAccounts as any[]) {
+        accounts.push({
+          id: acc.id,
+          name: acc.shopName || acc.sellerName || `TikTok #${acc.id}`,
+          marketplace: "tiktok",
+          isActive: true,
+          icon: undefined,
         });
       }
     }
 
     return accounts;
-  }, [integrationsData]);
+  }, [mlAccounts, tiktokAccounts]);
 
   // Get selected marketplace info
   const selectedMarketplaceInfo = useMemo(() => {
@@ -126,65 +108,55 @@ export default function ExportPage() {
     return (marketplaces as any[]).find((m: any) => String(m.id) === selectedMarketplace) || null;
   }, [selectedMarketplace, marketplaces]);
 
-  // Map marketplace codes to BaseLinker integration codes for filtering
-  const MARKETPLACE_CODE_TO_INTEGRATION: Record<string, string[]> = {
-    mercadolivre: ["melibr", "mercadolivre"],
-    shopee: ["shopeebr", "shopee"],
-    amazon: ["amazon"],
-    tiktok: ["tiktok", "tiktokshop"],
-    madeiramadeira: ["madeiramadeira"],
-    magalu: ["magaluopenapi", "magalu"],
-    leroymerlin: ["leroymerlinbr", "leroymerlin"],
-    americanas: ["americanas", "b2w"],
-    casasbahia: ["viavarejo", "casasbahia"],
-    carrefour: ["carrefourbr", "carrefour"],
-    kabum: ["kabum"],
-    shein: ["shein"],
-    olist: ["olist"],
-    aliexpress: ["aliexpress"],
-    dafiti: ["dafiti"],
-    netshoes: ["netshoes"],
-    centauro: ["centauro"],
-    fastshop: ["fastshop"],
-    rihappy: ["rihappy"],
-    olxbr: ["olxbr", "olx"],
-    privalia: ["privalia"],
-    webcontinental: ["webcontinental"],
+  // Map marketplace codes to our connected account types
+  const MARKETPLACE_CODE_TO_ACCOUNT_TYPE: Record<string, string[]> = {
+    mercadolivre: ["mercadolivre"],
+    tiktok: ["tiktok"],
+    shopee: [],
+    amazon: [],
+    madeiramadeira: [],
+    magalu: [],
+    leroymerlin: [],
+    americanas: [],
+    casasbahia: [],
+    carrefour: [],
+    kabum: [],
+    shein: [],
+    olist: [],
+    aliexpress: [],
+    dafiti: [],
+    netshoes: [],
   };
 
-  // Filter accounts by selected marketplace
+  // Filter connected accounts by selected marketplace
   const filteredAccounts = useMemo(() => {
-    if (!selectedMarketplaceInfo) return allAccounts;
+    if (!selectedMarketplaceInfo) return [];
     const mpCode = (selectedMarketplaceInfo as any).code?.toLowerCase();
-    if (!mpCode) return allAccounts;
-    const integrationCodes = MARKETPLACE_CODE_TO_INTEGRATION[mpCode];
-    if (!integrationCodes) return allAccounts; // No mapping, show all
-    return allAccounts.filter(a =>
-      integrationCodes.some(code => a.integrationCode.toLowerCase() === code || a.integrationCode.toLowerCase().includes(code))
-    );
-  }, [allAccounts, selectedMarketplaceInfo]);
+    if (!mpCode) return [];
+    const accountTypes = MARKETPLACE_CODE_TO_ACCOUNT_TYPE[mpCode];
+    if (!accountTypes || accountTypes.length === 0) return [];
+    return connectedAccounts.filter(a => accountTypes.includes(a.marketplace) && a.isActive);
+  }, [connectedAccounts, selectedMarketplaceInfo]);
 
-  // Filter displayed accounts by search within filtered accounts
-  const displayedAccounts = useMemo(() => {
-    if (!accountSearch) return filteredAccounts;
-    const search = accountSearch.toLowerCase();
-    return filteredAccounts.filter(a =>
-      a.accountName.toLowerCase().includes(search) ||
-      a.integrationLabel.toLowerCase().includes(search) ||
-      a.accountId.toLowerCase().includes(search) ||
-      a.integrationCode.toLowerCase().includes(search)
-    );
-  }, [filteredAccounts, accountSearch]);
+  // Check if the selected marketplace has API support
+  const hasDirectApiSupport = useMemo(() => {
+    if (!selectedMarketplaceInfo) return false;
+    const mpCode = (selectedMarketplaceInfo as any).code?.toLowerCase();
+    if (!mpCode) return false;
+    const accountTypes = MARKETPLACE_CODE_TO_ACCOUNT_TYPE[mpCode];
+    return accountTypes && accountTypes.length > 0;
+  }, [selectedMarketplaceInfo]);
 
   // Get selected account info
   const selectedAccountInfo = useMemo(() => {
     if (!selectedAccount) return null;
-    return allAccounts.find(a => `${a.integrationCode}:${a.accountId}` === selectedAccount) || null;
-  }, [selectedAccount, allAccounts]);
+    const [marketplace, accountIdStr] = selectedAccount.split(":");
+    const accountId = parseInt(accountIdStr);
+    return connectedAccounts.find(a => a.marketplace === marketplace && a.id === accountId) || null;
+  }, [selectedAccount, connectedAccounts]);
 
-  // Load pre-selected product IDs from sessionStorage (from Products page or re-export)
+  // Load pre-selected product IDs from sessionStorage
   useEffect(() => {
-    // Check for re-export from Logs page
     const reExportId = sessionStorage.getItem("reexport_job_id");
     const reExportTag = sessionStorage.getItem("reexport_job_tag");
     if (reExportId) {
@@ -192,7 +164,7 @@ export default function ExportPage() {
       if (reExportTag) setPreSelectedTag(reExportTag);
       sessionStorage.removeItem("reexport_job_id");
       sessionStorage.removeItem("reexport_job_tag");
-      return; // Don't load from export_product_ids if re-exporting
+      return;
     }
 
     const storedIds = sessionStorage.getItem("export_product_ids");
@@ -216,8 +188,6 @@ export default function ExportPage() {
     { enabled: !!reExportJobId }
   );
 
-  // When re-export products are loaded, convert their IDs to numbers for the cache query
-  // Also store the mapped data from the previous job
   useEffect(() => {
     if (reExportData && reExportData.products.length > 0 && preSelectedIds.length === 0 && mappedProducts.length === 0) {
       const ids = reExportData.products
@@ -225,11 +195,9 @@ export default function ExportPage() {
         .filter((id: number) => !isNaN(id));
       if (ids.length > 0) {
         setPreSelectedIds(ids);
-        // Store marketplace ID from previous job
         if (reExportData.jobMarketplaceId) {
           setReExportMarketplaceId(reExportData.jobMarketplaceId);
         }
-        // Store mapped data (category + attributes) from previous job for reuse
         const mappedDataMap: Record<string, { mappedCategory: string | null; mappedAttributes: any }> = {};
         for (const p of reExportData.products) {
           mappedDataMap[p.productId] = {
@@ -238,7 +206,7 @@ export default function ExportPage() {
           };
         }
         setReExportMappedData(mappedDataMap);
-        toast.info(`${ids.length} produtos carregados do Job #${reExportJobId} para re-exporta\u00e7\u00e3o.`);
+        toast.info(`${ids.length} produtos carregados do Job #${reExportJobId} para re-exportação.`);
       }
     }
   }, [reExportData]);
@@ -279,38 +247,14 @@ export default function ExportPage() {
   const createExportMutation = trpc.exports.create.useMutation();
   const updateExportMutation = trpc.exports.updateStatus.useMutation();
   const addLogMutation = trpc.exports.addLog.useMutation();
-  const exportProductMutation = trpc.exports.exportProduct.useMutation();
-  const enqueueAgentMutation = trpc.agent.enqueue.useMutation();
   const mlPublishMutation = trpc.ml.publishProduct.useMutation();
-
-  // Fetch ML accounts to check if direct ML publishing is available
-  const { data: mlAccounts } = trpc.ml.accounts.useQuery();
-  const activeMlAccounts = useMemo(
-    () => (mlAccounts || []).filter((a: any) => a.isActive),
-    [mlAccounts]
-  );
-
-  // Check if the selected integration is Mercado Livre and we have a connected ML account
-  const isMlDirectExport = useMemo(() => {
-    if (!selectedAccountInfo) return false;
-    const code = selectedAccountInfo.integrationCode.toLowerCase();
-    return (code === "melibr" || code === "mercadolivre" || code.includes("meli")) && activeMlAccounts.length > 0;
-  }, [selectedAccountInfo, activeMlAccounts]);
-
-  // Auto-select the first active ML account for direct export
-  const mlAccountForDirectExport = useMemo(() => {
-    if (!isMlDirectExport || activeMlAccounts.length === 0) return null;
-    return activeMlAccounts[0];
-  }, [isMlDirectExport, activeMlAccounts]);
 
   // Check if this is a re-export to the same marketplace type (can skip AI mapping)
   const canSkipMapping = useMemo(() => {
     if (!reExportJobId || !reExportMarketplaceId || !selectedMarketplace) return false;
-    // Same marketplace ID = same type of marketplace, can reuse mapping
     return reExportMarketplaceId.toString() === selectedMarketplace;
   }, [reExportJobId, reExportMarketplaceId, selectedMarketplace]);
 
-  // Check if we have mapped data from previous job
   const hasPreviousMappedData = useMemo(() => {
     return Object.keys(reExportMappedData).length > 0;
   }, [reExportMappedData]);
@@ -321,7 +265,7 @@ export default function ExportPage() {
       return;
     }
     if (!selectedAccount) {
-      toast.error("Selecione a conta/integra\u00e7\u00e3o de destino");
+      toast.error("Selecione a conta de destino");
       return;
     }
     if (mappedProducts.length === 0) {
@@ -335,11 +279,11 @@ export default function ExportPage() {
 
     const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
     const marketplaceName = marketplace?.name || "Marketplace";
-    const accountName = selectedAccountInfo?.accountName || "";
+    const accountName = selectedAccountInfo?.name || "";
 
     // If re-exporting to same marketplace type and we have previous mapped data, skip AI mapping
     if (canSkipMapping && hasPreviousMappedData) {
-      toast.info("Re-exporta\u00e7\u00e3o para mesmo marketplace detectada. Reutilizando mapeamento anterior...");
+      toast.info("Re-exportação para mesmo marketplace detectada. Reutilizando mapeamento anterior...");
       let reusedCount = 0;
       let newMappingCount = 0;
 
@@ -348,7 +292,6 @@ export default function ExportPage() {
         const previousData = reExportMappedData[product.id];
 
         if (previousData && (previousData.mappedCategory || previousData.mappedAttributes)) {
-          // Reuse previous mapping data
           const attrs = previousData.mappedAttributes as any[];
           setMappedProducts((prev) =>
             prev.map((p) =>
@@ -371,7 +314,6 @@ export default function ExportPage() {
           );
           reusedCount++;
         } else {
-          // No previous data for this product, run AI mapping
           try {
             const categorySuggestions = await mapCategoryMutation.mutateAsync({
               product: {
@@ -398,10 +340,8 @@ export default function ExportPage() {
                 { name: "Modelo", id: "model", required: true },
                 { name: "Cor", id: "color", required: false },
                 { name: "Material", id: "material", required: false },
-                { name: "Peso", id: "weight", required: false },
-                { name: "Dimens\u00f5es", id: "dimensions", required: false },
               ],
-              marketplace: marketplaceName,
+              marketplace: `${marketplaceName} (${accountName})`,
             });
 
             setMappedProducts((prev) =>
@@ -409,15 +349,13 @@ export default function ExportPage() {
                 p.id === product.id
                   ? {
                       ...p,
-                      suggestedCategory: categorySuggestions[0]
-                        ? {
-                            id: categorySuggestions[0].categoryId,
-                            name: categorySuggestions[0].categoryName,
-                            path: categorySuggestions[0].categoryPath,
-                            confidence: categorySuggestions[0].confidence,
-                          }
-                        : undefined,
-                      suggestedAttributes: attributeSuggestions,
+                      suggestedCategory: categorySuggestions?.[0] ? {
+                          id: categorySuggestions[0].categoryId,
+                          name: categorySuggestions[0].categoryName,
+                          path: categorySuggestions[0].categoryPath,
+                          confidence: categorySuggestions[0].confidence,
+                        } : undefined,
+                      suggestedAttributes: attributeSuggestions || undefined,
                       status: "mapped" as const,
                     }
                   : p
@@ -438,99 +376,82 @@ export default function ExportPage() {
         setMappingProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
       }
 
-      setIsMappingInProgress(false);
-      setStep("review");
-      if (reusedCount > 0) {
-        toast.success(`Mapeamento conclu\u00eddo! ${reusedCount} produtos reutilizaram mapeamento anterior${newMappingCount > 0 ? `, ${newMappingCount} novos mapeamentos` : ""}.`);
-      } else {
-        toast.success("Mapeamento conclu\u00eddo! Revise os resultados antes de exportar.");
-      }
-      return;
-    }
+      toast.success(`Mapeamento concluído: ${reusedCount} reutilizados, ${newMappingCount} novos.`);
+    } else {
+      // Normal AI mapping
+      for (let i = 0; i < mappedProducts.length; i++) {
+        const product = mappedProducts[i];
+        try {
+          const categorySuggestions = await mapCategoryMutation.mutateAsync({
+            product: {
+              name: product.name,
+              description: product.description,
+              features: product.features,
+              category: product.category,
+              ean: product.ean,
+              sku: product.sku,
+            },
+            marketplace: `${marketplaceName} (${accountName})`,
+            availableCategories: [],
+          });
 
-    // Normal AI mapping flow (no previous data to reuse)
-    for (let i = 0; i < mappedProducts.length; i++) {
-      const product = mappedProducts[i];
-      try {
-        const categorySuggestions = await mapCategoryMutation.mutateAsync({
-          product: {
-            name: product.name,
-            description: product.description,
-            features: product.features,
-            category: product.category,
-            ean: product.ean,
-            sku: product.sku,
-          },
-          marketplace: `${marketplaceName} (${accountName})`,
-          availableCategories: [],
-        });
+          const attributeSuggestions = await fillAttributesMutation.mutateAsync({
+            product: {
+              name: product.name,
+              description: product.description,
+              features: product.features,
+              category: product.category,
+            },
+            requiredAttributes: [
+              { name: "Marca", id: "brand", required: true },
+              { name: "Modelo", id: "model", required: true },
+              { name: "Cor", id: "color", required: false },
+              { name: "Material", id: "material", required: false },
+            ],
+            marketplace: `${marketplaceName} (${accountName})`,
+          });
 
-        const attributeSuggestions = await fillAttributesMutation.mutateAsync({
-          product: {
-            name: product.name,
-            description: product.description,
-            features: product.features,
-            category: product.category,
-          },
-          requiredAttributes: [
-            { name: "Marca", id: "brand", required: true },
-            { name: "Modelo", id: "model", required: true },
-            { name: "Cor", id: "color", required: false },
-            { name: "Material", id: "material", required: false },
-            { name: "Peso", id: "weight", required: false },
-            { name: "Dimens\u00f5es", id: "dimensions", required: false },
-          ],
-          marketplace: marketplaceName,
-        });
-
-        setMappedProducts((prev) =>
-          prev.map((p) =>
-            p.id === product.id
-              ? {
-                  ...p,
-                  suggestedCategory: categorySuggestions[0]
-                    ? {
+          setMappedProducts((prev) =>
+            prev.map((p) =>
+              p.id === product.id
+                ? {
+                    ...p,
+                    suggestedCategory: categorySuggestions?.[0] ? {
                         id: categorySuggestions[0].categoryId,
                         name: categorySuggestions[0].categoryName,
                         path: categorySuggestions[0].categoryPath,
                         confidence: categorySuggestions[0].confidence,
-                      }
-                    : undefined,
-                  suggestedAttributes: attributeSuggestions,
-                  status: "mapped" as const,
-                }
-              : p
-          )
-        );
-      } catch (error: any) {
-        setMappedProducts((prev) =>
-          prev.map((p) =>
-            p.id === product.id
-              ? { ...p, status: "error" as const, errorMessage: error.message }
-              : p
-          )
-        );
-      }
+                      } : undefined,
+                    suggestedAttributes: attributeSuggestions || undefined,
+                    status: "mapped" as const,
+                  }
+                : p
+            )
+          );
+        } catch (error: any) {
+          setMappedProducts((prev) =>
+            prev.map((p) =>
+              p.id === product.id
+                ? { ...p, status: "error" as const, errorMessage: error.message }
+                : p
+            )
+          );
+        }
 
-      setMappingProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
+        setMappingProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
+      }
     }
 
     setIsMappingInProgress(false);
     setStep("review");
-    toast.success("Mapeamento conclu\u00eddo! Revise os resultados antes de exportar.");
+    toast.success("Mapeamento concluído! Revise os resultados antes de exportar.");
   };
 
   const handleExport = async () => {
     const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
-    if (!marketplace || !selectedAccountInfo || !inventoryId) return;
+    if (!marketplace || !selectedAccountInfo) return;
 
-    // Parse marketplace type and account ID from the selected account
-    const mktType = selectedAccountInfo.integrationCode; // e.g. "melibr"
-    const rawAccountId = selectedAccountInfo.accountId; // e.g. "melibr_16544"
-    const numericAccountId = rawAccountId.includes("_") ? rawAccountId.split("_").pop()! : rawAccountId;
-
-    // Check if we should use direct ML API export
-    const useDirectMlExport = isMlDirectExport && mlAccountForDirectExport;
+    const mpCode = (selectedMarketplaceInfo as any)?.code?.toLowerCase() || "";
 
     setStep("exporting");
     setExportProgress(0);
@@ -549,9 +470,7 @@ export default function ExportPage() {
     setExportJobId(jobId);
     await updateExportMutation.mutateAsync({ jobId, status: "processing" });
 
-    if (useDirectMlExport) {
-      toast.info("Publicação direta via API do Mercado Livre ativada!", { duration: 3000 });
-    }
+    toast.info(`Publicando diretamente via API do ${marketplace.name}...`, { duration: 3000 });
 
     let successCount = 0;
     let errorCount = 0;
@@ -589,11 +508,10 @@ export default function ExportPage() {
           }
         }
 
-        if (useDirectMlExport) {
+        if (mpCode === "mercadolivre") {
           // ===== DIRECT ML API EXPORT =====
-          // Publish directly to Mercado Livre via API (no agent queue)
           const mlResult = await mlPublishMutation.mutateAsync({
-            accountId: mlAccountForDirectExport!.id,
+            accountId: selectedAccountInfo.id,
             productId: product.id,
             name: product.name,
             description: product.description || undefined,
@@ -607,7 +525,6 @@ export default function ExportPage() {
             categoryId: product.suggestedCategory?.id || undefined,
           });
 
-          // Log the result
           await addLogMutation.mutateAsync({
             jobId,
             productId: product.id,
@@ -623,34 +540,33 @@ export default function ExportPage() {
             toast.success(`"${product.name.substring(0, 30)}..." publicado no ML!${permalink}`, { duration: 4000 });
           } else {
             errorCount++;
-            toast.error(`Erro ML em "${product.name.substring(0, 30)}...": ${mlResult.error}`, { duration: 4000 });
+            toast.error(`Erro ML: "${product.name.substring(0, 30)}...": ${mlResult.error}`, { duration: 4000 });
           }
-        } else {
-          // ===== BASELINKER EXPORT (original flow) =====
-          const result = await exportProductMutation.mutateAsync({
-            inventoryId,
-            productId: product.id,
-            name: product.name,
-            description: product.description,
-            features,
-            ean: product.ean || undefined,
-            sku: product.sku || undefined,
-            price: product.mainPrice || undefined,
-            stock: product.totalStock || undefined,
-            images: product.imageUrl ? { "0": product.imageUrl } : undefined,
-            marketplaceType: mktType,
-            accountId: numericAccountId,
+        } else if (mpCode === "tiktok") {
+          // ===== TIKTOK SHOP API (placeholder) =====
+          // TikTok createProduct requires shopCipher and specific product format
+          // For now, log as error with message to use TikTok publish page
+          errorCount++;
+          await addLogMutation.mutateAsync({
             jobId,
+            productId: product.id,
+            productName: product.name,
             marketplaceId: marketplace.id,
+            status: "error",
+            errorMessage: "TikTok Shop: use a página 'Publicar no TikTok' para publicação individual por enquanto.",
           });
-
-          if (result.success) {
-            successCount++;
-            toast.success(`Produto "${product.name.substring(0, 30)}..." exportado!`, { duration: 2000 });
-          } else {
-            errorCount++;
-            toast.error(`Erro em "${product.name.substring(0, 30)}...": ${result.error}`, { duration: 3000 });
-          }
+          toast.error(`TikTok: Use a página dedicada para publicar "${product.name.substring(0, 30)}..."`, { duration: 4000 });
+        } else {
+          // ===== MARKETPLACE SEM API DIRETA =====
+          errorCount++;
+          await addLogMutation.mutateAsync({
+            jobId,
+            productId: product.id,
+            productName: product.name,
+            marketplaceId: marketplace.id,
+            status: "error",
+            errorMessage: `API direta para ${marketplace.name} ainda não disponível. Conecte a conta do marketplace primeiro.`,
+          });
         }
       } catch (error: any) {
         errorCount++;
@@ -673,8 +589,8 @@ export default function ExportPage() {
         errorCount,
       });
 
-      // Small delay between ML API calls to avoid rate limiting
-      if (useDirectMlExport && i < mappedProducts.length - 1) {
+      // Small delay between API calls to avoid rate limiting
+      if (i < mappedProducts.length - 1) {
         await new Promise(r => setTimeout(r, 500));
       }
     }
@@ -684,115 +600,59 @@ export default function ExportPage() {
       status: errorCount === mappedProducts.length ? "failed" : "completed",
     });
 
-    // Only enqueue to agent if NOT using direct ML export
-    if (!useDirectMlExport) {
-      try {
-        const productsForAgent = mappedProducts
-          .filter(p => p.status === "mapped")
-          .map(p => ({
-            productId: p.id,
-            productName: p.name,
-            sku: p.sku || undefined,
-            ean: p.ean || undefined,
-            price: p.mainPrice?.toString() || undefined,
-            stock: p.totalStock || 0,
-            imageUrl: p.imageUrl || undefined,
-            description: p.description || undefined,
-            mappedCategory: p.suggestedCategory?.name || undefined,
-            mappedAttributes: p.suggestedAttributes || undefined,
-          }));
-
-        if (productsForAgent.length > 0) {
-          await enqueueAgentMutation.mutateAsync({
-            jobId,
-            products: productsForAgent,
-            marketplaceType: mktType,
-            accountId: rawAccountId,
-            accountName: selectedAccountInfo?.accountName || undefined,
-            inventoryId,
-          });
-          toast.info(`${productsForAgent.length} produtos adicionados à fila do agente para listagem no marketplace.`);
-        }
-      } catch (agentError: any) {
-        console.error("Error enqueuing to agent:", agentError);
-      }
-    }
-
     setStep("done");
-    if (useDirectMlExport) {
-      toast.success(`Exportação concluída! ${successCount} produtos publicados diretamente no Mercado Livre, ${errorCount} erros.`);
-    } else {
-      toast.success(`Exportação concluída! ${successCount} produtos atualizados no BaseLinker, ${errorCount} erros.`);
-    }
+    toast.success(`Exportação concluída! ${successCount} publicados, ${errorCount} erros.`);
   };
 
   const updateProductAttribute = (productId: string, attrIndex: number, newValue: string) => {
     setMappedProducts((prev) =>
       prev.map((p) => {
         if (p.id !== productId || !p.suggestedAttributes) return p;
-        const attrs = [...p.suggestedAttributes];
-        attrs[attrIndex] = { ...attrs[attrIndex], value: newValue };
-        return { ...p, suggestedAttributes: attrs };
+        const newAttrs = [...p.suggestedAttributes];
+        newAttrs[attrIndex] = { ...newAttrs[attrIndex], value: newValue };
+        return { ...p, suggestedAttributes: newAttrs };
       })
     );
   };
 
-  if (!tokenData?.hasToken || !inventoryId) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Exportar Produtos</h1>
-          <p className="text-muted-foreground mt-1">Exporte produtos para marketplaces com IA</p>
-        </div>
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
-            <Upload className="h-12 w-12 text-muted-foreground/50" />
-            <p className="text-muted-foreground text-sm text-center">
-              Configure seu token e inventário nas configurações para começar.
-            </p>
-            <Button variant="outline" onClick={() => setLocation("/settings")}>
-              Ir para Configurações
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const getMarketplaceDisplayName = () => {
+    if (!selectedMarketplaceInfo) return "Marketplace";
+    return (selectedMarketplaceInfo as any).name || "Marketplace";
+  };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Exportar Produtos</h1>
-        <p className="text-muted-foreground mt-1">
-          Exporte produtos do BaseLinker para marketplaces com mapeamento inteligente
+        <p className="text-muted-foreground">
+          Exporte produtos do BaseLinker diretamente para marketplaces via API
         </p>
       </div>
 
       {/* Step indicator */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 text-sm">
         {[
-          { key: "select", label: "Selecionar" },
-          { key: "mapping", label: "Mapeamento IA" },
-          { key: "review", label: "Revisar" },
-          { key: "exporting", label: "Exportando" },
-          { key: "done", label: "Concluído" },
-        ].map((s, i) => (
+          { key: "select", label: "Selecionar", num: 1 },
+          { key: "mapping", label: "Mapeamento IA", num: 2 },
+          { key: "review", label: "Revisar", num: 3 },
+          { key: "exporting", label: "Publicando", num: 4 },
+          { key: "done", label: "Concluído", num: 5 },
+        ].map((s, idx) => (
           <div key={s.key} className="flex items-center gap-2">
             <div
-              className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-medium ${
+              className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-medium ${
                 step === s.key
                   ? "bg-primary text-primary-foreground"
-                  : ["select", "mapping", "review", "exporting", "done"].indexOf(step) > i
-                  ? "bg-primary/20 text-primary"
+                  : ["select", "mapping", "review", "exporting", "done"].indexOf(step) >
+                    ["select", "mapping", "review", "exporting", "done"].indexOf(s.key)
+                  ? "bg-green-500 text-white"
                   : "bg-muted text-muted-foreground"
               }`}
             >
-              {i + 1}
+              {s.num}
             </div>
-            <span className={`text-sm hidden sm:inline ${step === s.key ? "font-medium" : "text-muted-foreground"}`}>
-              {s.label}
-            </span>
-            {i < 4 && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
+            <span className={step === s.key ? "font-medium" : "text-muted-foreground"}>{s.label}</span>
+            {idx < 4 && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
           </div>
         ))}
       </div>
@@ -808,7 +668,7 @@ export default function ExportPage() {
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                   <span className="text-sm">
                     {reExportJobId
-                      ? `Carregando produtos do Job #${reExportJobId} para re-exporta\u00e7\u00e3o...`
+                      ? `Carregando produtos do Job #${reExportJobId} para re-exportação...`
                       : `Carregando ${preSelectedIds.length} produtos selecionados...`
                     }
                   </span>
@@ -824,10 +684,10 @@ export default function ExportPage() {
                   <CheckCircle className="h-5 w-5 text-green-600" />
                   <div>
                     <p className="text-sm font-medium text-green-800">
-                      {mappedProducts.length} produto(s) carregado(s) para exporta\u00e7\u00e3o
+                      {mappedProducts.length} produto(s) carregado(s) para exportação
                       {reExportJobId && (
                         <Badge variant="outline" className="ml-2 text-xs border-green-500 text-green-700">
-                          Re-exporta\u00e7\u00e3o do Job #{reExportJobId}
+                          Re-exportação do Job #{reExportJobId}
                         </Badge>
                       )}
                     </p>
@@ -928,20 +788,22 @@ export default function ExportPage() {
                 <Store className="h-4 w-4" />
                 Marketplace de Destino
               </CardTitle>
-              <CardDescription>Selecione o marketplace para onde deseja exportar</CardDescription>
+              <CardDescription>Selecione o marketplace e a conta conectada para publicar diretamente</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Marketplace selection - Visual cards with logos */}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                 {(marketplaces || []).map((mp: any) => {
                   const isSelected = selectedMarketplace === String(mp.id);
+                  const mpCode = mp.code?.toLowerCase();
+                  const accountTypes = MARKETPLACE_CODE_TO_ACCOUNT_TYPE[mpCode];
+                  const hasApi = accountTypes && accountTypes.length > 0;
                   return (
                     <button
                       key={mp.id}
                       onClick={() => {
                         setSelectedMarketplace(String(mp.id));
                         setSelectedAccount("");
-                        setAccountSearch("");
                       }}
                       className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 hover:shadow-md cursor-pointer ${
                         isSelected
@@ -952,6 +814,11 @@ export default function ExportPage() {
                       {isSelected && (
                         <div className="absolute top-1.5 right-1.5">
                           <CheckCircle className="h-4 w-4 text-primary" />
+                        </div>
+                      )}
+                      {hasApi && (
+                        <div className="absolute top-1.5 left-1.5">
+                          <Badge variant="default" className="text-[8px] h-4 px-1 bg-green-600">API</Badge>
                         </div>
                       )}
                       <div className="h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center overflow-hidden">
@@ -971,116 +838,124 @@ export default function ExportPage() {
                 })}
               </div>
 
-              {/* Account/Integration selection - filtered by marketplace */}
+              {/* Account selection - from our connected accounts (NOT BaseLinker) */}
               {selectedMarketplace && (
                 <div className="space-y-3 pt-2 border-t">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium flex items-center gap-2">
                       <Link2 className="h-3.5 w-3.5" />
-                      Conta de Destino
+                      Conta Conectada
                       {selectedMarketplaceInfo && (
                         <Badge variant="secondary" className="text-[10px] h-5 gap-1">
-                          {selectedMarketplaceInfo.icon && (
-                            <img src={selectedMarketplaceInfo.icon} alt="" className="h-3 w-3 object-contain" />
+                          {(selectedMarketplaceInfo as any).icon && (
+                            <img src={(selectedMarketplaceInfo as any).icon} alt="" className="h-3 w-3 object-contain" />
                           )}
-                          {selectedMarketplaceInfo.name}
+                          {(selectedMarketplaceInfo as any).name}
                         </Badge>
                       )}
                     </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">
-                        {filteredAccounts.length} conta(s)
-                      </span>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-7 text-xs"
-                        onClick={() => refetchIntegrations()}
-                      >
-                        <RefreshCw className="h-3 w-3 mr-1" />
-                        Atualizar
-                      </Button>
-                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        refetchMlAccounts();
+                        refetchTiktokAccounts();
+                      }}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Atualizar
+                    </Button>
                   </div>
 
-                  {integrationsLoading ? (
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span className="text-sm text-muted-foreground">Carregando contas...</span>
+                  {!hasDirectApiSupport ? (
+                    <div className="flex flex-col items-center gap-3 p-6 rounded-lg bg-amber-50 border border-amber-200">
+                      <AlertCircle className="h-8 w-8 text-amber-500" />
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-amber-800">
+                          API direta para {getMarketplaceDisplayName()} ainda não disponível
+                        </p>
+                        <p className="text-xs text-amber-600 mt-1">
+                          Atualmente suportamos exportação direta via API para: <strong>Mercado Livre</strong> e <strong>TikTok Shop</strong>.
+                          Outros marketplaces serão adicionados em breve.
+                        </p>
+                      </div>
                     </div>
                   ) : filteredAccounts.length > 0 ? (
-                    <>
-                      {filteredAccounts.length > 5 && (
-                        <Input
-                          placeholder="Buscar conta por nome ou ID..."
-                          value={accountSearch}
-                          onChange={(e) => setAccountSearch(e.target.value)}
-                          className="h-8 text-sm"
-                        />
-                      )}
-
-                      <div className="space-y-1.5 max-h-[250px] overflow-y-auto">
-                        {displayedAccounts.map((a) => {
-                          const accountKey = `${a.integrationCode}:${a.accountId}`;
-                          const isAccSelected = selectedAccount === accountKey;
-                          return (
-                            <button
-                              key={accountKey}
-                              onClick={() => setSelectedAccount(accountKey)}
-                              className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${
-                                isAccSelected
-                                  ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-                                  : "border-border hover:border-primary/30 hover:bg-muted/30"
-                              }`}
-                            >
-                              <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
-                                isAccSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                    <div className="space-y-1.5 max-h-[250px] overflow-y-auto">
+                      {filteredAccounts.map((a) => {
+                        const accountKey = `${a.marketplace}:${a.id}`;
+                        const isAccSelected = selectedAccount === accountKey;
+                        return (
+                          <button
+                            key={accountKey}
+                            onClick={() => setSelectedAccount(accountKey)}
+                            className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${
+                              isAccSelected
+                                ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                                : "border-border hover:border-primary/30 hover:bg-muted/30"
+                            }`}
+                          >
+                            <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                              isAccSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                            }`}>
+                              {isAccSelected ? (
+                                <CheckCircle className="h-4 w-4" />
+                              ) : (
+                                <Store className="h-4 w-4" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-medium truncate ${
+                                isAccSelected ? "text-primary" : ""
                               }`}>
-                                {isAccSelected ? (
-                                  <CheckCircle className="h-4 w-4" />
-                                ) : (
-                                  <Store className="h-4 w-4" />
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-medium truncate ${
-                                  isAccSelected ? "text-primary" : ""
-                                }`}>
-                                  {a.accountName}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {a.integrationLabel} &bull; #{a.accountId}
-                                </p>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : allAccounts.length > 0 ? (
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                      <p className="text-xs text-amber-700">
-                        Nenhuma conta do tipo <strong>{selectedMarketplaceInfo?.name}</strong> encontrada no BaseLinker. Verifique se esta integração está configurada.
-                      </p>
+                                {a.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {a.marketplace === "mercadolivre" ? "Mercado Livre" : "TikTok Shop"} &bull; Conta #{a.id}
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200 shrink-0">
+                              API Direta
+                            </Badge>
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                      <p className="text-xs text-amber-700">
-                        Nenhuma integração de marketplace encontrada. Verifique se os marketplaces estão conectados no BaseLinker.
-                      </p>
+                    <div className="flex flex-col items-center gap-3 p-6 rounded-lg bg-blue-50 border border-blue-200">
+                      <Info className="h-8 w-8 text-blue-500" />
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-blue-800">
+                          Nenhuma conta {getMarketplaceDisplayName()} conectada
+                        </p>
+                        <p className="text-xs text-blue-600 mt-1">
+                          Conecte uma conta na página de contas do marketplace para publicar diretamente.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const mpCode = (selectedMarketplaceInfo as any)?.code?.toLowerCase();
+                          if (mpCode === "mercadolivre") setLocation("/ml-accounts");
+                          else if (mpCode === "tiktok") setLocation("/tiktok-accounts");
+                        }}
+                      >
+                        <ExternalLink className="h-3 w-3 mr-1" />
+                        Conectar Conta
+                      </Button>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Info about direct ML export */}
-              {isMlDirectExport && mlAccountForDirectExport && (
+              {/* Info about direct export */}
+              {selectedAccount && selectedAccountInfo && (
                 <div className="p-3 rounded-lg bg-green-50 border border-green-200 flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-green-600 shrink-0" />
                   <p className="text-xs text-green-700">
-                    <strong>Exportação direta via API do Mercado Livre ativada!</strong> Os produtos serão publicados diretamente no ML usando a conta <strong>{mlAccountForDirectExport.nickname}</strong>, sem passar pela fila do agente.
+                    <strong>Exportação direta via API ativada!</strong> Os produtos serão publicados diretamente no {getMarketplaceDisplayName()} usando a conta <strong>{selectedAccountInfo.name}</strong>, sem intermediários.
                   </p>
                 </div>
               )}
@@ -1090,7 +965,7 @@ export default function ExportPage() {
                 <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 flex items-center gap-2">
                   <RefreshCw className="h-4 w-4 text-blue-500 shrink-0" />
                   <p className="text-xs text-blue-700">
-                    <strong>Re-exporta\u00e7\u00e3o para mesmo marketplace detectada.</strong> O mapeamento anterior (categorias e atributos) ser\u00e1 reutilizado automaticamente, sem necessidade de refazer o mapeamento com IA.
+                    <strong>Re-exportação para mesmo marketplace detectada.</strong> O mapeamento anterior (categorias e atributos) será reutilizado automaticamente.
                   </p>
                 </div>
               )}
@@ -1178,19 +1053,14 @@ export default function ExportPage() {
             </div>
             <div className="flex items-center gap-2">
               <div className="text-xs text-muted-foreground">
-                Destino: <strong>{selectedAccountInfo?.accountName}</strong>
-                {selectedAccountInfo && (
-                  <span className="ml-1">({selectedAccountInfo.integrationLabel})</span>
-                )}
-                {isMlDirectExport && mlAccountForDirectExport && (
-                  <Badge variant="default" className="ml-2 text-[10px] bg-green-600">
-                    API Direta ML ({mlAccountForDirectExport.nickname})
-                  </Badge>
-                )}
+                Destino: <strong>{selectedAccountInfo?.name}</strong>
+                <Badge variant="default" className="ml-2 text-[10px] bg-green-600">
+                  API Direta {getMarketplaceDisplayName()}
+                </Badge>
               </div>
               <Button onClick={handleExport}>
                 <Upload className="mr-2 h-4 w-4" />
-                {isMlDirectExport ? "Publicar Direto no ML" : "Confirmar Exporta\u00e7\u00e3o"}
+                Publicar no {getMarketplaceDisplayName()}
               </Button>
             </div>
           </div>
@@ -1307,14 +1177,11 @@ export default function ExportPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Upload className="h-5 w-5 text-primary animate-pulse" />
-              Exportando Produtos...
+              Publicando Produtos no {getMarketplaceDisplayName()}...
             </CardTitle>
             <CardDescription>
-              Os produtos estão sendo exportados para{" "}
-              <strong>{selectedAccountInfo?.accountName}</strong>
-              {selectedAccountInfo && (
-                <span className="ml-1">({selectedAccountInfo.integrationLabel})</span>
-              )}
+              Os produtos estão sendo publicados diretamente via API na conta{" "}
+              <strong>{selectedAccountInfo?.name}</strong>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1336,31 +1203,21 @@ export default function ExportPage() {
             <div className="h-16 w-16 rounded-full bg-green-100 dark:bg-green-950 flex items-center justify-center">
               <CheckCircle className="h-8 w-8 text-green-600" />
             </div>
-            <h3 className="text-xl font-semibold">Exportação Concluída!</h3>
+            <h3 className="text-xl font-semibold">Publicação Concluída!</h3>
             <p className="text-sm text-muted-foreground">
-              Destino: {selectedAccountInfo?.accountName}
-              {selectedAccountInfo && (
-                <span className="ml-1">({selectedAccountInfo.integrationLabel})</span>
-              )}
+              Publicado diretamente no {getMarketplaceDisplayName()} via API — conta: <strong>{selectedAccountInfo?.name}</strong>
             </p>
             <div className="flex items-center gap-4">
               <Badge variant="default" className="text-sm">
-                {mappedProducts.filter((p) => p.status === "mapped").length} sucesso
+                {mappedProducts.filter((p) => p.status === "mapped").length} publicado(s)
               </Badge>
               <Badge variant="destructive" className="text-sm">
-                {mappedProducts.filter((p) => p.status === "error").length} erros
+                {mappedProducts.filter((p) => p.status === "error").length} erro(s)
               </Badge>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Os produtos foram adicionados à fila do agente para listagem no marketplace.
-            </p>
             <div className="flex gap-3 mt-4">
               <Button variant="outline" onClick={() => setLocation("/logs")}>
                 Ver Logs Detalhados
-              </Button>
-              <Button variant="outline" onClick={() => setLocation("/agent")}>
-                <Bot className="h-4 w-4 mr-1" />
-                Monitor do Agente
               </Button>
               <Button
                 onClick={() => {
@@ -1381,58 +1238,4 @@ export default function ExportPage() {
       )}
     </div>
   );
-}
-
-/** Format integration code into a human-readable label */
-function formatIntegrationName(code: string): string {
-  // Map common BaseLinker integration codes to display names
-  const knownIntegrations: Record<string, string> = {
-    "allegro": "Allegro",
-    "amazon": "Amazon",
-    "ebay": "eBay",
-    "emag": "eMAG",
-    "shopee": "Shopee",
-    "mercadolivre": "Mercado Livre",
-    "mercadolibre": "Mercado Livre",
-    "tiktok": "TikTok Shop",
-    "tiktokshop": "TikTok Shop",
-    "magalu": "Magazine Luiza",
-    "magazineluiza": "Magazine Luiza",
-    "madeiramadeira": "Madeira Madeira",
-    "leroymerlin": "Leroy Merlin",
-    "shopify": "Shopify",
-    "woocommerce": "WooCommerce",
-    "prestashop": "PrestaShop",
-    "bling": "Bling",
-    "olist": "Olist",
-    "b2w": "B2W (Americanas)",
-    "americanas": "Americanas",
-    "casasbahia": "Casas Bahia",
-    "extra": "Extra",
-    "pontofrio": "Ponto Frio",
-    "carrefour": "Carrefour",
-    "dafiti": "Dafiti",
-    "netshoes": "Netshoes",
-    "kabum": "KaBuM!",
-    "wish": "Wish",
-    "etsy": "Etsy",
-    "aliexpress": "AliExpress",
-  };
-
-  // Check for exact match
-  const lower = code.toLowerCase();
-  if (knownIntegrations[lower]) return knownIntegrations[lower];
-
-  // Check for custom integrations
-  if (code.startsWith("custom_")) {
-    return `Canal Personalizado (${code.replace("custom_", "#")})`;
-  }
-
-  // Check partial matches
-  for (const [key, name] of Object.entries(knownIntegrations)) {
-    if (lower.includes(key) || key.includes(lower)) return name;
-  }
-
-  // Fallback: capitalize
-  return code.charAt(0).toUpperCase() + code.slice(1).replace(/_/g, " ");
 }
