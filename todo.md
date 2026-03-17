@@ -123,3 +123,4 @@
 - [x] BUG: Erro ao clicar em Sincronizar Categorias - corrigido: sync agora roda em background com polling de progresso (concorrência 15x, barra de progresso)
 - [x] BUG: Sync de categorias fica travado como "em andamento" - corrigido: auto-reset após 5min, botão cancelar, verificação inicial do estado ao carregar página
 - [x] BUG: Erro body.required_fields (HTTP 400) - corrigido: garantia de BRAND/MODEL com fallback, mensagens de erro detalhadas da API, validação de atributos obrigatórios
+- [x] BUG: Erro family_name obrigatório - corrigido: family_name agora é sempre enviado no body do POST /items (usa o título do produto como family_name)

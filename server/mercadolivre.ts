@@ -442,6 +442,7 @@ export async function createItem(
   accountId: number,
   itemData: {
     title: string;
+    familyName?: string;
     categoryId: string;
     price: number;
     currencyId?: string;
@@ -467,6 +468,15 @@ export async function createItem(
     condition: itemData.condition || "new",
     listing_type_id: itemData.listingTypeId || "gold_special",
   };
+
+  // family_name is required for sellers with "user_product_seller" tag
+  // It's a generic product description used to group User Products into families
+  if (itemData.familyName) {
+    body.family_name = itemData.familyName;
+  } else {
+    // Always send family_name as it's now required for most sellers
+    body.family_name = itemData.title;
+  }
 
   if (itemData.pictures && itemData.pictures.length > 0) {
     body.pictures = itemData.pictures;
