@@ -127,3 +127,8 @@
 - [x] BUG: Erro body.invalid_fields [title] - corrigido: detecta tag user_product_seller via API, não envia title para User Products, retry automático sem title se erro
 - [ ] Mapear todos os atributos obrigatórios por categoria ML no banco (similar ao que fizemos com categorias)
 - [x] Atualizar publishProduct para usar formato correto do modelo User Products (isUserProduct flag + sale_terms padrão)
+- [x] Melhorar listagem de produtos: exibir fotos/galeria, todos os dados do produto, link para descrição
+- [x] Geração de título otimizado por IA no mapeamento (diferente do original, otimizado para ML/SEO)
+- [ ] Troca de foto de capa: permitir escolher qual foto será a principal do anúncio
+- [x] Pesquisar e integrar IA de geração de fotos do Mercado Livre (se disponível via API) - NÃO tem API pública, só no painel do vendedor
+- [x] Exibir dados completos do produto na etapa de seleção/mapeamento (EAN, SKU, peso, dimensões, marca, etc.)

@@ -19,6 +19,8 @@ type ExportStep = "select" | "mapping" | "review" | "exporting" | "done";
 interface MappedProduct {
   id: string;
   name: string;
+  optimizedTitle?: string;
+  titleReasoning?: string;
   description: string;
   category: string;
   features: Record<string, string>;
@@ -27,8 +29,10 @@ interface MappedProduct {
   mainPrice?: number;
   totalStock?: number;
   imageUrl?: string;
+  allImages?: string[];
+  coverImageIndex?: number;
   suggestedCategory?: { id: string; name: string; path: string; confidence: number };
-  suggestedAttributes?: { attributeName: string; attributeId: string; value: string; confidence: number; source: string }[];
+  suggestedAttributes?: { attributeName: string; attributeId: string; value: string; confidence: number; source: string; required?: boolean }[];
   status: "pending" | "mapped" | "error";
   errorMessage?: string;
 }
@@ -244,6 +248,7 @@ export default function ExportPage() {
 
   const mapCategoryMutation = trpc.ai.mapCategory.useMutation();
   const fillAttributesMutation = trpc.ai.fillAttributes.useMutation();
+  const generateTitleMutation = trpc.ai.generateTitle.useMutation();
   const createExportMutation = trpc.exports.create.useMutation();
   const updateExportMutation = trpc.exports.updateStatus.useMutation();
   const addLogMutation = trpc.exports.addLog.useMutation();
@@ -382,40 +387,54 @@ export default function ExportPage() {
       for (let i = 0; i < mappedProducts.length; i++) {
         const product = mappedProducts[i];
         try {
-          const categorySuggestions = await mapCategoryMutation.mutateAsync({
-            product: {
-              name: product.name,
-              description: product.description,
-              features: product.features,
-              category: product.category,
-              ean: product.ean,
-              sku: product.sku,
-            },
-            marketplace: `${marketplaceName} (${accountName})`,
-            availableCategories: [],
-          });
-
-          const attributeSuggestions = await fillAttributesMutation.mutateAsync({
-            product: {
-              name: product.name,
-              description: product.description,
-              features: product.features,
-              category: product.category,
-            },
-            requiredAttributes: [
-              { name: "Marca", id: "brand", required: true },
-              { name: "Modelo", id: "model", required: true },
-              { name: "Cor", id: "color", required: false },
-              { name: "Material", id: "material", required: false },
-            ],
-            marketplace: `${marketplaceName} (${accountName})`,
-          });
+          // Run category mapping, attribute fill, and title generation in parallel
+          const [categorySuggestions, attributeSuggestions, titleResult] = await Promise.all([
+            mapCategoryMutation.mutateAsync({
+              product: {
+                name: product.name,
+                description: product.description,
+                features: product.features,
+                category: product.category,
+                ean: product.ean,
+                sku: product.sku,
+              },
+              marketplace: `${marketplaceName} (${accountName})`,
+              availableCategories: [],
+            }),
+            fillAttributesMutation.mutateAsync({
+              product: {
+                name: product.name,
+                description: product.description,
+                features: product.features,
+                category: product.category,
+              },
+              requiredAttributes: [
+                { name: "Marca", id: "brand", required: true },
+                { name: "Modelo", id: "model", required: true },
+                { name: "Cor", id: "color", required: false },
+                { name: "Material", id: "material", required: false },
+              ],
+              marketplace: `${marketplaceName} (${accountName})`,
+            }),
+            generateTitleMutation.mutateAsync({
+              product: {
+                name: product.name,
+                description: product.description,
+                features: product.features,
+                category: product.category,
+                ean: product.ean,
+              },
+              marketplace: `${marketplaceName} (${accountName})`,
+            }),
+          ]);
 
           setMappedProducts((prev) =>
             prev.map((p) =>
               p.id === product.id
                 ? {
                     ...p,
+                    optimizedTitle: titleResult?.title || product.name,
+                    titleReasoning: titleResult?.reasoning || "",
                     suggestedCategory: categorySuggestions?.[0] ? {
                         id: categorySuggestions[0].categoryId,
                         name: categorySuggestions[0].categoryName,
@@ -513,7 +532,7 @@ export default function ExportPage() {
           const mlResult = await mlPublishMutation.mutateAsync({
             accountId: selectedAccountInfo.id,
             productId: product.id,
-            name: product.name,
+            name: product.optimizedTitle || product.name,
             description: product.description || undefined,
             price: product.mainPrice || 0,
             stock: product.totalStock || 1,
@@ -522,8 +541,7 @@ export default function ExportPage() {
             brand: features["Marca"] || features["brand"] || undefined,
             images: product.imageUrl ? [product.imageUrl] : undefined,
             features,
-            // Don't pass AI-mapped categoryId - let ML's domain_discovery predict the correct category
-            // categoryId: product.suggestedCategory?.id || undefined,
+            categoryId: product.suggestedCategory?.id || undefined,
           });
 
           await addLogMutation.mutateAsync({
@@ -1083,156 +1101,190 @@ export default function ExportPage() {
             </div>
           </div>
 
-          <Card>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-14">Foto</TableHead>
-                      <TableHead>Produto</TableHead>
-                      <TableHead>Categoria Sugerida</TableHead>
-                      <TableHead>Confiança</TableHead>
-                      <TableHead>Atributos Obrigatórios</TableHead>
-                      <TableHead>Atributos Opcionais</TableHead>
-                      <TableHead className="w-12">Editar</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {mappedProducts.map((product) => (
-                      <TableRow key={product.id}>
-                        <TableCell>
-                          {product.status === "mapped" && <CheckCircle className="h-4 w-4 text-green-500" />}
-                          {product.status === "error" && <XCircle className="h-4 w-4 text-destructive" />}
-                          {product.status === "pending" && <AlertCircle className="h-4 w-4 text-amber-500" />}
-                        </TableCell>
-                        <TableCell>
-                          {product.imageUrl ? (
-                            <img src={product.imageUrl} alt={product.name} className="h-10 w-10 rounded-md object-cover border" />
-                          ) : (
-                            <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center">
-                              <Package className="h-4 w-4 text-muted-foreground" />
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="max-w-[200px]">
-                            <p className="text-sm font-medium truncate">{product.name}</p>
-                            <p className="text-xs text-muted-foreground">ID: {product.id}</p>
+          {/* Product review cards */}
+          <div className="space-y-4">
+            {mappedProducts.map((product) => (
+              <Card key={product.id} className={`overflow-hidden ${
+                product.status === "error" ? "border-destructive/50" : 
+                product.status === "mapped" ? "border-green-200" : "border-amber-200"
+              }`}>
+                <CardContent className="p-4">
+                  <div className="flex gap-4">
+                    {/* Product image */}
+                    <div className="shrink-0">
+                      {product.imageUrl ? (
+                        <img 
+                          src={product.imageUrl} 
+                          alt={product.name} 
+                          className="h-24 w-24 rounded-lg object-cover border shadow-sm" 
+                        />
+                      ) : (
+                        <div className="h-24 w-24 rounded-lg bg-muted flex items-center justify-center border">
+                          <Package className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1 mt-1">
+                        {product.status === "mapped" && <CheckCircle className="h-3 w-3 text-green-500" />}
+                        {product.status === "error" && <XCircle className="h-3 w-3 text-destructive" />}
+                        {product.status === "pending" && <AlertCircle className="h-3 w-3 text-amber-500" />}
+                        <span className="text-[10px] text-muted-foreground">
+                          {product.status === "mapped" ? "Mapeado" : product.status === "error" ? "Erro" : "Pendente"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Product details */}
+                    <div className="flex-1 min-w-0 space-y-2">
+                      {/* Title section */}
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs text-muted-foreground">Nome original:</p>
+                            <p className="text-sm text-muted-foreground line-through truncate">{product.name}</p>
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          {product.suggestedCategory ? (
-                            <div className="max-w-[200px]">
-                              <p className="text-sm truncate">{product.suggestedCategory.name}</p>
-                              <p className="text-xs text-muted-foreground truncate">{product.suggestedCategory.path}</p>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {product.suggestedCategory && (
-                            <Badge
-                              variant={product.suggestedCategory.confidence >= 80 ? "default" : "secondary"}
-                              className="text-xs"
-                            >
-                              {product.suggestedCategory.confidence}%
-                            </Badge>
-                          )}
-                        </TableCell>
-                        {/* Atributos Obrigatórios */}
-                        <TableCell>
-                          {(() => {
-                            const requiredAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required !== false);
-                            if (requiredAttrs.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
-                            return editingProduct === product.id ? (
-                              <div className="space-y-1">
-                                {requiredAttrs.map((attr: any) => {
-                                  const origIdx = (product.suggestedAttributes || []).indexOf(attr);
-                                  return (
-                                    <div key={origIdx} className="flex items-center gap-1">
-                                      <span className="text-xs font-medium text-red-600 w-20 shrink-0">{attr.attributeName}*</span>
-                                      <Input
-                                        className="h-6 text-xs border-red-200 focus:border-red-400"
-                                        value={attr.value}
-                                        onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
-                                      />
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => setEditingProduct(editingProduct === product.id ? null : product.id)}
+                          >
+                            {editingProduct === product.id ? (
+                              <><Save className="h-3 w-3 mr-1" /> Salvar</>
                             ) : (
-                              <div className="space-y-0.5">
-                                {requiredAttrs.map((attr: any, idx: number) => (
-                                  <p key={idx} className="text-xs">
-                                    <span className="text-red-600 font-medium">{attr.attributeName}*:</span> {attr.value || <span className="text-red-400 italic">vazio</span>}
+                              <><Edit3 className="h-3 w-3 mr-1" /> Editar</>
+                            )}
+                          </Button>
+                        </div>
+                        {editingProduct === product.id ? (
+                          <div className="mt-1">
+                            <p className="text-xs text-muted-foreground mb-0.5">Título otimizado (IA):</p>
+                            <Input
+                              className="h-8 text-sm font-medium"
+                              value={product.optimizedTitle || product.name}
+                              onChange={(e) => {
+                                setMappedProducts(prev => prev.map(p => 
+                                  p.id === product.id ? { ...p, optimizedTitle: e.target.value } : p
+                                ));
+                              }}
+                            />
+                            {product.titleReasoning && (
+                              <p className="text-[10px] text-blue-600 mt-0.5 flex items-center gap-1">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                {product.titleReasoning}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="mt-1">
+                            <p className="text-xs text-muted-foreground">Título para o anúncio:</p>
+                            <p className="text-sm font-semibold text-primary">
+                              {product.optimizedTitle || product.name}
+                            </p>
+                            {product.titleReasoning && (
+                              <p className="text-[10px] text-blue-600 mt-0.5 flex items-center gap-1">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                {product.titleReasoning}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Info row: ID, SKU, EAN, Price, Stock */}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span>ID: <strong>{product.id}</strong></span>
+                        {product.sku && <span>SKU: <strong>{product.sku}</strong></span>}
+                        {product.ean && <span>EAN: <strong>{product.ean}</strong></span>}
+                        {product.mainPrice && <span>Preço: <strong className="text-foreground">R$ {product.mainPrice.toFixed(2)}</strong></span>}
+                        {product.totalStock != null && <span>Estoque: <strong className="text-foreground">{product.totalStock}</strong></span>}
+                      </div>
+
+                      {/* Category */}
+                      {product.suggestedCategory && (
+                        <div className="flex items-center gap-2">
+                          <Badge variant={product.suggestedCategory.confidence >= 80 ? "default" : "secondary"} className="text-[10px]">
+                            {product.suggestedCategory.confidence}%
+                          </Badge>
+                          <span className="text-xs">
+                            {product.suggestedCategory.path || product.suggestedCategory.name}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Attributes */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {/* Required attributes */}
+                        {(() => {
+                          const requiredAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required !== false);
+                          if (requiredAttrs.length === 0) return null;
+                          return (
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide">Obrigatórios</p>
+                              {requiredAttrs.map((attr: any) => {
+                                const origIdx = (product.suggestedAttributes || []).indexOf(attr);
+                                return editingProduct === product.id ? (
+                                  <div key={origIdx} className="flex items-center gap-1">
+                                    <span className="text-xs font-medium text-red-600 w-16 shrink-0 truncate">{attr.attributeName}*</span>
+                                    <Input
+                                      className="h-6 text-xs border-red-200 focus:border-red-400"
+                                      value={attr.value}
+                                      onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
+                                    />
+                                  </div>
+                                ) : (
+                                  <p key={origIdx} className="text-xs">
+                                    <span className="text-red-600 font-medium">{attr.attributeName}*:</span>{" "}
+                                    {attr.value || <span className="text-red-400 italic">vazio</span>}
                                   </p>
-                                ))}
-                              </div>
-                            );
-                          })()}
-                        </TableCell>
-                        {/* Atributos Opcionais */}
-                        <TableCell>
-                          {(() => {
-                            const optionalAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required === false);
-                            if (optionalAttrs.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
-                            return editingProduct === product.id ? (
-                              <div className="space-y-1">
-                                {optionalAttrs.map((attr: any) => {
-                                  const origIdx = (product.suggestedAttributes || []).indexOf(attr);
-                                  return (
-                                    <div key={origIdx} className="flex items-center gap-1">
-                                      <span className="text-xs text-muted-foreground w-20 shrink-0">{attr.attributeName}</span>
-                                      <Input
-                                        className="h-6 text-xs"
-                                        value={attr.value}
-                                        onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
-                                      />
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <div className="space-y-0.5">
-                                {optionalAttrs.slice(0, 3).map((attr: any, idx: number) => (
-                                  <p key={idx} className="text-xs">
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                        {/* Optional attributes */}
+                        {(() => {
+                          const optionalAttrs = (product.suggestedAttributes || []).filter((a: any) => a.required === false);
+                          if (optionalAttrs.length === 0) return null;
+                          return (
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Opcionais</p>
+                              {(editingProduct === product.id ? optionalAttrs : optionalAttrs.slice(0, 4)).map((attr: any) => {
+                                const origIdx = (product.suggestedAttributes || []).indexOf(attr);
+                                return editingProduct === product.id ? (
+                                  <div key={origIdx} className="flex items-center gap-1">
+                                    <span className="text-xs text-muted-foreground w-16 shrink-0 truncate">{attr.attributeName}</span>
+                                    <Input
+                                      className="h-6 text-xs"
+                                      value={attr.value}
+                                      onChange={(e) => updateProductAttribute(product.id, origIdx, e.target.value)}
+                                    />
+                                  </div>
+                                ) : (
+                                  <p key={origIdx} className="text-xs">
                                     <span className="text-muted-foreground">{attr.attributeName}:</span> {attr.value || "—"}
                                   </p>
-                                ))}
-                                {optionalAttrs.length > 3 && (
-                                  <p className="text-xs text-muted-foreground">
-                                    +{optionalAttrs.length - 3} mais
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </TableCell>
-                        <TableCell>
-                          {product.status === "mapped" && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setEditingProduct(editingProduct === product.id ? null : product.id)}
-                            >
-                              {editingProduct === product.id ? (
-                                <Save className="h-3 w-3" />
-                              ) : (
-                                <Edit3 className="h-3 w-3" />
+                                );
+                              })}
+                              {editingProduct !== product.id && optionalAttrs.length > 4 && (
+                                <p className="text-[10px] text-muted-foreground">+{optionalAttrs.length - 4} mais</p>
                               )}
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Error message */}
+                      {product.status === "error" && product.errorMessage && (
+                        <div className="p-2 rounded bg-destructive/10 border border-destructive/20">
+                          <p className="text-xs text-destructive">{product.errorMessage}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 

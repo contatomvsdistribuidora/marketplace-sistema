@@ -296,3 +296,80 @@ Retorne:
     return { summary: "", keywords: [], suggestedCategory: "" };
   }
 }
+
+/**
+ * Generate an optimized title for marketplace listing
+ * Creates a title that is similar but not identical to the original,
+ * optimized for marketplace SEO and following best practices
+ */
+export async function generateOptimizedTitle(
+  product: {
+    name: string;
+    description: string;
+    features: Record<string, string>;
+    category: string;
+    ean?: string;
+  },
+  marketplace: string
+): Promise<{ title: string; reasoning: string }> {
+  const featuresText = Object.entries(product.features || {})
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(", ");
+
+  const response = await invokeLLM({
+    messages: [
+      {
+        role: "system",
+        content: `Você é um especialista em SEO para marketplaces brasileiros, especialmente ${marketplace}.
+Crie um título otimizado para o anúncio do produto seguindo estas regras:
+- Máximo 60 caracteres para Mercado Livre
+- Inclua marca, modelo e características principais
+- NÃO use caixa alta completa (ALL CAPS)
+- NÃO use caracteres especiais desnecessários
+- Use palavras-chave relevantes para busca
+- O título deve ser DIFERENTE do original mas descrever o mesmo produto
+- Priorize: Marca + Produto + Modelo + Característica principal
+Responda APENAS em JSON válido.`,
+      },
+      {
+        role: "user",
+        content: `Produto:
+Nome original: ${product.name}
+Descrição: ${(product.description || "").substring(0, 1000)}
+Categoria: ${product.category || "N/A"}
+Características: ${featuresText || "N/A"}
+EAN: ${product.ean || "N/A"}
+
+Retorne:
+{
+  "title": "Título otimizado para o marketplace",
+  "reasoning": "Explicação das mudanças feitas"
+}`,
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "optimized_title",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            reasoning: { type: "string" },
+          },
+          required: ["title", "reasoning"],
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+
+  try {
+    const content = response.choices?.[0]?.message?.content as string | undefined;
+    if (!content) return { title: product.name, reasoning: "Falha ao gerar título" };
+    return JSON.parse(content);
+  } catch {
+    return { title: product.name, reasoning: "Falha ao gerar título" };
+  }
+}

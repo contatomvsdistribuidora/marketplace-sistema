@@ -11,10 +11,11 @@ import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Package, Filter, Loader2, ChevronLeft, ChevronRight, ArrowRight,
-  RefreshCw, Search, ChevronDown, ChevronUp, X, SlidersHorizontal
+  RefreshCw, Search, ChevronDown, ChevronUp, X, SlidersHorizontal, Eye
 } from "lucide-react";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
+import { ProductDetailModal } from "@/components/ProductDetailModal";
 
 type Filters = {
   tagName?: string;
@@ -168,6 +169,8 @@ export default function ProductsPage() {
   const products = productsData?.products || [];
 
   const [allFilteredSelected, setAllFilteredSelected] = useState(false);
+  const [detailProduct, setDetailProduct] = useState<any>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const toggleProduct = (id: string) => {
     setAllFilteredSelected(false);
@@ -620,6 +623,7 @@ export default function ProductsPage() {
                           onCheckedChange={togglePageAll}
                         />
                       </TableHead>
+                      <TableHead className="w-16">Foto</TableHead>
                       <TableHead className="w-24">ID</TableHead>
                       <TableHead>Nome</TableHead>
                       <TableHead className="w-32">SKU</TableHead>
@@ -627,7 +631,8 @@ export default function ProductsPage() {
                       <TableHead className="w-40">Tags</TableHead>
                       <TableHead className="w-20 text-right">Estoque</TableHead>
                       <TableHead className="w-24 text-right">Preço</TableHead>
-                      <TableHead className="w-20 text-right">Peso</TableHead>
+                        <TableHead className="w-20 text-right">Peso</TableHead>
+                        <TableHead className="w-12"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -642,9 +647,25 @@ export default function ProductsPage() {
                             onCheckedChange={() => toggleProduct(String(product.id))}
                           />
                         </TableCell>
+                        <TableCell>
+                          {product.imageUrl ? (
+                            <img src={product.imageUrl} alt={product.name} className="h-10 w-10 rounded-md object-cover border cursor-pointer hover:ring-2 ring-primary/30 transition" onClick={() => { setDetailProduct(product); setDetailOpen(true); }} />
+                          ) : (
+                            <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center">
+                              <Package className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{product.id}</TableCell>
-                        <TableCell className="font-medium max-w-[300px] truncate" title={product.name}>
-                          {product.name || "—"}
+                        <TableCell>
+                          <button
+                            className="text-left hover:underline cursor-pointer"
+                            onClick={() => { setDetailProduct(product); setDetailOpen(true); }}
+                          >
+                            <span className="font-medium max-w-[300px] truncate block" title={product.name}>
+                              {product.name || "—"}
+                            </span>
+                          </button>
                         </TableCell>
                         <TableCell className="text-xs font-mono">{product.sku || "—"}</TableCell>
                         <TableCell className="text-xs font-mono">{product.ean || "—"}</TableCell>
@@ -670,6 +691,11 @@ export default function ProductsPage() {
                         </TableCell>
                         <TableCell className="text-right text-xs">
                           {product.weight ? `${product.weight} kg` : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setDetailProduct(product); setDetailOpen(true); }}>
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -708,6 +734,13 @@ export default function ProductsPage() {
           )}
         </CardContent>
       </Card>
+      {/* Product Detail Modal */}
+      <ProductDetailModal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        product={detailProduct}
+        inventoryId={inventoryId || 0}
+      />
     </div>
   );
 }

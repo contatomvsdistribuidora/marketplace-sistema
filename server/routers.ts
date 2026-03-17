@@ -357,6 +357,23 @@ export const appRouter = router({
         return aiMapper.analyzeProduct(input.product, input.marketplace);
       }),
 
+    generateTitle: protectedProcedure
+      .input(
+        z.object({
+          product: z.object({
+            name: z.string(),
+            description: z.string().default(""),
+            features: z.record(z.string(), z.string()).default({}),
+            category: z.string().default(""),
+            ean: z.string().optional(),
+          }),
+          marketplace: z.string(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        return aiMapper.generateOptimizedTitle(input.product, input.marketplace);
+      }),
+
     batchMapCategories: protectedProcedure
       .input(
         z.object({
