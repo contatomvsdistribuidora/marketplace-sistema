@@ -284,13 +284,33 @@ async function mlApiCall(accessToken: string, method: string, path: string, body
   }
 
   const response = await fetch(url, options);
-  const data = await response.json();
+  let data: any;
+  const responseText = await response.text();
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    console.error(`[ML API] ${method} ${path} - non-JSON response:`, responseText.substring(0, 500));
+    throw new Error(`ML API error ${response.status}: Non-JSON response`);
+  }
 
   if (!response.ok) {
+    // Extract detailed error info from ML API response
+    const errorDetails: string[] = [];
+    if (data.message) errorDetails.push(data.message);
+    if (data.error) errorDetails.push(data.error);
+    if (data.cause && Array.isArray(data.cause)) {
+      for (const cause of data.cause) {
+        const causeMsg = [cause.code, cause.message, cause.type].filter(Boolean).join(': ');
+        if (causeMsg) errorDetails.push(causeMsg);
+        // Show which fields are missing
+        if (cause.references) {
+          errorDetails.push(`References: ${JSON.stringify(cause.references)}`);
+        }
+      }
+    }
+    const fullError = errorDetails.length > 0 ? errorDetails.join(' | ') : JSON.stringify(data);
     console.error(`[ML API] ${method} ${path} failed:`, response.status, JSON.stringify(data));
-    throw new Error(
-      `ML API error ${response.status}: ${data.message || data.error || JSON.stringify(data)}`
-    );
+    throw new Error(`ML API error ${response.status}: ${fullError}`);
   }
 
   return data;
@@ -786,6 +806,40 @@ export async function publishProduct(
       );
     }
 
+    // Ensure all required attributes are present with fallback values
+    for (const reqAttr of requiredAttrs) {
+      const existing = filledAttributes.find((a: any) => a.id === reqAttr.id);
+      if (!existing) {
+        console.warn(`[ML publishProduct] Required attribute ${reqAttr.id} (${reqAttr.name}) missing from AI response, adding fallback`);
+        let fallbackValue = "";
+        
+        // Smart fallbacks for common required attributes
+        if (reqAttr.id === "BRAND") {
+          fallbackValue = product.brand || "Genérica";
+        } else if (reqAttr.id === "MODEL") {
+          // Extract model from product name (first 40 chars)
+          fallbackValue = product.name.substring(0, 40);
+        } else if (reqAttr.id === "GTIN") {
+          fallbackValue = product.ean || "";
+        } else if (reqAttr.values && reqAttr.values.length > 0) {
+          // Use first available value as fallback
+          filledAttributes.push({ id: reqAttr.id, value_name: reqAttr.values[0].name, value_id: reqAttr.values[0].id });
+          continue;
+        } else {
+          fallbackValue = "N/A";
+        }
+        
+        if (fallbackValue) {
+          filledAttributes.push({ id: reqAttr.id, value_name: fallbackValue });
+        }
+      } else if (!existing.value_name && !existing.value_id) {
+        // Attribute exists but has no value
+        console.warn(`[ML publishProduct] Required attribute ${reqAttr.id} has empty value, fixing`);
+        if (reqAttr.id === "BRAND") existing.value_name = product.brand || "Genérica";
+        else if (reqAttr.id === "MODEL") existing.value_name = product.name.substring(0, 40);
+      }
+    }
+
     // Add GTIN/EAN if available and not already filled
     if (product.ean && !filledAttributes.find((a: any) => a.id === "GTIN")) {
       filledAttributes.push({ id: "GTIN", value_name: product.ean });
@@ -795,6 +849,13 @@ export async function publishProduct(
     if (product.sku && !filledAttributes.find((a: any) => a.id === "SELLER_SKU")) {
       filledAttributes.push({ id: "SELLER_SKU", value_name: product.sku });
     }
+
+    // Log all attributes being sent for debugging
+    console.log(`[ML publishProduct] Required attrs for category: ${requiredAttrs.map((a: any) => a.id).join(', ')}`);
+    console.log(`[ML publishProduct] Filled attributes: ${filledAttributes.map((a: any) => `${a.id}=${a.value_name || a.value_id}`).join(', ')}`);
+    
+    // Validate: ensure no attribute has both value_name and value_id as empty/null
+    filledAttributes = filledAttributes.filter((a: any) => a.value_name || a.value_id);
 
     // 4. Prepare pictures
     const pictures = (product.images || []).map((url) => ({ source: url }));
