@@ -97,3 +97,5 @@
 - [x] Frontend: publicação de produtos no TikTok Shop
 - [x] Testes da integração TikTok Shop
 - [x] Salvar credenciais TikTok Shop (App Key + App Secret) no sistema
+- [ ] BUG: TikTok OAuth mostra "This service does not exist" ao tentar conectar conta
+- [x] Criar página de Política de Privacidade (/privacy-policy)

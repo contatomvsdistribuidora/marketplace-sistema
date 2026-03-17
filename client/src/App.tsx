@@ -17,6 +17,7 @@ import MlPublish from "./pages/MlPublish";
 import TikTokAccounts from "./pages/TikTokAccounts";
 import TikTokPublish from "./pages/TikTokPublish";
 import Login from "./pages/Login";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 function DashboardRouter() {
   return (
@@ -48,6 +49,7 @@ function App() {
           <Toaster />
           <Switch>
             <Route path="/login" component={Login} />
+            <Route path="/privacy-policy" component={PrivacyPolicy} />
             <Route component={DashboardRouter} />
           </Switch>
         </TooltipProvider>
