@@ -99,3 +99,4 @@
 - [x] Salvar credenciais TikTok Shop (App Key + App Secret) no sistema
 - [ ] BUG: TikTok OAuth mostra "This service does not exist" ao tentar conectar conta
 - [x] Criar página de Política de Privacidade (/privacy-policy)
+- [x] BUG: OAuth ML callback retorna 404 em produção - corrigido: domínio atualizado de baselinker-marketplace-exporter.manus.space para blmarketexp-nqnujejx.manus.space em todos os arquivos

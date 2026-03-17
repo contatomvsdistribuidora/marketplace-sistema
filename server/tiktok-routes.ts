@@ -7,7 +7,7 @@ import { tiktokAccounts } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db";
 
-const PROD_DOMAIN = "https://baselinker-marketplace-exporter.manus.space";
+const PROD_DOMAIN = "https://blmarketexp-nqnujejx.manus.space";
 
 export function registerTiktokRoutes(app: Express) {
   // OAuth callback

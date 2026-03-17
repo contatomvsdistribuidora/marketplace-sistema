@@ -13,7 +13,7 @@ const TT_AUTH_BASE = "https://auth.tiktok-shops.com";
 const TT_API_BASE = "https://open-api.tiktokglobalshop.com";
 const TT_AUTH_URL_US = "https://services.us.tiktokshop.com/open/authorize";
 const TT_AUTH_URL_GLOBAL = "https://services.tiktokshop.com/open/authorize";
-const PROD_DOMAIN = "https://baselinker-marketplace-exporter.manus.space";
+const PROD_DOMAIN = "https://blmarketexp-nqnujejx.manus.space";
 const TT_CALLBACK_PATH = "/api/tiktok/callback";
 const API_VERSION = "202309";
 

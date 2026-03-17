@@ -606,7 +606,7 @@ export const appRouter = router({
       .input(z.object({ origin: z.string() }))
       .mutation(async ({ ctx, input }) => {
         // Always use the production domain for redirect_uri to match ML app configuration
-        const productionDomain = "https://baselinker-marketplace-exporter.manus.space";
+        const productionDomain = "https://blmarketexp-nqnujejx.manus.space";
         const redirectUri = `${productionDomain}/api/ml/callback`;
         const state = Buffer.from(
           JSON.stringify({ userId: ctx.user.id, returnPath: "/ml-accounts", origin: input.origin })

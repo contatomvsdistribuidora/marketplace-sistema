@@ -62,7 +62,7 @@ export function registerMlRoutes(app: Express) {
 
       // Build redirect URI (must match exactly what was configured in ML app)
       // Always use the production domain for token exchange
-      const redirectUri = "https://baselinker-marketplace-exporter.manus.space/api/ml/callback";
+      const redirectUri = "https://blmarketexp-nqnujejx.manus.space/api/ml/callback";
 
       // Exchange code for token
       const tokenData = await ml.exchangeCodeForToken(String(code), redirectUri);
@@ -118,7 +118,7 @@ export function registerMlRoutes(app: Express) {
       }
 
       // Use the production domain for redirect URI
-      const redirectUri = "https://baselinker-marketplace-exporter.manus.space/api/ml/callback";
+      const redirectUri = "https://blmarketexp-nqnujejx.manus.space/api/ml/callback";
 
       // Encode state with userId and return path
       const state = Buffer.from(
