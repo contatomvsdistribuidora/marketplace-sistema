@@ -172,3 +172,6 @@
 - [x] Colunas listingType e mlItemId adicionadas na tabela export_logs
 - [x] Endpoints tRPC: exports.history, exports.historyStats, exports.exportedProductIds
 - [x] Testes Vitest para os novos endpoints de histórico de exportação
+- [x] Filtro de exportação na página de Produtos: filtrar por loja/marketplace específico (ex: Mercado Livre Bidushop, etc.)
+- [x] Filtro de exportação na página de Produtos: filtrar por tipo de anúncio (Clássico/Premium/Grátis)
+- [x] Endpoint exportedProductIds retornar dados detalhados (marketplace name, listingType) para suportar filtros avançados

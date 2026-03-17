@@ -674,6 +674,18 @@ export const appRouter = router({
         return db.getExportedProductIds(ctx.user.id);
       }),
 
+    // Get detailed export info per product (marketplace, listingType) for advanced filtering
+    exportedProductDetails: protectedProcedure
+      .query(async ({ ctx }) => {
+        return db.getExportedProductDetails(ctx.user.id);
+      }),
+
+    // Get distinct marketplaces that have successful exports
+    exportedMarketplaces: protectedProcedure
+      .query(async ({ ctx }) => {
+        return db.getExportedMarketplaces(ctx.user.id);
+      }),
+
     // REAL EXPORT: Update product in BaseLinker catalog with marketplace-specific data
     exportProduct: protectedProcedure
       .input(

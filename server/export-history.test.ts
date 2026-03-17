@@ -133,3 +133,40 @@ describe("exports.exportedProductIds", () => {
     }
   });
 });
+
+describe("exports.exportedProductDetails", () => {
+  it("returns an array of detailed export records", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const details = await caller.exports.exportedProductDetails();
+
+    expect(Array.isArray(details)).toBe(true);
+    for (const d of details) {
+      expect(d).toHaveProperty("productId");
+      expect(d).toHaveProperty("marketplaceId");
+      expect(d).toHaveProperty("marketplaceName");
+      expect(d).toHaveProperty("listingType");
+      expect(typeof d.productId).toBe("string");
+      expect(typeof d.marketplaceId).toBe("number");
+      expect(typeof d.marketplaceName).toBe("string");
+    }
+  });
+});
+
+describe("exports.exportedMarketplaces", () => {
+  it("returns an array of marketplace objects with id and name", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const marketplaces = await caller.exports.exportedMarketplaces();
+
+    expect(Array.isArray(marketplaces)).toBe(true);
+    for (const mp of marketplaces) {
+      expect(mp).toHaveProperty("id");
+      expect(mp).toHaveProperty("name");
+      expect(typeof mp.id).toBe("number");
+      expect(typeof mp.name).toBe("string");
+    }
+  });
+});

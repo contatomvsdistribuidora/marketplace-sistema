@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Package, Filter, Loader2, ChevronLeft, ChevronRight, ArrowRight,
-  RefreshCw, Search, ChevronDown, ChevronUp, X, SlidersHorizontal, Eye, CheckCircle, XCircle
+  RefreshCw, Search, ChevronDown, ChevronUp, X, SlidersHorizontal, Eye, CheckCircle, XCircle, Store
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useMemo, useEffect, useCallback } from "react";
@@ -61,6 +61,8 @@ export default function ProductsPage() {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedManufacturer, setSelectedManufacturer] = useState("all");
   const [exportStatusFilter, setExportStatusFilter] = useState("all");
+  const [exportMarketplaceFilter, setExportMarketplaceFilter] = useState("all");
+  const [exportListingTypeFilter, setExportListingTypeFilter] = useState("all");
 
   const { data: tokenData } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
@@ -100,17 +102,44 @@ export default function ProductsPage() {
     onSuccess: () => setScanStarted(true),
   });
 
-  // Check if any filter is active
-  // Fetch exported product IDs
+  // Fetch exported product details for advanced filtering
   const { data: exportedProductIds } = trpc.exports.exportedProductIds.useQuery();
+  const { data: exportedDetails } = trpc.exports.exportedProductDetails.useQuery();
+  const { data: exportedMarketplaces } = trpc.exports.exportedMarketplaces.useQuery();
   const exportedSet = useMemo(() => new Set(exportedProductIds || []), [exportedProductIds]);
+
+  // Build a map of productId -> export details for tooltip and filtering
+  const exportDetailsMap = useMemo(() => {
+    const map = new Map<string, { marketplaces: Set<string>; marketplaceIds: Set<number>; listingTypes: Set<string> }>();
+    for (const d of (exportedDetails || [])) {
+      if (!map.has(d.productId)) {
+        map.set(d.productId, { marketplaces: new Set(), marketplaceIds: new Set(), listingTypes: new Set() });
+      }
+      const entry = map.get(d.productId)!;
+      entry.marketplaces.add(d.marketplaceName);
+      entry.marketplaceIds.add(d.marketplaceId);
+      if (d.listingType) entry.listingTypes.add(d.listingType);
+    }
+    return map;
+  }, [exportedDetails]);
+
+  // Distinct listing types from export data
+  const availableListingTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const d of (exportedDetails || [])) {
+      if (d.listingType) types.add(d.listingType);
+    }
+    return Array.from(types);
+  }, [exportedDetails]);
 
   const hasActiveFilters = useMemo(() => {
     return selectedTag !== "all" || selectedCategory !== "all" || selectedManufacturer !== "all" ||
       draftName || draftEan || draftSku || draftPriceMin || draftPriceMax ||
-      draftStockMin || draftStockMax || draftWeightMin || draftWeightMax || exportStatusFilter !== "all";
+      draftStockMin || draftStockMax || draftWeightMin || draftWeightMax ||
+      exportStatusFilter !== "all" || exportMarketplaceFilter !== "all" || exportListingTypeFilter !== "all";
   }, [selectedTag, selectedCategory, selectedManufacturer, draftName, draftEan, draftSku,
-    draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax, exportStatusFilter]);
+    draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax,
+    exportStatusFilter, exportMarketplaceFilter, exportListingTypeFilter]);
 
   // Build filters object
   const activeFilters = useMemo((): Filters => {
@@ -178,13 +207,36 @@ export default function ProductsPage() {
     draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax, pageSize]);
 
   const rawProducts = productsData?.products || [];
-  // Apply client-side export status filter
+  // Apply client-side export filters (status, marketplace, listing type)
   const products = useMemo(() => {
-    if (exportStatusFilter === "all") return rawProducts;
-    if (exportStatusFilter === "exported") return rawProducts.filter((p: any) => exportedSet.has(String(p.id)));
-    if (exportStatusFilter === "not_exported") return rawProducts.filter((p: any) => !exportedSet.has(String(p.id)));
-    return rawProducts;
-  }, [rawProducts, exportStatusFilter, exportedSet]);
+    let filtered = rawProducts;
+
+    // Status filter
+    if (exportStatusFilter === "exported") {
+      filtered = filtered.filter((p: any) => exportedSet.has(String(p.id)));
+    } else if (exportStatusFilter === "not_exported") {
+      filtered = filtered.filter((p: any) => !exportedSet.has(String(p.id)));
+    }
+
+    // Marketplace filter
+    if (exportMarketplaceFilter !== "all") {
+      const mpId = Number(exportMarketplaceFilter);
+      filtered = filtered.filter((p: any) => {
+        const details = exportDetailsMap.get(String(p.id));
+        return details?.marketplaceIds.has(mpId);
+      });
+    }
+
+    // Listing type filter
+    if (exportListingTypeFilter !== "all") {
+      filtered = filtered.filter((p: any) => {
+        const details = exportDetailsMap.get(String(p.id));
+        return details?.listingTypes.has(exportListingTypeFilter);
+      });
+    }
+
+    return filtered;
+  }, [rawProducts, exportStatusFilter, exportMarketplaceFilter, exportListingTypeFilter, exportedSet, exportDetailsMap]);
 
   const [allFilteredSelected, setAllFilteredSelected] = useState(false);
   const [detailProduct, setDetailProduct] = useState<any>(null);
@@ -247,6 +299,8 @@ export default function ProductsPage() {
     setDraftWeightMin("");
     setDraftWeightMax("");
     setExportStatusFilter("all");
+    setExportMarketplaceFilter("all");
+    setExportListingTypeFilter("all");
   };
 
   const handleStartSync = () => {
@@ -576,6 +630,38 @@ export default function ProductsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Exportado p/ Loja</Label>
+                  <Select value={exportMarketplaceFilter} onValueChange={setExportMarketplaceFilter}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Todas as lojas" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas as lojas</SelectItem>
+                      {(exportedMarketplaces || []).map((mp) => (
+                        <SelectItem key={mp.id} value={String(mp.id)}>{mp.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Tipo de Anúncio</Label>
+                  <Select value={exportListingTypeFilter} onValueChange={setExportListingTypeFilter}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Todos os tipos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos os tipos</SelectItem>
+                      {availableListingTypes.map((lt) => (
+                        <SelectItem key={lt} value={lt}>
+                          {lt === "gold_pro" ? "Premium (gold_pro)" : lt === "gold_special" ? "Clássico (gold_special)" : lt === "free" ? "Grátis" : lt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </CardContent>
           </CollapsibleContent>
@@ -739,16 +825,30 @@ export default function ProductsPage() {
                           {product.weight ? `${product.weight} kg` : "—"}
                         </TableCell>
                         <TableCell className="text-center">
-                          {exportedSet.has(String(product.id)) ? (
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <CheckCircle className="h-4 w-4 text-green-500 mx-auto" />
-                              </TooltipTrigger>
-                              <TooltipContent>Produto já exportado com sucesso</TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
+                          {(() => {
+                            const details = exportDetailsMap.get(String(product.id));
+                            if (!details) return <span className="text-xs text-muted-foreground">—</span>;
+                            const mpNames = Array.from(details.marketplaces).join(", ");
+                            const ltNames = Array.from(details.listingTypes).map(lt =>
+                              lt === "gold_pro" ? "Premium" : lt === "gold_special" ? "Clássico" : lt === "free" ? "Grátis" : lt
+                            ).join(", ");
+                            return (
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <CheckCircle className="h-4 w-4 text-green-500" />
+                                    <span className="text-[10px] text-muted-foreground leading-tight max-w-[80px] truncate">{mpNames}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <div className="text-xs space-y-1">
+                                    <div><strong>Lojas:</strong> {mpNames}</div>
+                                    {ltNames && <div><strong>Tipos:</strong> {ltNames}</div>}
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setDetailProduct(product); setDetailOpen(true); }}>

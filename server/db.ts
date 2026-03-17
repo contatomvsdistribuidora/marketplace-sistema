@@ -410,6 +410,41 @@ export async function getExportedProductIds(userId: number): Promise<string[]> {
   return results.map(r => r.productId);
 }
 
+/** Get detailed export info per product (marketplace, listingType) for advanced filtering */
+export async function getExportedProductDetails(userId: number): Promise<{
+  productId: string;
+  marketplaceId: number;
+  marketplaceName: string;
+  listingType: string | null;
+}[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.select({
+    productId: exportLogs.productId,
+    marketplaceId: exportLogs.marketplaceId,
+    marketplaceName: marketplaces.name,
+    listingType: exportLogs.listingType,
+  })
+    .from(exportLogs)
+    .innerJoin(marketplaces, eq(exportLogs.marketplaceId, marketplaces.id))
+    .where(and(eq(exportLogs.userId, userId), eq(exportLogs.status, "success")));
+  return results;
+}
+
+/** Get distinct marketplace names that have successful exports */
+export async function getExportedMarketplaces(userId: number): Promise<{ id: number; name: string }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.selectDistinct({
+    id: marketplaces.id,
+    name: marketplaces.name,
+  })
+    .from(exportLogs)
+    .innerJoin(marketplaces, eq(exportLogs.marketplaceId, marketplaces.id))
+    .where(and(eq(exportLogs.userId, userId), eq(exportLogs.status, "success")));
+  return results;
+}
+
 // ============ AGENT QUEUE ============
 export async function addToAgentQueue(items: InsertAgentQueue[]) {
   const db = await getDb();
