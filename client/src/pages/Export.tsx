@@ -712,6 +712,28 @@ export default function ExportPage() {
     toast.success("Foto de capa alterada!");
   }, []);
 
+  // ===== BATCH CHANGE COVER IMAGE =====
+  const setBatchCoverImage = useCallback((mode: "first" | "second" | "third" | "last") => {
+    let count = 0;
+    setMappedProducts(prev => prev.map(p => {
+      if (!p.selected || !p.allImages || p.allImages.length <= 1) return p;
+      let newIdx: number;
+      switch (mode) {
+        case "first": newIdx = 0; break;
+        case "second": newIdx = Math.min(1, p.allImages.length - 1); break;
+        case "third": newIdx = Math.min(2, p.allImages.length - 1); break;
+        case "last": newIdx = p.allImages.length - 1; break;
+      }
+      if (newIdx !== (p.coverImageIndex || 0)) {
+        count++;
+        return { ...p, coverImageIndex: newIdx };
+      }
+      return p;
+    }));
+    const label = mode === "first" ? "1\u00AA" : mode === "second" ? "2\u00AA" : mode === "third" ? "3\u00AA" : "\u00FAltima";
+    toast.success(`Capa definida como ${label} foto para ${count} produto(s)`);
+  }, []);
+
   // ===== TOGGLE EXPANDED =====
   const toggleExpanded = useCallback((productId: string) => {
     setExpandedProducts(prev => {
@@ -2328,6 +2350,44 @@ export default function ExportPage() {
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
                       <p className="text-xs">Gera uma foto com IA para cada produto selecionado e define como foto de capa. A foto original é usada como referência.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {/* Row 4: Batch Cover Image Selection */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-medium flex items-center gap-1 whitespace-nowrap">
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      Foto de Capa:
+                    </Label>
+                    <div className="flex gap-1">
+                      {([
+                        { mode: "first" as const, label: "1\u00AA Foto" },
+                        { mode: "second" as const, label: "2\u00AA Foto" },
+                        { mode: "third" as const, label: "3\u00AA Foto" },
+                        { mode: "last" as const, label: "\u00DAltima Foto" },
+                      ]).map(opt => (
+                        <Button
+                          key={opt.mode}
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[11px] gap-1"
+                          onClick={() => setBatchCoverImage(opt.mode)}
+                          disabled={selectedProducts.filter(p => p.allImages && p.allImages.length > 1).length === 0}
+                        >
+                          {opt.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="text-xs">Define a foto de capa em lote para todos os produtos selecionados. "\u00DAltima Foto" \u00e9 \u00fatil ap\u00f3s gerar fotos com IA. Voc\u00ea tamb\u00e9m pode trocar a capa individualmente passando o mouse sobre a foto de cada produto.</p>
                     </TooltipContent>
                   </Tooltip>
                 </div>
