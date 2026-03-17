@@ -327,7 +327,27 @@ export async function getMlUserInfo(accessToken: string) {
     email: data.email as string,
     siteId: data.site_id as string,
     permalink: data.permalink as string,
+    tags: (data.tags || []) as string[],
   };
+}
+
+/**
+ * Check if a seller uses the User Products model
+ * Sellers with tag "user_product_seller" must publish without title field
+ */
+export async function isUserProductSeller(accountId: number): Promise<boolean> {
+  try {
+    const accessToken = await getValidToken(accountId);
+    const userInfo = await mlApiCall(accessToken, "GET", "/users/me");
+    const tags = (userInfo.tags || []) as string[];
+    const isUP = tags.includes("user_product_seller");
+    console.log(`[ML] Seller ${userInfo.nickname} tags: ${tags.join(', ')} | isUserProductSeller: ${isUP}`);
+    return isUP;
+  } catch (err) {
+    console.error("[ML] Failed to check user_product_seller tag:", err);
+    // Default to true (safer - most sellers are being migrated)
+    return true;
+  }
 }
 
 // ============ CATEGORY PREDICTION ============
@@ -454,12 +474,12 @@ export async function createItem(
     pictures?: { source: string }[];
     attributes?: { id: string; value_name?: string; value_id?: string }[];
     saleTerms?: { id: string; value_name?: string; value_id?: string }[];
+    isUserProduct?: boolean; // If true, don't send title (User Products model)
   }
 ) {
   const accessToken = await getValidToken(accountId);
 
   const body: any = {
-    title: itemData.title,
     category_id: itemData.categoryId,
     price: itemData.price,
     currency_id: itemData.currencyId || "BRL",
@@ -469,13 +489,17 @@ export async function createItem(
     listing_type_id: itemData.listingTypeId || "gold_special",
   };
 
-  // family_name is required for sellers with "user_product_seller" tag
-  // It's a generic product description used to group User Products into families
-  if (itemData.familyName) {
-    body.family_name = itemData.familyName;
+  // User Products model: don't send title, use family_name instead
+  // Traditional model: send title
+  if (itemData.isUserProduct) {
+    console.log(`[ML createItem] User Products mode: NOT sending title, using family_name`);
+    body.family_name = itemData.familyName || itemData.title;
+    // Do NOT set body.title
   } else {
-    // Always send family_name as it's now required for most sellers
-    body.family_name = itemData.title;
+    console.log(`[ML createItem] Traditional mode: sending title`);
+    body.title = itemData.title;
+    // Also send family_name as fallback (some sellers are being migrated)
+    body.family_name = itemData.familyName || itemData.title;
   }
 
   if (itemData.pictures && itemData.pictures.length > 0) {
@@ -486,12 +510,36 @@ export async function createItem(
     body.attributes = itemData.attributes;
   }
 
+  // Sale terms: warranty is required for MLB (Brazil)
   if (itemData.saleTerms && itemData.saleTerms.length > 0) {
     body.sale_terms = itemData.saleTerms;
+  } else {
+    // Default sale_terms with warranty (required for most categories)
+    body.sale_terms = [
+      { id: "WARRANTY_TYPE", value_name: "Garantia do vendedor" },
+      { id: "WARRANTY_TIME", value_name: "90 dias" },
+    ];
   }
 
-  console.log(`[ML createItem] Sending POST /items with body:`, JSON.stringify(body).substring(0, 500));
-  const result = await mlApiCall(accessToken, "POST", "/items", body);
+  console.log(`[ML createItem] Sending POST /items with body:`, JSON.stringify(body).substring(0, 800));
+  
+  let result: any;
+  try {
+    result = await mlApiCall(accessToken, "POST", "/items", body);
+  } catch (err: any) {
+    // If title is invalid (User Products), retry without title
+    if (err.message?.includes('invalid_fields') && err.message?.includes('title') && !itemData.isUserProduct) {
+      console.log(`[ML createItem] Got title invalid error, retrying in User Products mode (without title)`);
+      delete body.title;
+      if (!body.family_name) {
+        body.family_name = itemData.title;
+      }
+      result = await mlApiCall(accessToken, "POST", "/items", body);
+    } else {
+      throw err;
+    }
+  }
+  
   console.log(`[ML createItem] Response:`, JSON.stringify(result).substring(0, 300));
 
   // Set description separately (ML requires it as a separate call)
@@ -870,8 +918,12 @@ export async function publishProduct(
     // 4. Prepare pictures
     const pictures = (product.images || []).map((url) => ({ source: url }));
 
+    // 4.5 Check if seller uses User Products model
+    const isUP = await isUserProductSeller(accountId);
+    console.log(`[ML publishProduct] isUserProductSeller: ${isUP}`);
+
     // 5. Create item on ML
-    console.log(`[ML publishProduct] Creating item with categoryId=${categoryId}, title="${product.name.substring(0, 60)}", price=${product.price}, stock=${product.stock}`);
+    console.log(`[ML publishProduct] Creating item with categoryId=${categoryId}, title="${product.name.substring(0, 60)}", price=${product.price}, stock=${product.stock}, isUserProduct=${isUP}`);
     console.log(`[ML publishProduct] Attributes to send:`, JSON.stringify(filledAttributes).substring(0, 300));
     const mlItem = await createItem(accountId, {
       title: product.name.substring(0, 60), // ML title limit is 60 chars
@@ -881,6 +933,7 @@ export async function publishProduct(
       description: product.description,
       pictures,
       attributes: filledAttributes,
+      isUserProduct: isUP,
     });
 
     // 6. Save listing in our DB

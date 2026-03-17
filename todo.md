@@ -124,3 +124,6 @@
 - [x] BUG: Sync de categorias fica travado como "em andamento" - corrigido: auto-reset após 5min, botão cancelar, verificação inicial do estado ao carregar página
 - [x] BUG: Erro body.required_fields (HTTP 400) - corrigido: garantia de BRAND/MODEL com fallback, mensagens de erro detalhadas da API, validação de atributos obrigatórios
 - [x] BUG: Erro family_name obrigatório - corrigido: family_name agora é sempre enviado no body do POST /items (usa o título do produto como family_name)
+- [x] BUG: Erro body.invalid_fields [title] - corrigido: detecta tag user_product_seller via API, não envia title para User Products, retry automático sem title se erro
+- [ ] Mapear todos os atributos obrigatórios por categoria ML no banco (similar ao que fizemos com categorias)
+- [x] Atualizar publishProduct para usar formato correto do modelo User Products (isUserProduct flag + sale_terms padrão)
