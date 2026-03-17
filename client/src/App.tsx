@@ -17,6 +17,7 @@ import MlPublish from "./pages/MlPublish";
 import MlCategories from "./pages/MlCategories";
 import TikTokAccounts from "./pages/TikTokAccounts";
 import TikTokPublish from "./pages/TikTokPublish";
+import ExportHistory from "./pages/ExportHistory";
 import Login from "./pages/Login";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 
@@ -36,6 +37,7 @@ function DashboardRouter() {
         <Route path="/ml-categories" component={MlCategories} />
         <Route path="/tiktok-accounts" component={TikTokAccounts} />
         <Route path="/tiktok-publish" component={TikTokPublish} />
+        <Route path="/export-history" component={ExportHistory} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

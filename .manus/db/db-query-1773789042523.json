@@ -1,0 +1,90 @@
+{
+  "query": "SELECT productId, LEFT(productName, 50) as name, mlItemId, listingType, ml_listing_status, LEFT(permalink, 60) as link FROM ml_listings LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT productId, LEFT(productName, 50) as name, mlItemId, listingType, ml_listing_status, LEFT(permalink, 60) as link FROM ml_listings LIMIT 10;",
+  "rows": [
+    {
+      "productId": "92600603",
+      "name": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600605",
+      "name": "Triciclo Infantil Bandeirante Velobaby Passeio E P",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600603",
+      "name": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600603",
+      "name": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600603",
+      "name": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600605",
+      "name": "Triciclo Infantil Bandeirante Velobaby Passeio E P",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600594",
+      "name": "Super Banjipe Reclinável Com Capota Passeio E Peda",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600605",
+      "name": "Triciclo Infantil Bandeirante Velobaby Passeio E P",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600603",
+      "name": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante",
+      "mlItemId": "NULL",
+      "listingType": "gold_special",
+      "ml_listing_status": "error",
+      "link": "NULL"
+    },
+    {
+      "productId": "92600596",
+      "name": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante",
+      "mlItemId": "MLB6471659844",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-6471659844-triciclo-v"
+    }
+  ],
+  "messages": [],
+  "stdout": "productId\tname\tmlItemId\tlistingType\tml_listing_status\tlink\n92600603\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante\tNULL\tgold_special\terror\tNULL\n92600605\tTriciclo Infantil Bandeirante Velobaby Passeio E P\tNULL\tgold_special\terror\tNULL\n92600603\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante\tNULL\tgold_special\terror\tNULL\n92600603\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante\tNULL\tgold_special\terror\tNULL\n92600603\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante\tNULL\tgold_special\terror\tNULL\n92600605\tTriciclo Infantil Bandeirante Velobaby Passeio E P\tNULL\tgold_special\terror\tNULL\n92600594\tSuper Banjipe Reclinável Com Capota Passeio E Peda\tNULL\tgold_special\terror\tNULL\n92600605\tTriciclo Infantil Bandeirante Velobaby Passeio E P\tNULL\tgold_special\terror\tNULL\n92600603\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante\tNULL\tgold_special\terror\tNULL\n92600596\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante\tMLB6471659844\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-6471659844-triciclo-v\n",
+  "stderr": "",
+  "execution_time_ms": 366
+}

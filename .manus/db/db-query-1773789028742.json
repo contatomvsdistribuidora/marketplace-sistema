@@ -1,0 +1,50 @@
+{
+  "query": "SELECT productId, LEFT(productName, 60) as name, listingType, mlItemId, status, LEFT(JSON_UNQUOTE(JSON_EXTRACT(baselinkerResponse, '$.mlItemId')), 20) as respItemId FROM export_logs WHERE status = 'success' LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT productId, LEFT(productName, 60) as name, listingType, mlItemId, status, LEFT(JSON_UNQUOTE(JSON_EXTRACT(baselinkerResponse, '$.mlItemId')), 20) as respItemId FROM export_logs WHERE status = 'success' LIMIT 5;",
+  "rows": [
+    {
+      "productId": "92283809",
+      "name": "Saco De Lixo Pet Sustentavel - C/ 30 Sacos + Brinde",
+      "listingType": "NULL",
+      "mlItemId": "NULL",
+      "status": "success",
+      "respItemId": "NULL"
+    },
+    {
+      "productId": "92283810",
+      "name": "Sacos De Lixo 100l  Embalixo Perfumado Citrus 15 Un + Brinde",
+      "listingType": "NULL",
+      "mlItemId": "NULL",
+      "status": "success",
+      "respItemId": "NULL"
+    },
+    {
+      "productId": "92283811",
+      "name": "Sacos De Lixo 50l Embalixo Perfumado Citrus 30 Un + Brinde",
+      "listingType": "NULL",
+      "mlItemId": "NULL",
+      "status": "success",
+      "respItemId": "NULL"
+    },
+    {
+      "productId": "92283812",
+      "name": "Sacos 50l Preto Embalixo Mega Econômico Com 100 Und + Brinde",
+      "listingType": "NULL",
+      "mlItemId": "NULL",
+      "status": "success",
+      "respItemId": "NULL"
+    },
+    {
+      "productId": "92283813",
+      "name": "Sacos De Lixo Branco Embalixo Mega Pia E Banheiro Com 150 Un",
+      "listingType": "NULL",
+      "mlItemId": "NULL",
+      "status": "success",
+      "respItemId": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "productId\tname\tlistingType\tmlItemId\tstatus\trespItemId\n92283809\tSaco De Lixo Pet Sustentavel - C/ 30 Sacos + Brinde\tNULL\tNULL\tsuccess\tNULL\n92283810\tSacos De Lixo 100l  Embalixo Perfumado Citrus 15 Un + Brinde\tNULL\tNULL\tsuccess\tNULL\n92283811\tSacos De Lixo 50l Embalixo Perfumado Citrus 30 Un + Brinde\tNULL\tNULL\tsuccess\tNULL\n92283812\tSacos 50l Preto Embalixo Mega Econômico Com 100 Und + Brinde\tNULL\tNULL\tsuccess\tNULL\n92283813\tSacos De Lixo Branco Embalixo Mega Pia E Banheiro Com 150 Un\tNULL\tNULL\tsuccess\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 346
+}

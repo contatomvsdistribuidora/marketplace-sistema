@@ -164,3 +164,11 @@
 - [x] Mostrar títulos gerados por tipo de anúncio claramente no card (ex: "Clássico: título X", "Premium: título Y") - IMPLEMENTADO: preview de títulos por tipo no card quando titlesPerType disponível
 - [x] BUG: Só puxa 1 foto do produto na exportação - CORRIGIDO: useEffect auto-load dispara quando step muda para review, usando ref para acessar estado mais recente
 - [x] Botão de trocar foto de capa visível no card (sem precisar expandir) - IMPLEMENTADO: overlay com setas ◀ ▶ ao hover sobre a imagem + loading indicator
+- [ ] BUG: Galeria de fotos continua mostrando só 1 foto - investigar o que getProductDetails retorna do BaseLinker
+- [x] Filtro/tela de produtos exportados: ver quais produtos já foram exportados, para quais marketplaces, tipos de anúncio criados
+- [x] Página "Produtos Exportados" com tabela detalhada, filtros por status/tipo de anúncio/nome, estatísticas e paginação
+- [x] Coluna "Exportado" na tabela de Produtos com indicador visual (check verde)
+- [x] Filtro "Status Exportação" na página de Produtos (Todos / Já exportados / Não exportados)
+- [x] Colunas listingType e mlItemId adicionadas na tabela export_logs
+- [x] Endpoints tRPC: exports.history, exports.historyStats, exports.exportedProductIds
+- [x] Testes Vitest para os novos endpoints de histórico de exportação

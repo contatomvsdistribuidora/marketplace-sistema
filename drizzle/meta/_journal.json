@@ -57,6 +57,13 @@
       "when": 1773768567916,
       "tag": "0007_red_jocasta",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1773789079075,
+      "tag": "0008_abandoned_vance_astro",
+      "breakpoints": true
     }
   ]
 }

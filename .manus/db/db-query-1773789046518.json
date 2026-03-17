@@ -1,0 +1,21 @@
+{
+  "query": "SELECT ml_listing_status, COUNT(*) as cnt FROM ml_listings GROUP BY ml_listing_status; SELECT COUNT(DISTINCT productId) as unique_products FROM ml_listings;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT ml_listing_status, COUNT(*) as cnt FROM ml_listings GROUP BY ml_listing_status; SELECT COUNT(DISTINCT productId) as unique_products FROM ml_listings;",
+  "rows": [
+    {
+      "ml_listing_status": "draft",
+      "cnt": "10"
+    },
+    {
+      "ml_listing_status": "error",
+      "cnt": "110"
+    }
+  ],
+  "messages": [
+    "unique_products",
+    "20"
+  ],
+  "stdout": "ml_listing_status\tcnt\ndraft\t10\nerror\t110\nunique_products\n20\n",
+  "stderr": "",
+  "execution_time_ms": 419
+}

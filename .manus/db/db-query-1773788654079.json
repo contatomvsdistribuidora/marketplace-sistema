@@ -1,0 +1,22 @@
+{
+  "query": "SELECT productId, name, imageUrl, LEFT(imageUrl, 80) as img_preview FROM product_cache WHERE productId IN (92600569, 92600585) LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT productId, name, imageUrl, LEFT(imageUrl, 80) as img_preview FROM product_cache WHERE productId IN (92600569, 92600585) LIMIT 5;",
+  "rows": [
+    {
+      "productId": "92600569",
+      "name": "Superjipe Reclinável Capota Passeio Pedal (pink) Bandeirante Pink",
+      "imageUrl": "https://upload.cdn.baselinker.com/products/8014187/f56d176ee0eb020960acb6b28e0e99ec.jpg",
+      "img_preview": "https://upload.cdn.baselinker.com/products/8014187/f56d176ee0eb020960acb6b28e0e9"
+    },
+    {
+      "productId": "92600585",
+      "name": "Bike Equilibrio Joy Azul Infantil Aprender A Andar",
+      "imageUrl": "https://upload.cdn.baselinker.com/products/8014187/898d8faf8a73e2641d9cfbed7381bdba.jpg",
+      "img_preview": "https://upload.cdn.baselinker.com/products/8014187/898d8faf8a73e2641d9cfbed7381b"
+    }
+  ],
+  "messages": [],
+  "stdout": "productId\tname\timageUrl\timg_preview\n92600569\tSuperjipe Reclinável Capota Passeio Pedal (pink) Bandeirante Pink\thttps://upload.cdn.baselinker.com/products/8014187/f56d176ee0eb020960acb6b28e0e99ec.jpg\thttps://upload.cdn.baselinker.com/products/8014187/f56d176ee0eb020960acb6b28e0e9\n92600585\tBike Equilibrio Joy Azul Infantil Aprender A Andar\thttps://upload.cdn.baselinker.com/products/8014187/898d8faf8a73e2641d9cfbed7381bdba.jpg\thttps://upload.cdn.baselinker.com/products/8014187/898d8faf8a73e2641d9cfbed7381b\n",
+  "stderr": "",
+  "execution_time_ms": 603
+}

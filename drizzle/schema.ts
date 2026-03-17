@@ -101,6 +101,8 @@ export const exportLogs = mysqlTable("export_logs", {
   productId: varchar("productId", { length: 128 }).notNull(),
   productName: varchar("productName", { length: 512 }),
   marketplaceId: int("marketplaceId").notNull(),
+  listingType: varchar("listingType", { length: 64 }),
+  mlItemId: varchar("mlItemId", { length: 64 }),
   status: mysqlEnum("status", ["success", "error", "skipped", "pending"]).default("pending").notNull(),
   mappedCategory: varchar("mappedCategory", { length: 512 }),
   mappedAttributes: json("mappedAttributes"),

@@ -78,6 +78,7 @@ const TITLE_STYLE_OPTIONS = [
 
 export default function ExportPage() {
   const [, setLocation] = useLocation();
+  const trpcUtils = trpc.useUtils();
   const [step, setStep] = useState<ExportStep>("select");
   const [selectedMarketplace, setSelectedMarketplace] = useState<string>("");
   const [selectedAccount, setSelectedAccount] = useState<string>(""); // "marketplace:accountId"
@@ -486,13 +487,10 @@ export default function ExportPage() {
 
     setLoadingImagesFor(prev => new Set(prev).add(productId));
     try {
-      const details = await new Promise<any>((resolve, reject) => {
-        // Use a direct fetch since we need imperative access
-        const url = `/api/trpc/baselinker.getProductDetails?input=${encodeURIComponent(JSON.stringify({ inventoryId, productIds: [numId] }))}`;
-        fetch(url)
-          .then(r => r.json())
-          .then(data => resolve(data?.result?.data || {}))
-          .catch(reject);
+      // Use tRPC client with superjson to properly decode the response
+      const details = await trpcUtils.baselinker.getProductDetails.fetch({
+        inventoryId,
+        productIds: [numId],
       });
 
       const fullProduct = details ? Object.values(details)[0] as any : null;
@@ -535,7 +533,7 @@ export default function ExportPage() {
         return next;
       });
     }
-  }, [inventoryId]);
+  }, [inventoryId, trpcUtils]);
 
   // Auto-load images for all products when entering review step
   useEffect(() => {
@@ -1051,6 +1049,8 @@ export default function ExportPage() {
             productId: product.id,
             productName: `${product.name} [${typeLabel}]`,
             marketplaceId: marketplace.id,
+            listingType: usedListingType,
+            mlItemId: mlResult.mlItemId || undefined,
             status: mlResult.success ? "success" : "error",
             errorMessage: mlResult.error || undefined,
           });

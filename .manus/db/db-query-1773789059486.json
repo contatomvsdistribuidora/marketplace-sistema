@@ -1,0 +1,19 @@
+{
+  "query": "SELECT COUNT(*) as with_ml_id FROM export_logs WHERE mlItemId IS NOT NULL; SELECT COUNT(*) as total_success FROM export_logs WHERE status = 'success';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT COUNT(*) as with_ml_id FROM export_logs WHERE mlItemId IS NOT NULL; SELECT COUNT(*) as total_success FROM export_logs WHERE status = 'success';",
+  "rows": [
+    {
+      "with_ml_id": "24"
+    },
+    {
+      "with_ml_id": "total_success"
+    },
+    {
+      "with_ml_id": "160"
+    }
+  ],
+  "messages": [],
+  "stdout": "with_ml_id\n24\ntotal_success\n160\n",
+  "stderr": "",
+  "execution_time_ms": 431
+}

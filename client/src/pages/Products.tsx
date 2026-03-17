@@ -11,8 +11,9 @@ import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Package, Filter, Loader2, ChevronLeft, ChevronRight, ArrowRight,
-  RefreshCw, Search, ChevronDown, ChevronUp, X, SlidersHorizontal, Eye
+  RefreshCw, Search, ChevronDown, ChevronUp, X, SlidersHorizontal, Eye, CheckCircle, XCircle
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { ProductDetailModal } from "@/components/ProductDetailModal";
@@ -59,6 +60,7 @@ export default function ProductsPage() {
   const [selectedTag, setSelectedTag] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedManufacturer, setSelectedManufacturer] = useState("all");
+  const [exportStatusFilter, setExportStatusFilter] = useState("all");
 
   const { data: tokenData } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
@@ -99,12 +101,16 @@ export default function ProductsPage() {
   });
 
   // Check if any filter is active
+  // Fetch exported product IDs
+  const { data: exportedProductIds } = trpc.exports.exportedProductIds.useQuery();
+  const exportedSet = useMemo(() => new Set(exportedProductIds || []), [exportedProductIds]);
+
   const hasActiveFilters = useMemo(() => {
     return selectedTag !== "all" || selectedCategory !== "all" || selectedManufacturer !== "all" ||
       draftName || draftEan || draftSku || draftPriceMin || draftPriceMax ||
-      draftStockMin || draftStockMax || draftWeightMin || draftWeightMax;
+      draftStockMin || draftStockMax || draftWeightMin || draftWeightMax || exportStatusFilter !== "all";
   }, [selectedTag, selectedCategory, selectedManufacturer, draftName, draftEan, draftSku,
-    draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax]);
+    draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax, exportStatusFilter]);
 
   // Build filters object
   const activeFilters = useMemo((): Filters => {
@@ -171,7 +177,14 @@ export default function ProductsPage() {
   }, [selectedTag, selectedCategory, selectedManufacturer, draftName, nameMode, draftEan, draftSku,
     draftPriceMin, draftPriceMax, draftStockMin, draftStockMax, draftWeightMin, draftWeightMax, pageSize]);
 
-  const products = productsData?.products || [];
+  const rawProducts = productsData?.products || [];
+  // Apply client-side export status filter
+  const products = useMemo(() => {
+    if (exportStatusFilter === "all") return rawProducts;
+    if (exportStatusFilter === "exported") return rawProducts.filter((p: any) => exportedSet.has(String(p.id)));
+    if (exportStatusFilter === "not_exported") return rawProducts.filter((p: any) => !exportedSet.has(String(p.id)));
+    return rawProducts;
+  }, [rawProducts, exportStatusFilter, exportedSet]);
 
   const [allFilteredSelected, setAllFilteredSelected] = useState(false);
   const [detailProduct, setDetailProduct] = useState<any>(null);
@@ -233,6 +246,7 @@ export default function ProductsPage() {
     setDraftStockMax("");
     setDraftWeightMin("");
     setDraftWeightMax("");
+    setExportStatusFilter("all");
   };
 
   const handleStartSync = () => {
@@ -548,6 +562,20 @@ export default function ProductsPage() {
                     />
                   </div>
                 </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Status Exportação</Label>
+                  <Select value={exportStatusFilter} onValueChange={setExportStatusFilter}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="exported">Já exportados</SelectItem>
+                      <SelectItem value="not_exported">Não exportados</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </CardContent>
           </CollapsibleContent>
@@ -648,8 +676,9 @@ export default function ProductsPage() {
                       <TableHead className="w-40">Tags</TableHead>
                       <TableHead className="w-20 text-right">Estoque</TableHead>
                       <TableHead className="w-24 text-right">Preço</TableHead>
-                        <TableHead className="w-20 text-right">Peso</TableHead>
-                        <TableHead className="w-12"></TableHead>
+                      <TableHead className="w-20 text-right">Peso</TableHead>
+                      <TableHead className="w-16 text-center">Exportado</TableHead>
+                      <TableHead className="w-12"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -708,6 +737,18 @@ export default function ProductsPage() {
                         </TableCell>
                         <TableCell className="text-right text-xs">
                           {product.weight ? `${product.weight} kg` : "—"}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {exportedSet.has(String(product.id)) ? (
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <CheckCircle className="h-4 w-4 text-green-500 mx-auto" />
+                              </TooltipTrigger>
+                              <TooltipContent>Produto já exportado com sucesso</TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setDetailProduct(product); setDetailOpen(true); }}>

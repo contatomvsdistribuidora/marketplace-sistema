@@ -1,0 +1,9 @@
+{
+  "query": "UPDATE export_logs SET listingType = 'gold_pro' WHERE productName LIKE '%[Premium]%' AND listingType IS NULL; UPDATE export_logs SET listingType = 'gold_special' WHERE productName LIKE '%[Clássico]%' AND listingType IS NULL; UPDATE export_logs SET listingType = 'free' WHERE productName LIKE '%[Grátis]%' AND listingType IS NULL;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute UPDATE export_logs SET listingType = 'gold_pro' WHERE productName LIKE '%[Premium]%' AND listingType IS NULL; UPDATE export_logs SET listingType = 'gold_special' WHERE productName LIKE '%[Clássico]%' AND listingType IS NULL; UPDATE export_logs SET listingType = 'free' WHERE productName LIKE '%[Grátis]%' AND listingType IS NULL;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 476
+}

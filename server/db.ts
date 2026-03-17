@@ -11,9 +11,11 @@ import {
   exportLogs,
   agentQueue,
   agentActions,
+  mlListings,
   InsertAgentQueue,
   InsertAgentAction,
 } from "../drizzle/schema";
+import { like, or, isNotNull, inArray, ne, gte, lte } from "drizzle-orm";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -230,6 +232,8 @@ export async function createExportLog(data: {
   productId: string;
   productName?: string;
   marketplaceId: number;
+  listingType?: string;
+  mlItemId?: string;
   status: "success" | "error" | "skipped" | "pending";
   mappedCategory?: string;
   mappedAttributes?: any;
@@ -245,6 +249,8 @@ export async function createExportLog(data: {
     productId: data.productId,
     productName: data.productName || null,
     marketplaceId: data.marketplaceId,
+    listingType: data.listingType || null,
+    mlItemId: data.mlItemId || null,
     status: data.status,
     mappedCategory: data.mappedCategory || null,
     mappedAttributes: data.mappedAttributes || null,
@@ -289,6 +295,119 @@ export async function getRecentLogs(userId: number, limit: number = 100) {
     .where(eq(exportLogs.userId, userId))
     .orderBy(desc(exportLogs.createdAt))
     .limit(limit);
+}
+
+// ============ EXPORT HISTORY ============
+export async function getExportHistory(userId: number, filters?: {
+  status?: string;
+  listingType?: string;
+  productName?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const db = await getDb();
+  if (!db) return { logs: [], total: 0, totalPages: 0 };
+
+  const conditions: any[] = [eq(exportLogs.userId, userId)];
+  if (filters?.status && filters.status !== "all") {
+    conditions.push(eq(exportLogs.status, filters.status as any));
+  }
+  if (filters?.listingType && filters.listingType !== "all") {
+    conditions.push(eq(exportLogs.listingType, filters.listingType));
+  }
+  if (filters?.productName) {
+    conditions.push(like(exportLogs.productName, `%${filters.productName}%`));
+  }
+
+  const page = filters?.page || 1;
+  const pageSize = filters?.pageSize || 50;
+  const offset = (page - 1) * pageSize;
+
+  const [countResult, logs] = await Promise.all([
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(exportLogs)
+      .where(and(...conditions)),
+    db.select({
+      id: exportLogs.id,
+      jobId: exportLogs.jobId,
+      productId: exportLogs.productId,
+      productName: exportLogs.productName,
+      marketplaceId: exportLogs.marketplaceId,
+      listingType: exportLogs.listingType,
+      mlItemId: exportLogs.mlItemId,
+      status: exportLogs.status,
+      mappedCategory: exportLogs.mappedCategory,
+      errorMessage: exportLogs.errorMessage,
+      createdAt: exportLogs.createdAt,
+    })
+      .from(exportLogs)
+      .where(and(...conditions))
+      .orderBy(desc(exportLogs.createdAt))
+      .limit(pageSize)
+      .offset(offset),
+  ]);
+
+  const total = countResult[0]?.count || 0;
+  return {
+    logs,
+    total,
+    totalPages: Math.ceil(total / pageSize),
+    page,
+    pageSize,
+  };
+}
+
+export async function getExportHistoryStats(userId: number) {
+  const db = await getDb();
+  if (!db) return { totalExported: 0, totalSuccess: 0, totalError: 0, totalProducts: 0, byListingType: [], byStatus: [] };
+
+  const [totals, byListingType, byStatus, uniqueProducts] = await Promise.all([
+    db.select({
+      total: sql<number>`COUNT(*)`,
+      success: sql<number>`SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)`,
+      error: sql<number>`SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)`,
+      skipped: sql<number>`SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END)`,
+    }).from(exportLogs).where(eq(exportLogs.userId, userId)),
+    db.select({
+      listingType: exportLogs.listingType,
+      count: sql<number>`COUNT(*)`,
+      successCount: sql<number>`SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)`,
+    }).from(exportLogs).where(eq(exportLogs.userId, userId)).groupBy(exportLogs.listingType),
+    db.select({
+      status: exportLogs.status,
+      count: sql<number>`COUNT(*)`,
+    }).from(exportLogs).where(eq(exportLogs.userId, userId)).groupBy(exportLogs.status),
+    db.select({
+      count: sql<number>`COUNT(DISTINCT productId)`,
+    }).from(exportLogs).where(and(eq(exportLogs.userId, userId), eq(exportLogs.status, "success"))),
+  ]);
+
+  return {
+    totalExported: totals[0]?.total || 0,
+    totalSuccess: totals[0]?.success || 0,
+    totalError: totals[0]?.error || 0,
+    totalSkipped: totals[0]?.skipped || 0,
+    uniqueSuccessProducts: uniqueProducts[0]?.count || 0,
+    byListingType: byListingType.map(r => ({
+      listingType: r.listingType || "sem tipo",
+      count: r.count,
+      successCount: r.successCount,
+    })),
+    byStatus: byStatus.map(r => ({
+      status: r.status,
+      count: r.count,
+    })),
+  };
+}
+
+/** Get productIds that have been successfully exported (for filtering in Products page) */
+export async function getExportedProductIds(userId: number): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.selectDistinct({ productId: exportLogs.productId })
+    .from(exportLogs)
+    .where(and(eq(exportLogs.userId, userId), eq(exportLogs.status, "success")));
+  return results.map(r => r.productId);
 }
 
 // ============ AGENT QUEUE ============

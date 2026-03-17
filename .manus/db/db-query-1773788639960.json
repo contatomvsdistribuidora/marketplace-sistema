@@ -1,0 +1,16 @@
+{
+  "query": "SELECT id, userId, settingKey, LEFT(settingValue, 20) as value_preview FROM settings WHERE settingKey = 'baselinker_token' LIMIT 1;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, userId, settingKey, LEFT(settingValue, 20) as value_preview FROM settings WHERE settingKey = 'baselinker_token' LIMIT 1;",
+  "rows": [
+    {
+      "id": "1",
+      "userId": "1",
+      "settingKey": "baselinker_token",
+      "value_preview": "8003874-8014187-TVS3"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuserId\tsettingKey\tvalue_preview\n1\t1\tbaselinker_token\t8003874-8014187-TVS3\n",
+  "stderr": "",
+  "execution_time_ms": 405
+}

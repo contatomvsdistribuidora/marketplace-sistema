@@ -1,0 +1,37 @@
+{
+  "query": "SELECT listingType, COUNT(*) as cnt FROM export_logs GROUP BY listingType; SELECT COUNT(*) as total FROM export_logs; SELECT status, COUNT(*) as cnt FROM export_logs GROUP BY status;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT listingType, COUNT(*) as cnt FROM export_logs GROUP BY listingType; SELECT COUNT(*) as total FROM export_logs; SELECT status, COUNT(*) as cnt FROM export_logs GROUP BY status;",
+  "rows": [
+    {
+      "listingType": "NULL",
+      "cnt": "273"
+    },
+    {
+      "listingType": "gold_pro",
+      "cnt": "2"
+    },
+    {
+      "listingType": "gold_special",
+      "cnt": "2"
+    },
+    {
+      "listingType": "status",
+      "cnt": "cnt"
+    },
+    {
+      "listingType": "success",
+      "cnt": "160"
+    },
+    {
+      "listingType": "error",
+      "cnt": "117"
+    }
+  ],
+  "messages": [
+    "total",
+    "277"
+  ],
+  "stdout": "listingType\tcnt\nNULL\t273\ngold_pro\t2\ngold_special\t2\ntotal\n277\nstatus\tcnt\nsuccess\t160\nerror\t117\n",
+  "stderr": "",
+  "execution_time_ms": 481
+}

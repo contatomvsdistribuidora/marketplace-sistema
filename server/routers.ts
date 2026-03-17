@@ -629,6 +629,8 @@ export const appRouter = router({
           productId: z.string(),
           productName: z.string().optional(),
           marketplaceId: z.number(),
+          listingType: z.string().optional(),
+          mlItemId: z.string().optional(),
           status: z.enum(["success", "error", "skipped", "pending"]),
           mappedCategory: z.string().optional(),
           mappedAttributes: z.any().optional(),
@@ -643,6 +645,33 @@ export const appRouter = router({
           ...input,
         });
         return { success: true };
+      }),
+
+    // Export history with filters and pagination
+    history: protectedProcedure
+      .input(
+        z.object({
+          status: z.string().optional(),
+          listingType: z.string().optional(),
+          productName: z.string().optional(),
+          page: z.number().optional(),
+          pageSize: z.number().optional(),
+        }).optional()
+      )
+      .query(async ({ ctx, input }) => {
+        return db.getExportHistory(ctx.user.id, input || {});
+      }),
+
+    // Export history stats (counts by status, listing type, etc.)
+    historyStats: protectedProcedure
+      .query(async ({ ctx }) => {
+        return db.getExportHistoryStats(ctx.user.id);
+      }),
+
+    // Get list of product IDs that have been successfully exported
+    exportedProductIds: protectedProcedure
+      .query(async ({ ctx }) => {
+        return db.getExportedProductIds(ctx.user.id);
       }),
 
     // REAL EXPORT: Update product in BaseLinker catalog with marketplace-specific data

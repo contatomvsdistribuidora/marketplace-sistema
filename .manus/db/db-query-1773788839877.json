@@ -1,0 +1,100 @@
+{
+  "query": "SELECT productId, productName, marketplaceId, status, LEFT(mappedCategory, 50) as category, LEFT(errorMessage, 80) as error, createdAt FROM export_logs ORDER BY createdAt DESC LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT productId, productName, marketplaceId, status, LEFT(mappedCategory, 50) as category, LEFT(errorMessage, 80) as error, createdAt FROM export_logs ORDER BY createdAt DESC LIMIT 10;",
+  "rows": [
+    {
+      "productId": "92600605",
+      "productName": "Triciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde [Premium]",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 22:33:23"
+    },
+    {
+      "productId": "92600605",
+      "productName": "Triciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde [Clássico]",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 22:33:17"
+    },
+    {
+      "productId": "92600473",
+      "productName": "Quadriciclo Smart Quad Passeio Pedal Rosa Bandeirante [Premium]",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 22:33:10"
+    },
+    {
+      "productId": "92600473",
+      "productName": "Quadriciclo Smart Quad Passeio Pedal Rosa Bandeirante [Clássico]",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 22:33:04"
+    },
+    {
+      "productId": "92600478",
+      "productName": "Smart Quad Bandeirante Passeio E Pedal Rosa Rosa",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 21:51:10"
+    },
+    {
+      "productId": "92372560",
+      "productName": "Saco De Lixo 30l Reforçado Preto- 50 Unidades + Brinde",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 21:51:04"
+    },
+    {
+      "productId": "92283817",
+      "productName": "Sacos 50l Preto  Embalixo - Mega Econômico Com 100 Und",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 21:51:02"
+    },
+    {
+      "productId": "92283816",
+      "productName": "Saco De Lixo Preto Reforçado 200l Embalixo 20 Und + Brinde",
+      "marketplaceId": "1",
+      "status": "success",
+      "category": "NULL",
+      "error": "NULL",
+      "createdAt": "2026-03-17 21:50:59"
+    },
+    {
+      "productId": "92600552",
+      "productName": "Quadriciclo Smart Quad Azul Veiculo Presente Bandeirante Azu Azul",
+      "marketplaceId": "1",
+      "status": "error",
+      "category": "NULL",
+      "error": "ML API error 400: Listing type is temporarily unavailable. Please try again; | l",
+      "createdAt": "2026-03-17 21:24:39"
+    },
+    {
+      "productId": "92600528",
+      "productName": "Trator Infantil 2 Em 1 Menino Bandeirante Com Acessórios Verde",
+      "marketplaceId": "1",
+      "status": "error",
+      "category": "NULL",
+      "error": "ML API error 400: Listing type is temporarily unavailable. Please try again; | l",
+      "createdAt": "2026-03-17 21:24:32"
+    }
+  ],
+  "messages": [],
+  "stdout": "productId\tproductName\tmarketplaceId\tstatus\tcategory\terror\tcreatedAt\n92600605\tTriciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde [Premium]\t1\tsuccess\tNULL\tNULL\t2026-03-17 22:33:23\n92600605\tTriciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde [Clássico]\t1\tsuccess\tNULL\tNULL\t2026-03-17 22:33:17\n92600473\tQuadriciclo Smart Quad Passeio Pedal Rosa Bandeirante [Premium]\t1\tsuccess\tNULL\tNULL\t2026-03-17 22:33:10\n92600473\tQuadriciclo Smart Quad Passeio Pedal Rosa Bandeirante [Clássico]\t1\tsuccess\tNULL\tNULL\t2026-03-17 22:33:04\n92600478\tSmart Quad Bandeirante Passeio E Pedal Rosa Rosa\t1\tsuccess\tNULL\tNULL\t2026-03-17 21:51:10\n92372560\tSaco De Lixo 30l Reforçado Preto- 50 Unidades + Brinde\t1\tsuccess\tNULL\tNULL\t2026-03-17 21:51:04\n92283817\tSacos 50l Preto  Embalixo - Mega Econômico Com 100 Und\t1\tsuccess\tNULL\tNULL\t2026-03-17 21:51:02\n92283816\tSaco De Lixo Preto Reforçado 200l Embalixo 20 Und + Brinde\t1\tsuccess\tNULL\tNULL\t2026-03-17 21:50:59\n92600552\tQuadriciclo Smart Quad Azul Veiculo Presente Bandeirante Azu Azul\t1\terror\tNULL\tML API error 400: Listing type is temporarily unavailable. Please try again; | l\t2026-03-17 21:24:39\n92600528\tTrator Infantil 2 Em 1 Menino Bandeirante Com Acessórios Verde\t1\terror\tNULL\tML API error 400: Listing type is temporarily unavailable. Please try again; | l\t2026-03-17 21:24:32\n",
+  "stderr": "",
+  "execution_time_ms": 354
+}

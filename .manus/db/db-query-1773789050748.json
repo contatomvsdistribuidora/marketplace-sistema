@@ -1,0 +1,80 @@
+{
+  "query": "SELECT productId, mlItemId, listingType, ml_listing_status, LEFT(permalink, 80) as link FROM ml_listings WHERE mlItemId IS NOT NULL AND mlItemId != '' LIMIT 15;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT productId, mlItemId, listingType, ml_listing_status, LEFT(permalink, 80) as link FROM ml_listings WHERE mlItemId IS NOT NULL AND mlItemId != '' LIMIT 15;",
+  "rows": [
+    {
+      "productId": "92600596",
+      "mlItemId": "MLB6471659844",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-6471659844-triciclo-velobaby-passeio-e-pe"
+    },
+    {
+      "productId": "92600512",
+      "mlItemId": "MLB6472029008",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-6472029008-bandeirante-smart-quad-passeio"
+    },
+    {
+      "productId": "92283816",
+      "mlItemId": "MLB4537418981",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-4537418981-embalixo-saco-lixo-preto-refor"
+    },
+    {
+      "productId": "92283817",
+      "mlItemId": "MLB6472066642",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-6472066642-embalixo-saco-lixo-50l-preto-m"
+    },
+    {
+      "productId": "92372560",
+      "mlItemId": "MLB6472066668",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-6472066668-embalixo-saco-lixo-30l-reforca"
+    },
+    {
+      "productId": "92600478",
+      "mlItemId": "MLB4537419067",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-4537419067-bandeirante-smart-quad-2-em-1-"
+    },
+    {
+      "productId": "92600473",
+      "mlItemId": "MLB4537447099",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-4537447099-quadriciclo-smart-quad-2-em-1-"
+    },
+    {
+      "productId": "92600473",
+      "mlItemId": "MLB6472094862",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-6472094862-quadriciclo-smart-quad-2-em-1-"
+    },
+    {
+      "productId": "92600605",
+      "mlItemId": "MLB6472094884",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-6472094884-triciclo-infantil-bandeirante-"
+    },
+    {
+      "productId": "92600605",
+      "mlItemId": "MLB4537440053",
+      "listingType": "gold_special",
+      "ml_listing_status": "draft",
+      "link": "http://produto.mercadolivre.com.br/MLB-4537440053-triciclo-infantil-bandeirante-"
+    }
+  ],
+  "messages": [],
+  "stdout": "productId\tmlItemId\tlistingType\tml_listing_status\tlink\n92600596\tMLB6471659844\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-6471659844-triciclo-velobaby-passeio-e-pe\n92600512\tMLB6472029008\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-6472029008-bandeirante-smart-quad-passeio\n92283816\tMLB4537418981\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-4537418981-embalixo-saco-lixo-preto-refor\n92283817\tMLB6472066642\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-6472066642-embalixo-saco-lixo-50l-preto-m\n92372560\tMLB6472066668\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-6472066668-embalixo-saco-lixo-30l-reforca\n92600478\tMLB4537419067\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-4537419067-bandeirante-smart-quad-2-em-1-\n92600473\tMLB4537447099\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-4537447099-quadriciclo-smart-quad-2-em-1-\n92600473\tMLB6472094862\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-6472094862-quadriciclo-smart-quad-2-em-1-\n92600605\tMLB6472094884\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-6472094884-triciclo-infantil-bandeirante-\n92600605\tMLB4537440053\tgold_special\tdraft\thttp://produto.mercadolivre.com.br/MLB-4537440053-triciclo-infantil-bandeirante-\n",
+  "stderr": "",
+  "execution_time_ms": 344
+}
