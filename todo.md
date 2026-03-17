@@ -96,3 +96,4 @@
 - [x] Frontend: tela de conexão de contas TikTok Shop
 - [x] Frontend: publicação de produtos no TikTok Shop
 - [x] Testes da integração TikTok Shop
+- [x] Salvar credenciais TikTok Shop (App Key + App Secret) no sistema
