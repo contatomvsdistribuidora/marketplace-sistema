@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot, Link2, Send, Music } from "lucide-react";
+import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot, Link2, Send, Music, FolderTree } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -37,6 +37,7 @@ const menuItems = [
   { icon: Bot, label: "Monitor do Agente", path: "/agent" },
   { icon: Link2, label: "Contas ML", path: "/ml-accounts" },
   { icon: Send, label: "Publicar no ML", path: "/ml-publish" },
+  { icon: FolderTree, label: "Categorias ML", path: "/ml-categories" },
   { icon: Music, label: "Contas TikTok", path: "/tiktok-accounts" },
   { icon: Music, label: "Publicar no TikTok", path: "/tiktok-publish" },
 ];

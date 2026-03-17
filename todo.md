@@ -114,3 +114,9 @@
 - [x] Exibir atributos obrigatórios vs opcionais na etapa de mapeamento IA (obrigatórios em destaque, opcionais colapsáveis)
 - [x] Permitir edição dos atributos mapeados antes de publicar
 - [x] BUG: Predição de categoria ML retorna IDs inválidos (ex: MLB1735) - corrigido: adicionada validação de formato (regex MLB\d+), logging detalhado em todo o fluxo de publicação, fallback para predições alternativas, e rejeição de categoryIds inválidos antes de chamar API do ML
+- [x] BUG: domain_discovery retorna categoryId MLB180740 que não existe (HTTP 404) - corrigido: categorias locais no banco + validação dupla
+- [x] Baixar toda a árvore de categorias do ML e salvar no banco de dados local
+- [x] Criar tabela ml_categories com id, name, parentId, pathFromRoot, totalItems, etc.
+- [x] Endpoint para sincronizar categorias do ML (download completo + incremental)
+- [x] Usar categorias locais para validar/buscar na exportação (substituir domain_discovery como fonte primária)
+- [x] UI para busca/seleção de categorias ML na etapa de mapeamento

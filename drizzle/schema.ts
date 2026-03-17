@@ -289,3 +289,23 @@ export const tiktokListings = mysqlTable("tiktok_listings", {
 
 export type TiktokListing = typeof tiktokListings.$inferSelect;
 export type InsertTiktokListing = typeof tiktokListings.$inferInsert;
+
+/** Cached Mercado Livre categories tree */
+export const mlCategories = mysqlTable("ml_categories", {
+  id: int("id").autoincrement().primaryKey(),
+  mlCategoryId: varchar("mlCategoryId", { length: 32 }).notNull().unique(),
+  name: varchar("name", { length: 512 }).notNull(),
+  parentId: varchar("parentId", { length: 32 }),
+  pathFromRoot: text("pathFromRoot"),
+  pathIds: text("pathIds"),
+  totalItems: int("totalItems").default(0),
+  hasChildren: int("hasChildren").default(0).notNull(),
+  isLeaf: int("isLeaf").default(0).notNull(),
+  level: int("level").default(0).notNull(),
+  picture: varchar("picture", { length: 1024 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MlCategory = typeof mlCategories.$inferSelect;
+export type InsertMlCategory = typeof mlCategories.$inferInsert;

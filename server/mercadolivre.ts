@@ -12,6 +12,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { mlAccounts, mlListings } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
+import { findBestCategory, validateCategoryId, getLocalCategoryInfo } from "./ml-categories";
 
 const ML_API_BASE = "https://api.mercadolibre.com";
 const ML_AUTH_URL = "https://auth.mercadolivre.com.br";
@@ -719,52 +720,51 @@ export async function publishProduct(
 ) {
   try {
     console.log(`[ML publishProduct] Starting for product: "${product.name}" (ID: ${product.productId})`);
-    console.log(`[ML publishProduct] Input categoryId: ${product.categoryId || 'NOT PROVIDED (will use domain_discovery)'}`);
+    console.log(`[ML publishProduct] Input categoryId: ${product.categoryId || 'NOT PROVIDED (will use findBestCategory)'}`);
     
-    // 1. Predict category if not provided
+    // 1. Determine category - use local DB + domain_discovery
     let categoryId = product.categoryId;
     let categoryName = "";
 
-    // Validate provided categoryId format
-    if (categoryId && !categoryId.match(/^MLB\d+$/)) {
-      console.warn(`[ML publishProduct] Provided categoryId "${categoryId}" has invalid format, ignoring and using domain_discovery instead`);
-      categoryId = undefined;
-    }
-
-    if (!categoryId) {
-      console.log(`[ML publishProduct] No valid categoryId, calling domain_discovery...`);
-      const predictions = await predictCategory(product.name);
-      if (predictions.length > 0) {
-        // Validate the predicted categoryId
-        const predicted = predictions[0];
-        if (predicted.categoryId && predicted.categoryId.match(/^MLB\d+$/)) {
-          categoryId = predicted.categoryId;
-          categoryName = predicted.categoryName;
-          console.log(`[ML publishProduct] domain_discovery predicted: ${categoryId} (${categoryName})`);
+    // Validate provided categoryId against local DB
+    if (categoryId) {
+      if (!categoryId.match(/^MLB\d+$/)) {
+        console.warn(`[ML publishProduct] Provided categoryId "${categoryId}" has invalid format, ignoring`);
+        categoryId = undefined;
+      } else {
+        // Check if it exists in our local DB
+        const localCat = await getLocalCategoryInfo(categoryId);
+        if (localCat) {
+          categoryName = localCat.name;
+          console.log(`[ML publishProduct] Provided categoryId validated in local DB: ${categoryId} = ${categoryName}`);
         } else {
-          console.error(`[ML publishProduct] domain_discovery returned invalid categoryId: "${predicted.categoryId}"`);
-          // Try other predictions
-          const validPrediction = predictions.find((p: any) => p.categoryId && p.categoryId.match(/^MLB\d+$/));
-          if (validPrediction) {
-            categoryId = validPrediction.categoryId;
-            categoryName = validPrediction.categoryName;
-            console.log(`[ML publishProduct] Using alternative prediction: ${categoryId} (${categoryName})`);
-          } else {
-            throw new Error(`domain_discovery retornou IDs de categoria inválidos: ${predictions.map((p: any) => p.categoryId).join(', ')}`);
+          // Try to validate via ML API directly
+          try {
+            const catInfo = await getCategoryInfo(categoryId);
+            categoryName = catInfo.name;
+            console.log(`[ML publishProduct] Provided categoryId validated via API: ${categoryId} = ${categoryName}`);
+          } catch (e) {
+            console.warn(`[ML publishProduct] Provided categoryId ${categoryId} is invalid, will use findBestCategory`);
+            categoryId = undefined;
           }
         }
-      } else {
-        throw new Error("Não foi possível determinar a categoria do produto no Mercado Livre (domain_discovery retornou vazio)");
       }
     }
 
-    // Double-check: validate categoryId exists on ML before proceeding
-    console.log(`[ML publishProduct] Validating categoryId ${categoryId} on ML API...`);
-    if (categoryId && !categoryName) {
-      const catInfo = await getCategoryInfo(categoryId);
-      categoryName = catInfo.name;
-      console.log(`[ML publishProduct] Category validated: ${categoryId} = ${categoryName}`);
+    // If no valid categoryId, use findBestCategory (domain_discovery + local DB)
+    if (!categoryId) {
+      console.log(`[ML publishProduct] Finding best category for: "${product.name}"`);
+      const bestCategory = await findBestCategory(product.name);
+      if (bestCategory) {
+        categoryId = bestCategory.categoryId;
+        categoryName = bestCategory.categoryName;
+        console.log(`[ML publishProduct] Best category found: ${categoryId} = ${categoryName} (source: ${bestCategory.source})`);
+      } else {
+        throw new Error(`Não foi possível determinar a categoria do produto "${product.name}" no Mercado Livre. Sincronize as categorias primeiro.`);
+      }
     }
+
+    console.log(`[ML publishProduct] Using category: ${categoryId} = ${categoryName}`);
 
     // 2. Get required attributes for the category
     const allAttributes = await getCategoryAttributes(categoryId!);

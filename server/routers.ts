@@ -9,6 +9,7 @@ import * as aiMapper from "./ai-mapper";
 import * as ml from "./mercadolivre";
 import * as localAuth from "./local-auth";
 import * as tiktok from "./tiktokshop";
+import * as mlCat from "./ml-categories";
 
 export const appRouter = router({
   system: systemRouter,
@@ -741,6 +742,68 @@ export const appRouter = router({
       .input(z.object({ accountId: z.number(), status: z.string().optional() }))
       .query(async ({ input }) => {
         return ml.getSellerItems(input.accountId, input.status);
+      }),
+
+    // ============ CATEGORIES (LOCAL DB) ============
+    
+    // Sync all ML categories to local database
+    syncCategories: protectedProcedure
+      .mutation(async () => {
+        const count = await mlCat.getCategoryCount();
+        if (count > 0) {
+          return { total: count, duration: 0, message: `${count} categorias já sincronizadas. Use forceSync para re-sincronizar.` };
+        }
+        return mlCat.syncAllCategories();
+      }),
+
+    // Force re-sync all categories
+    forceSyncCategories: protectedProcedure
+      .mutation(async () => {
+        return mlCat.syncAllCategories();
+      }),
+
+    // Get category count
+    categoryCount: protectedProcedure
+      .query(async () => {
+        return { count: await mlCat.getCategoryCount() };
+      }),
+
+    // Search categories by name
+    searchCategories: protectedProcedure
+      .input(z.object({ query: z.string(), leafOnly: z.boolean().optional(), limit: z.number().optional() }))
+      .query(async ({ input }) => {
+        if (input.leafOnly) {
+          return mlCat.searchLeafCategories(input.query, input.limit || 20);
+        }
+        return mlCat.searchCategories(input.query, input.limit || 20);
+      }),
+
+    // Get children of a category
+    categoryChildren: protectedProcedure
+      .input(z.object({ parentId: z.string() }))
+      .query(async ({ input }) => {
+        return mlCat.getCategoryChildren(input.parentId);
+      }),
+
+    // Get root categories
+    rootCategories: protectedProcedure
+      .query(async () => {
+        return mlCat.getRootCategories();
+      }),
+
+    // Validate a category ID
+    validateCategory: protectedProcedure
+      .input(z.object({ categoryId: z.string() }))
+      .query(async ({ input }) => {
+        const cat = await mlCat.getLocalCategoryInfo(input.categoryId);
+        return { valid: !!cat, category: cat };
+      }),
+
+    // Find best category for a product (uses domain_discovery + local DB)
+    findBestCategory: protectedProcedure
+      .input(z.object({ productName: z.string() }))
+      .mutation(async ({ input }) => {
+        return mlCat.findBestCategory(input.productName);
       }),
 
     // Fill attributes with AI
