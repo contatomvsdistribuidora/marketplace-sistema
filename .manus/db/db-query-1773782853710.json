@@ -1,0 +1,100 @@
+{
+  "query": "SELECT id, jobId, productId, productName, status, errorMessage, createdAt FROM export_logs ORDER BY id DESC LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, jobId, productId, productName, status, errorMessage, createdAt FROM export_logs ORDER BY id DESC LIMIT 10;",
+  "rows": [
+    {
+      "id": "30019",
+      "jobId": "30013",
+      "productId": "92600552",
+      "productName": "Quadriciclo Smart Quad Azul Veiculo Presente Bandeirante Azu Azul",
+      "status": "error",
+      "errorMessage": "ML API error 400: Listing type is temporarily unavailable. Please try again; | listing_type.temporarily_unavailable",
+      "createdAt": "2026-03-17 21:24:39"
+    },
+    {
+      "id": "30018",
+      "jobId": "30013",
+      "productId": "92600528",
+      "productName": "Trator Infantil 2 Em 1 Menino Bandeirante Com Acessórios Verde",
+      "status": "error",
+      "errorMessage": "ML API error 400: Listing type is temporarily unavailable. Please try again; | listing_type.temporarily_unavailable",
+      "createdAt": "2026-03-17 21:24:32"
+    },
+    {
+      "id": "30017",
+      "jobId": "30013",
+      "productId": "92600522",
+      "productName": "Trator Passeio & Pedal",
+      "status": "error",
+      "errorMessage": "ML API error 400: Listing type is temporarily unavailable. Please try again; | listing_type.temporarily_unavailable",
+      "createdAt": "2026-03-17 21:24:25"
+    },
+    {
+      "id": "30016",
+      "jobId": "30013",
+      "productId": "92600512",
+      "productName": "Quadriciclo Passeio Smart Quad Pedal Rosa - Bandeirante Rosa Rosa",
+      "status": "success",
+      "errorMessage": "NULL",
+      "createdAt": "2026-03-17 21:24:19"
+    },
+    {
+      "id": "30015",
+      "jobId": "30010",
+      "productId": "92600596",
+      "productName": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante Azul/verde",
+      "status": "success",
+      "errorMessage": "NULL",
+      "createdAt": "2026-03-17 19:34:40"
+    },
+    {
+      "id": "30014",
+      "jobId": "30009",
+      "productId": "92600603",
+      "productName": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa",
+      "status": "error",
+      "errorMessage": "ML API error 400: body.invalid_fields | The fields [title] are invalid for requested call.",
+      "createdAt": "2026-03-17 19:20:32"
+    },
+    {
+      "id": "30013",
+      "jobId": "30008",
+      "productId": "92600605",
+      "productName": "Triciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde",
+      "status": "error",
+      "errorMessage": "ML API error 400: body.required_fields | validation_error | body.required_fields: The body does not contains some or none of the following properties [family_name]: error | References: [\"body\"]",
+      "createdAt": "2026-03-17 19:02:29"
+    },
+    {
+      "id": "30012",
+      "jobId": "30008",
+      "productId": "92600594",
+      "productName": "Super Banjipe Reclinável Com Capota Passeio E Pedal 586 Pink Pink",
+      "status": "error",
+      "errorMessage": "ML API error 400: body.required_fields | validation_error | body.required_fields: The body does not contains some or none of the following properties [family_name]: error | References: [\"body\"]",
+      "createdAt": "2026-03-17 19:02:23"
+    },
+    {
+      "id": "30011",
+      "jobId": "30007",
+      "productId": "92600605",
+      "productName": "Triciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde",
+      "status": "error",
+      "errorMessage": "ML API error 400: body.required_fields",
+      "createdAt": "2026-03-17 18:55:22"
+    },
+    {
+      "id": "30010",
+      "jobId": "30007",
+      "productId": "92600603",
+      "productName": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa",
+      "status": "error",
+      "errorMessage": "ML API error 400: body.required_fields",
+      "createdAt": "2026-03-17 18:55:17"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tjobId\tproductId\tproductName\tstatus\terrorMessage\tcreatedAt\n30019\t30013\t92600552\tQuadriciclo Smart Quad Azul Veiculo Presente Bandeirante Azu Azul\terror\tML API error 400: Listing type is temporarily unavailable. Please try again; | listing_type.temporarily_unavailable\t2026-03-17 21:24:39\n30018\t30013\t92600528\tTrator Infantil 2 Em 1 Menino Bandeirante Com Acessórios Verde\terror\tML API error 400: Listing type is temporarily unavailable. Please try again; | listing_type.temporarily_unavailable\t2026-03-17 21:24:32\n30017\t30013\t92600522\tTrator Passeio & Pedal\terror\tML API error 400: Listing type is temporarily unavailable. Please try again; | listing_type.temporarily_unavailable\t2026-03-17 21:24:25\n30016\t30013\t92600512\tQuadriciclo Passeio Smart Quad Pedal Rosa - Bandeirante Rosa Rosa\tsuccess\tNULL\t2026-03-17 21:24:19\n30015\t30010\t92600596\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante Azul/verde\tsuccess\tNULL\t2026-03-17 19:34:40\n30014\t30009\t92600603\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa\terror\tML API error 400: body.invalid_fields | The fields [title] are invalid for requested call.\t2026-03-17 19:20:32\n30013\t30008\t92600605\tTriciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde\terror\tML API error 400: body.required_fields | validation_error | body.required_fields: The body does not contains some or none of the following properties [family_name]: error | References: [\"body\"]\t2026-03-17 19:02:29\n30012\t30008\t92600594\tSuper Banjipe Reclinável Com Capota Passeio E Pedal 586 Pink Pink\terror\tML API error 400: body.required_fields | validation_error | body.required_fields: The body does not contains some or none of the following properties [family_name]: error | References: [\"body\"]\t2026-03-17 19:02:23\n30011\t30007\t92600605\tTriciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde\terror\tML API error 400: body.required_fields\t2026-03-17 18:55:22\n30010\t30007\t92600603\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa\terror\tML API error 400: body.required_fields\t2026-03-17 18:55:17\n",
+  "stderr": "",
+  "execution_time_ms": 360
+}

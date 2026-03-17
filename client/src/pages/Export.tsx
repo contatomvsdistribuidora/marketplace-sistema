@@ -99,6 +99,8 @@ export default function ExportPage() {
   const [loadingImagesFor, setLoadingImagesFor] = useState<Set<string>>(new Set());
   const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
   const [loadingAttrsFor, setLoadingAttrsFor] = useState<Set<string>>(new Set());
+  const [generatingImageFor, setGeneratingImageFor] = useState<Set<string>>(new Set());
+  const [imageGenStyle, setImageGenStyle] = useState<"white_background" | "lifestyle" | "enhanced" | "product_photo">("white_background");
 
   const { data: tokenData } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
@@ -298,6 +300,7 @@ export default function ExportPage() {
   const updateExportMutation = trpc.exports.updateStatus.useMutation();
   const addLogMutation = trpc.exports.addLog.useMutation();
   const mlPublishMutation = trpc.ml.publishProduct.useMutation();
+  const generateImageMutation = trpc.ai.generateProductImage.useMutation();
 
   // Check if this is a re-export to the same marketplace type (can skip AI mapping)
   const canSkipMapping = useMemo(() => {
@@ -461,6 +464,39 @@ export default function ExportPage() {
       });
     }
   }, []);
+
+  // ===== GENERATE IMAGE WITH AI =====
+  const handleGenerateImage = useCallback(async (productId: string) => {
+    const product = mappedProducts.find(p => p.id === productId);
+    if (!product) return;
+
+    setGeneratingImageFor(prev => new Set(prev).add(productId));
+    try {
+      const result = await generateImageMutation.mutateAsync({
+        productName: product.optimizedTitle || product.name,
+        productDescription: product.description?.substring(0, 300) || undefined,
+        originalImageUrl: product.imageUrl || undefined,
+        style: imageGenStyle,
+      });
+
+      if (result.url) {
+        setMappedProducts(prev => prev.map(p => {
+          if (p.id !== productId) return p;
+          const newImages = [...(p.allImages || []), result.url!];
+          return { ...p, allImages: newImages, coverImageIndex: newImages.length - 1 };
+        }));
+        toast.success("Foto gerada com IA e definida como capa!");
+      }
+    } catch (error: any) {
+      toast.error(`Erro ao gerar imagem: ${error.message}`);
+    } finally {
+      setGeneratingImageFor(prev => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+    }
+  }, [mappedProducts, imageGenStyle]);
 
   // ===== CHANGE COVER IMAGE =====
   const setCoverImage = useCallback((productId: string, imageIndex: number) => {
@@ -692,6 +728,17 @@ export default function ExportPage() {
     setIsMappingInProgress(false);
     setStep("review");
     toast.success("Mapeamento concluído! Revise os resultados antes de exportar.");
+
+    // Auto-load images for all products when entering review
+    if (inventoryId) {
+      for (const product of mappedProducts) {
+        if (!product.allImages) {
+          loadAllImages(product.id);
+          // Small delay to avoid overwhelming the API
+          await new Promise(r => setTimeout(r, 200));
+        }
+      }
+    }
   };
 
   const handleExport = async () => {
@@ -757,22 +804,48 @@ export default function ExportPage() {
         }
 
         if (mpCode === "mercadolivre") {
-          // ===== DIRECT ML API EXPORT =====
-          const mlResult = await mlPublishMutation.mutateAsync({
-            accountId: selectedAccountInfo.id,
-            productId: product.id,
-            name: product.optimizedTitle || product.name,
-            description: product.description || undefined,
-            price: product.mainPrice || 0,
-            stock: product.totalStock || 1,
-            ean: product.ean || undefined,
-            sku: product.sku || undefined,
-            brand: features["Marca"] || features["brand"] || undefined,
-            images: images.length > 0 ? images : undefined,
-            features,
-            categoryId: product.suggestedCategory?.id || undefined,
-            listingType: product.listingType || batchListingType,
-          });
+          // ===== DIRECT ML API EXPORT WITH LISTING TYPE FALLBACK =====
+          const listingTypeFallback: ListingType[] = [];
+          const primaryType = product.listingType || batchListingType;
+          listingTypeFallback.push(primaryType);
+          // Add fallback types
+          if (primaryType !== "gold_special") listingTypeFallback.push("gold_special");
+          if (primaryType !== "free") listingTypeFallback.push("free");
+
+          let mlResult: any = null;
+          let usedListingType = primaryType;
+
+          for (const tryType of listingTypeFallback) {
+            mlResult = await mlPublishMutation.mutateAsync({
+              accountId: selectedAccountInfo.id,
+              productId: product.id,
+              name: product.optimizedTitle || product.name,
+              description: product.description || undefined,
+              price: product.mainPrice || 0,
+              stock: product.totalStock || 1,
+              ean: product.ean || undefined,
+              sku: product.sku || undefined,
+              brand: features["Marca"] || features["brand"] || undefined,
+              images: images.length > 0 ? images : undefined,
+              features,
+              categoryId: product.suggestedCategory?.id || undefined,
+              listingType: tryType,
+            });
+
+            usedListingType = tryType;
+
+            // If success or error is NOT about listing type, stop trying
+            if (mlResult.success || !mlResult.error?.includes("listing_type")) {
+              break;
+            }
+
+            // If listing type error, try next fallback
+            if (tryType !== listingTypeFallback[listingTypeFallback.length - 1]) {
+              const fallbackLabel = LISTING_TYPE_OPTIONS.find(o => o.value === listingTypeFallback[listingTypeFallback.indexOf(tryType) + 1])?.label;
+              toast.info(`Tipo "${LISTING_TYPE_OPTIONS.find(o => o.value === tryType)?.label}" indisponível para "${product.name.substring(0, 25)}...", tentando "${fallbackLabel}"...`, { duration: 3000 });
+              await new Promise(r => setTimeout(r, 500));
+            }
+          }
 
           await addLogMutation.mutateAsync({
             jobId,
@@ -786,7 +859,8 @@ export default function ExportPage() {
           if (mlResult.success) {
             successCount++;
             const permalink = mlResult.permalink ? ` - ${mlResult.permalink}` : "";
-            toast.success(`"${product.name.substring(0, 30)}..." publicado no ML!${permalink}`, { duration: 4000 });
+            const typeLabel = LISTING_TYPE_OPTIONS.find(o => o.value === usedListingType)?.label || usedListingType;
+            toast.success(`"${product.name.substring(0, 30)}..." publicado no ML! (${typeLabel})${permalink}`, { duration: 4000 });
           } else {
             errorCount++;
             toast.error(`Erro ML: "${product.name.substring(0, 30)}...": ${mlResult.error}`, { duration: 4000 });
@@ -1025,28 +1099,55 @@ export default function ExportPage() {
                   {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                 </Button>
               </div>
-              {/* Individual listing type selector */}
-              <Select
-                value={product.listingType || batchListingType}
-                onValueChange={(val) => {
-                  setMappedProducts(prev => prev.map(p =>
-                    p.id === product.id ? { ...p, listingType: val as ListingType } : p
-                  ));
-                }}
-              >
-                <SelectTrigger className="h-6 text-[10px] w-28">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LISTING_TYPE_OPTIONS.map(opt => (
-                    <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                      <span className={`flex items-center gap-1 ${opt.color}`}>
-                        {opt.icon} {opt.label}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Individual listing type selector - more visible */}
+              <div className="flex gap-0.5 mt-1">
+                {LISTING_TYPE_OPTIONS.map(opt => {
+                  const isActive = (product.listingType || batchListingType) === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => {
+                        setMappedProducts(prev => prev.map(p =>
+                          p.id === product.id ? { ...p, listingType: opt.value } : p
+                        ));
+                      }}
+                      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium border transition-all ${
+                        isActive
+                          ? opt.value === "gold_pro" ? "bg-purple-100 border-purple-400 text-purple-700"
+                            : opt.value === "gold_special" ? "bg-amber-100 border-amber-400 text-amber-700"
+                            : "bg-gray-100 border-gray-400 text-gray-700"
+                          : "bg-transparent border-transparent text-muted-foreground hover:bg-muted"
+                      }`}
+                      title={opt.description}
+                    >
+                      {opt.icon}
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Quick cover image change buttons */}
+              {product.allImages && product.allImages.length > 1 && (
+                <div className="flex items-center gap-1 mt-1">
+                  <button
+                    onClick={() => setCoverImage(product.id, Math.max(0, (product.coverImageIndex || 0) - 1))}
+                    disabled={(product.coverImageIndex || 0) === 0}
+                    className="h-5 w-5 rounded border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 transition-colors"
+                  >
+                    <ChevronLeft className="h-3 w-3" />
+                  </button>
+                  <span className="text-[9px] text-muted-foreground">
+                    Capa {(product.coverImageIndex || 0) + 1}/{product.allImages.length}
+                  </span>
+                  <button
+                    onClick={() => setCoverImage(product.id, Math.min(product.allImages!.length - 1, (product.coverImageIndex || 0) + 1))}
+                    disabled={(product.coverImageIndex || 0) === product.allImages.length - 1}
+                    className="h-5 w-5 rounded border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 transition-colors"
+                  >
+                    <ChevronRight className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1069,12 +1170,27 @@ export default function ExportPage() {
                       Galeria de Fotos
                       {product.allImages && <span className="text-muted-foreground font-normal">({product.allImages.length} fotos)</span>}
                     </Label>
-                    {!product.allImages && !isLoadingImages && (
-                      <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => loadAllImages(product.id)}>
-                        <ImagePlus className="h-3 w-3 mr-1" />
-                        Carregar fotos
+                    <div className="flex items-center gap-1.5">
+                      {!product.allImages && !isLoadingImages && (
+                        <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => loadAllImages(product.id)}>
+                          <ImagePlus className="h-3 w-3 mr-1" />
+                          Carregar fotos
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-[10px] border-purple-300 text-purple-700 hover:bg-purple-50"
+                        onClick={() => handleGenerateImage(product.id)}
+                        disabled={generatingImageFor.has(product.id)}
+                      >
+                        {generatingImageFor.has(product.id) ? (
+                          <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Gerando...</>
+                        ) : (
+                          <><Wand2 className="h-3 w-3 mr-1" />Gerar Foto IA</>
+                        )}
                       </Button>
-                    )}
+                    </div>
                   </div>
 
                   {isLoadingImages ? (
@@ -1106,8 +1222,47 @@ export default function ExportPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground italic">Nenhuma foto disponível</p>
+                    <div className="flex flex-col items-center gap-2 py-4">
+                      <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
+                      <p className="text-xs text-muted-foreground italic">Nenhuma foto disponível</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs border-purple-300 text-purple-700 hover:bg-purple-50"
+                        onClick={() => handleGenerateImage(product.id)}
+                        disabled={generatingImageFor.has(product.id)}
+                      >
+                        {generatingImageFor.has(product.id) ? (
+                          <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Gerando foto com IA...</>
+                        ) : (
+                          <><Wand2 className="h-3.5 w-3.5 mr-1" />Gerar Foto com IA</>
+                        )}
+                      </Button>
+                    </div>
                   )}
+
+                  {/* AI Image Generation Style Selector */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] text-muted-foreground">Estilo IA:</span>
+                    {([
+                      { value: "white_background", label: "Fundo Branco" },
+                      { value: "lifestyle", label: "Lifestyle" },
+                      { value: "enhanced", label: "Melhorada" },
+                      { value: "product_photo", label: "Produto" },
+                    ] as const).map(s => (
+                      <button
+                        key={s.value}
+                        onClick={() => setImageGenStyle(s.value)}
+                        className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${
+                          imageGenStyle === s.value
+                            ? "bg-purple-100 border-purple-400 text-purple-700 font-medium"
+                            : "border-transparent text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <Separator />

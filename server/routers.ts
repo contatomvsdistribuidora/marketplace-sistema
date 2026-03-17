@@ -10,6 +10,7 @@ import * as ml from "./mercadolivre";
 import * as localAuth from "./local-auth";
 import * as tiktok from "./tiktokshop";
 import * as mlCat from "./ml-categories";
+import { generateImage } from "./_core/imageGeneration";
 
 export const appRouter = router({
   system: systemRouter,
@@ -448,6 +449,43 @@ export const appRouter = router({
           }
         }
         return results;
+      }),
+
+    // Generate product image with AI
+    generateProductImage: protectedProcedure
+      .input(
+        z.object({
+          productName: z.string(),
+          productDescription: z.string().optional(),
+          originalImageUrl: z.string().optional(),
+          style: z.enum(["product_photo", "lifestyle", "white_background", "enhanced"]).default("white_background"),
+        })
+      )
+      .mutation(async ({ input }) => {
+        let prompt = "";
+        switch (input.style) {
+          case "white_background":
+            prompt = `Professional product photography of ${input.productName} on a clean white background, studio lighting, high resolution, e-commerce style, no text or watermarks`;
+            break;
+          case "lifestyle":
+            prompt = `Lifestyle product photography of ${input.productName} in a natural setting, warm lighting, aspirational, e-commerce marketing style`;
+            break;
+          case "enhanced":
+            prompt = `Enhanced professional product photo of ${input.productName}, improved lighting and colors, sharp details, e-commerce ready`;
+            break;
+          default:
+            prompt = `Professional product photo of ${input.productName}, clean background, studio lighting, e-commerce style`;
+        }
+        if (input.productDescription) {
+          prompt += `. Product details: ${input.productDescription.substring(0, 200)}`;
+        }
+
+        const originalImages = input.originalImageUrl
+          ? [{ url: input.originalImageUrl, mimeType: "image/jpeg" }]
+          : undefined;
+
+        const result = await generateImage({ prompt, originalImages });
+        return { url: result.url, prompt };
       }),
   }),
 

@@ -146,4 +146,8 @@
 - [x] Atributos obrigatórios por categoria: buscar da API ML ao expandir card, exibe obrigatórios/opcionais separados
 - [x] Integrar listing_type_id no publishProduct - já aceita listingType no input schema
 - [x] Endpoint para buscar atributos obrigatórios de uma categoria ML - ml.getCategoryAttributes já existe
-- [ ] Endpoint para gerar foto de capa com IA
+- [x] Endpoint para gerar foto de capa com IA - IMPLEMENTADO: ai.generateProductImage com 4 estilos (white_background/lifestyle/enhanced/product_photo)
+- [x] BUG: Exportação mostra 4 publicados mas toast diz 1 publicado e 3 erros - CAUSA: listing_type.temporarily_unavailable do ML (tipo Premium indisponível para esses produtos) - CORRIGIDO: fallback automático de listing type (gold_pro → gold_special → free)
+- [x] Permitir selecionar tipo de anúncio diferente por produto (ex: alguns Premium, outros Grátis, outros Clássico) - IMPLEMENTADO: seletor individual por card + batch apply
+- [x] Botão de gerar foto de capa com IA visível e funcional na etapa de Review - IMPLEMENTADO: botão Gerar Foto IA na galeria expandida com 4 estilos
+- [x] Garantir galeria de fotos com troca de capa visível e funcional por produto - IMPLEMENTADO: auto-load de imagens ao entrar no Review, galeria com seleção de capa

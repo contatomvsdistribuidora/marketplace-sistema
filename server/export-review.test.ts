@@ -79,7 +79,7 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 3000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
         ]);
       } catch (error: any) {
         // TIMEOUT or ML API error is fine - means input validation passed
@@ -87,7 +87,7 @@ describe("Export Review - ML Publish Input Validation", () => {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 10000);
+    }, 15000);
 
     it("accepts listingType gold_special", async () => {
       const { ctx } = createAuthContext();
@@ -129,13 +129,13 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 3000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
         ]);
       } catch (error: any) {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 10000);
+    }, 15000);
 
     it("accepts images array", async () => {
       const { ctx } = createAuthContext();
@@ -157,13 +157,13 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 3000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
         ]);
       } catch (error: any) {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 10000);
+    }, 15000);
 
     it("accepts features record", async () => {
       const { ctx } = createAuthContext();
@@ -187,13 +187,13 @@ describe("Export Review - ML Publish Input Validation", () => {
       try {
         await Promise.race([
           promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 3000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 8000)),
         ]);
       } catch (error: any) {
         expect(error.message).not.toContain("Invalid input");
         expect(error.message).not.toMatch(/Expected .+ received/);
       }
-    }, 10000);
+    }, 15000);
   });
 
   describe("ml.batchPublish input schema", () => {
@@ -281,6 +281,65 @@ describe("Export Review - ML Publish Input Validation", () => {
       });
       expect(result).toBeDefined();
     });
+  });
+
+  describe("ai.generateProductImage input schema", () => {
+    it("requires authentication", async () => {
+      const ctx = createUnauthContext();
+      const caller = appRouter.createCaller(ctx);
+      await expect(
+        caller.ai.generateProductImage({
+          productName: "Test Product",
+          style: "white_background",
+        })
+      ).rejects.toThrow();
+    });
+
+    it("accepts valid style options", async () => {
+      const { ctx } = createAuthContext();
+      const caller = appRouter.createCaller(ctx);
+
+      // Test that input validation passes for all styles
+      for (const style of ["white_background", "lifestyle", "enhanced", "product_photo"] as const) {
+        const promise = caller.ai.generateProductImage({
+          productName: "Test Product",
+          style,
+        });
+
+        try {
+          await Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 3000)),
+          ]);
+        } catch (error: any) {
+          // TIMEOUT or API error is fine - means input validation passed
+          expect(error.message).not.toContain("Invalid input");
+          expect(error.message).not.toMatch(/Expected .+ received/);
+        }
+      }
+    }, 20000);
+
+    it("accepts optional parameters", async () => {
+      const { ctx } = createAuthContext();
+      const caller = appRouter.createCaller(ctx);
+
+      const promise = caller.ai.generateProductImage({
+        productName: "Test Product",
+        productDescription: "A great product for testing",
+        originalImageUrl: "https://example.com/original.jpg",
+        style: "enhanced",
+      });
+
+      try {
+        await Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 3000)),
+        ]);
+      } catch (error: any) {
+        expect(error.message).not.toContain("Invalid input");
+        expect(error.message).not.toMatch(/Expected .+ received/);
+      }
+    }, 10000);
   });
 
   describe("exports.create input schema", () => {
