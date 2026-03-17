@@ -157,3 +157,8 @@
 - [x] Exportação multiplicada: N produtos × M tipos = N×M publicações com progresso correto
 - [x] Galeria de fotos, troca de capa e gerar foto IA visíveis e funcionais no card de Review
 - [x] Filtro de nome com opção "contém" e "não contém" na página de Produtos (ex: nome contém "tintas" ou nome não contém "tintas")
+- [x] Gerar foto IA em lote: botão na barra de ações para gerar fotos com IA para todos os produtos selecionados - IMPLEMENTADO: Row 3 na batch actions bar com seletor de estilo e progresso
+- [x] Puxar todas as fotos do produto (não apenas 1) - buscar via getProductDetails para ter galeria completa - IMPLEMENTADO: auto-load ao entrar no Review
+- [x] Descrição do produto visível e editável no card expandido da etapa de Review - IMPLEMENTADO: seção de descrição entre galeria e atributos
+- [x] Gerar descrição por IA otimizada para ML (botão no card expandido) - IMPLEMENTADO: endpoint ai.generateDescription com 3 estilos (SEO/Detalhada/Curta)
+- [x] Mostrar títulos gerados por tipo de anúncio claramente no card (ex: "Clássico: título X", "Premium: título Y") - IMPLEMENTADO: preview de títulos por tipo no card quando titlesPerType disponível

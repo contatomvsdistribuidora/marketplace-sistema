@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
@@ -18,7 +19,7 @@ import {
   Upload, Store, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
   ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw, ExternalLink,
   ChevronDown, ChevronUp, Image as ImageIcon, ChevronLeft, ChevronRight, Crown, Tag, Wand2,
-  Star, ImagePlus, Type, Settings2, SquareCheck, Square
+  Star, ImagePlus, Type, Settings2, SquareCheck, Square, FileText, Images
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
@@ -304,6 +305,15 @@ export default function ExportPage() {
   const addLogMutation = trpc.exports.addLog.useMutation();
   const mlPublishMutation = trpc.ml.publishProduct.useMutation();
   const generateImageMutation = trpc.ai.generateProductImage.useMutation();
+  const generateDescriptionMutation = trpc.ai.generateDescription.useMutation();
+
+  // Batch image generation states
+  const [isBatchGeneratingImages, setIsBatchGeneratingImages] = useState(false);
+  const [batchImageGenProgress, setBatchImageGenProgress] = useState(0);
+
+  // Description generation states
+  const [generatingDescFor, setGeneratingDescFor] = useState<Set<string>>(new Set());
+  const [descriptionStyle, setDescriptionStyle] = useState<"seo" | "detailed" | "short">("seo");
 
   // Check if this is a re-export to the same marketplace type (can skip AI mapping)
   const canSkipMapping = useMemo(() => {
@@ -579,6 +589,99 @@ export default function ExportPage() {
       });
     }
   }, [mappedProducts, imageGenStyle]);
+
+  // ===== BATCH GENERATE IMAGES WITH AI =====
+  const handleBatchGenerateImages = useCallback(async () => {
+    const selected = mappedProducts.filter(p => p.selected && p.status === "mapped");
+    if (selected.length === 0) {
+      toast.error("Selecione pelo menos um produto mapeado para gerar fotos.");
+      return;
+    }
+
+    setIsBatchGeneratingImages(true);
+    setBatchImageGenProgress(0);
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < selected.length; i++) {
+      const product = selected[i];
+      try {
+        const result = await generateImageMutation.mutateAsync({
+          productName: product.optimizedTitle || product.name,
+          productDescription: product.description?.substring(0, 300) || undefined,
+          originalImageUrl: product.imageUrl || undefined,
+          style: imageGenStyle,
+        });
+
+        if (result.url) {
+          setMappedProducts(prev => prev.map(p => {
+            if (p.id !== product.id) return p;
+            const newImages = [...(p.allImages || []), result.url!];
+            return { ...p, allImages: newImages, coverImageIndex: newImages.length - 1 };
+          }));
+          successCount++;
+        }
+      } catch (error: any) {
+        errorCount++;
+        console.error(`Error generating image for ${product.id}:`, error);
+      }
+
+      setBatchImageGenProgress(Math.round(((i + 1) / selected.length) * 100));
+      // Small delay between API calls
+      if (i < selected.length - 1) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    setIsBatchGeneratingImages(false);
+    setBatchImageGenProgress(0);
+
+    if (errorCount > 0) {
+      toast.warning(`Fotos geradas: ${successCount} sucesso, ${errorCount} erro(s).`);
+    } else {
+      toast.success(`${successCount} foto(s) gerada(s) com IA e definida(s) como capa!`);
+    }
+  }, [mappedProducts, imageGenStyle]);
+
+  // ===== GENERATE DESCRIPTION WITH AI =====
+  const handleGenerateDescription = useCallback(async (productId: string) => {
+    const product = mappedProducts.find(p => p.id === productId);
+    if (!product) return;
+
+    const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
+    const marketplaceName = marketplace?.name || "Marketplace";
+
+    setGeneratingDescFor(prev => new Set(prev).add(productId));
+    try {
+      const result = await generateDescriptionMutation.mutateAsync({
+        product: {
+          name: product.optimizedTitle || product.name,
+          description: product.description || "",
+          features: product.features || {},
+          category: product.suggestedCategory?.name || product.category || "",
+          ean: product.ean,
+        },
+        marketplace: marketplaceName,
+        style: descriptionStyle,
+      });
+
+      if (result.description) {
+        setMappedProducts(prev => prev.map(p =>
+          p.id === productId ? { ...p, description: result.description } : p
+        ));
+        toast.success(`Descrição gerada para "${product.name.substring(0, 30)}..."`);
+      }
+    } catch (error: any) {
+      toast.error(`Erro ao gerar descrição: ${error.message}`);
+    } finally {
+      setGeneratingDescFor(prev => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+    }
+  }, [mappedProducts, selectedMarketplace, marketplaces, descriptionStyle]);
 
   // ===== CHANGE COVER IMAGE =====
   const setCoverImage = useCallback((productId: string, imageIndex: number) => {
@@ -1347,6 +1450,68 @@ export default function ExportPage() {
 
                 <Separator />
 
+                {/* Description section */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5" />
+                      Descrição do Produto
+                      {product.description && (
+                        <span className="text-muted-foreground font-normal">({product.description.length} caracteres)</span>
+                      )}
+                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        className="h-6 text-[10px] border rounded px-1.5 bg-background"
+                        value={descriptionStyle}
+                        onChange={(e) => setDescriptionStyle(e.target.value as any)}
+                      >
+                        <option value="seo">SEO</option>
+                        <option value="detailed">Detalhada</option>
+                        <option value="short">Curta</option>
+                      </select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-[10px] border-blue-300 text-blue-700 hover:bg-blue-50"
+                        onClick={() => handleGenerateDescription(product.id)}
+                        disabled={generatingDescFor.has(product.id)}
+                      >
+                        {generatingDescFor.has(product.id) ? (
+                          <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Gerando...</>
+                        ) : (
+                          <><Sparkles className="h-3 w-3 mr-1" />Gerar Descrição IA</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {isEditing ? (
+                    <Textarea
+                      className="text-xs min-h-[120px] resize-y"
+                      value={product.description || ""}
+                      onChange={(e) => {
+                        setMappedProducts(prev => prev.map(p =>
+                          p.id === product.id ? { ...p, description: e.target.value } : p
+                        ));
+                      }}
+                      placeholder="Descrição do produto para o anúncio..."
+                    />
+                  ) : (
+                    <div className="bg-background rounded-lg border p-3 max-h-[200px] overflow-y-auto">
+                      {product.description ? (
+                        <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
+                          {product.description.length > 500 ? product.description.substring(0, 500) + "..." : product.description}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">Sem descrição. Clique em "Gerar Descrição IA" ou "Editar" para adicionar.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
                 {/* Attributes section */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -2089,6 +2254,59 @@ export default function ExportPage() {
                       </Tooltip>
                     </div>
                   )}
+                </div>
+
+                {/* Row 3: Image Generation in Batch */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-medium flex items-center gap-1 whitespace-nowrap">
+                      <Images className="h-3.5 w-3.5" />
+                      Gerar Fotos IA:
+                    </Label>
+                    <div className="flex gap-1">
+                      {([
+                        { value: "white_background" as const, label: "Fundo Branco" },
+                        { value: "lifestyle" as const, label: "Lifestyle" },
+                        { value: "enhanced" as const, label: "Melhorada" },
+                        { value: "product_photo" as const, label: "Produto" },
+                      ]).map(s => (
+                        <button
+                          key={s.value}
+                          onClick={() => setImageGenStyle(s.value)}
+                          className={`text-[10px] px-2 py-1 rounded border transition-all ${
+                            imageGenStyle === s.value
+                              ? "bg-purple-100 border-purple-400 text-purple-700 font-medium"
+                              : "border-border text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 border-purple-300 text-purple-700 hover:bg-purple-50"
+                    onClick={handleBatchGenerateImages}
+                    disabled={isBatchGeneratingImages || selectedProducts.filter(p => p.status === "mapped").length === 0}
+                  >
+                    {isBatchGeneratingImages ? (
+                      <><Loader2 className="h-3 w-3 animate-spin" />{batchImageGenProgress > 0 ? `${batchImageGenProgress}%` : "Gerando..."}</>
+                    ) : (
+                      <><Wand2 className="h-3 w-3" />Gerar Fotos ({selectedProducts.filter(p => p.status === "mapped").length})</>
+                    )}
+                  </Button>
+
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="text-xs">Gera uma foto com IA para cada produto selecionado e define como foto de capa. A foto original é usada como referência.</p>
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             </CardContent>

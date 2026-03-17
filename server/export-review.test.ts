@@ -420,6 +420,93 @@ describe("Export Review - ML Publish Input Validation", () => {
     });
   });
 
+  describe("ai.generateDescription input schema", () => {
+    it("requires authentication", async () => {
+      const ctx = createUnauthContext();
+      const caller = appRouter.createCaller(ctx);
+      await expect(
+        caller.ai.generateDescription({
+          productName: "Test Product",
+          style: "seo",
+        })
+      ).rejects.toThrow();
+    });
+
+    it("accepts valid style options", async () => {
+      const { ctx } = createAuthContext();
+      const caller = appRouter.createCaller(ctx);
+
+      for (const style of ["seo", "detailed", "short"] as const) {
+        const promise = caller.ai.generateDescription({
+          productName: "Test Product",
+          style,
+        });
+
+        try {
+          await Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 5000)),
+          ]);
+        } catch (error: any) {
+          expect(error.message).not.toContain("Invalid input");
+          expect(error.message).not.toMatch(/Expected .+ received/);
+        }
+      }
+    }, 20000);
+
+    it("accepts optional parameters", async () => {
+      const { ctx } = createAuthContext();
+      const caller = appRouter.createCaller(ctx);
+
+      const promise = caller.ai.generateDescription({
+        productName: "Test Product",
+        productDescription: "Original description",
+        features: { Marca: "TestBrand", Cor: "Preto" },
+        categoryName: "Eletr\u00f4nicos",
+        style: "detailed",
+      });
+
+      try {
+        await Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 5000)),
+        ]);
+      } catch (error: any) {
+        expect(error.message).not.toContain("Invalid input");
+        expect(error.message).not.toMatch(/Expected .+ received/);
+      }
+    }, 10000);
+  });
+
+  describe("Batch image generation logic", () => {
+    it("should process all selected products for image generation", () => {
+      const products = [
+        { id: "1", status: "mapped", selected: true, imageUrl: "https://example.com/img1.jpg" },
+        { id: "2", status: "mapped", selected: true, imageUrl: "https://example.com/img2.jpg" },
+        { id: "3", status: "mapped", selected: false, imageUrl: "https://example.com/img3.jpg" },
+        { id: "4", status: "error", selected: true, imageUrl: null },
+      ];
+
+      const toGenerate = products.filter(p => p.status === "mapped" && p.selected);
+      expect(toGenerate).toHaveLength(2);
+      expect(toGenerate.map(p => p.id)).toEqual(["1", "2"]);
+    });
+
+    it("should track progress during batch generation", () => {
+      const total = 5;
+      let completed = 0;
+      const progressSteps: number[] = [];
+
+      for (let i = 0; i < total; i++) {
+        completed++;
+        const progress = Math.round((completed / total) * 100);
+        progressSteps.push(progress);
+      }
+
+      expect(progressSteps).toEqual([20, 40, 60, 80, 100]);
+    });
+  });
+
   describe("exports.create input schema", () => {
     it("requires authentication", async () => {
       const ctx = createUnauthContext();

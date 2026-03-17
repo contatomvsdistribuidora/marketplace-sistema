@@ -392,3 +392,102 @@ Retorne:
     return { title: product.name, reasoning: "Falha ao gerar título" };
   }
 }
+
+/**
+ * Generate an optimized product description for a marketplace listing
+ */
+export async function generateOptimizedDescription(
+  product: {
+    name: string;
+    description: string;
+    features: Record<string, string>;
+    category: string;
+    ean?: string;
+  },
+  marketplace: string,
+  style: "seo" | "detailed" | "short" | "custom" = "seo",
+  customInstruction?: string
+): Promise<{ description: string; reasoning: string }> {
+  const featuresText = Object.entries(product.features || {})
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(", ");
+
+  const response = await invokeLLM({
+    messages: [
+      {
+        role: "system",
+        content: `Você é um especialista em copywriting para marketplaces brasileiros, especialmente ${marketplace}.
+Crie uma descrição otimizada para o anúncio do produto.
+
+${style === "seo" ? `ESTILO: SEO Otimizado
+- Descrição completa com palavras-chave relevantes para busca
+- Inclua especificações técnicas, benefícios e diferenciais
+- Use formatação com quebras de linha para facilitar leitura
+- Foque em termos que compradores usam para buscar
+- Inclua seções: O que é, Características, Especificações, Benefícios`
+: style === "detailed" ? `ESTILO: Detalhado Completo
+- Descrição extensa e profissional
+- Todas as especificações técnicas disponíveis
+- Material, dimensões, peso, garantia se disponível
+- Instruções de uso e cuidados
+- Inclua seções organizadas com subtítulos`
+: style === "short" ? `ESTILO: Curto e Direto
+- Descrição concisa com os pontos principais
+- Máximo 500 caracteres
+- Apenas características essenciais e diferenciais
+- Ideal para anúncios grátis ou com pouco espaço`
+: `ESTILO: Personalizado
+Instrução do usuário: ${customInstruction || "Criar descrição otimizada"}
+- Siga a instrução do usuário para o estilo da descrição`}
+
+Regras gerais:
+- NÃO use caixa alta completa (ALL CAPS)
+- NÃO invente especificações que não existem nos dados
+- A descrição deve ser profissional e focada em conversão de vendas
+- NÃO inclua preço na descrição
+- NÃO inclua nome do site de origem
+- Use quebras de linha (\\n) para formatar
+Responda APENAS em JSON válido.`,
+      },
+      {
+        role: "user",
+        content: `Produto:
+Nome: ${product.name}
+Descrição original: ${(product.description || "Sem descrição").substring(0, 2000)}
+Categoria: ${product.category || "N/A"}
+Características: ${featuresText || "N/A"}
+EAN: ${product.ean || "N/A"}
+
+Retorne:
+{
+  "description": "Descrição otimizada para o marketplace",
+  "reasoning": "Explicação das mudanças feitas"
+}`,
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "optimized_description",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            description: { type: "string" },
+            reasoning: { type: "string" },
+          },
+          required: ["description", "reasoning"],
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+
+  try {
+    const content = response.choices?.[0]?.message?.content as string | undefined;
+    if (!content) return { description: product.description || "", reasoning: "Falha ao gerar descrição" };
+    return JSON.parse(content);
+  } catch {
+    return { description: product.description || "", reasoning: "Falha ao gerar descrição" };
+  }
+}

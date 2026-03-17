@@ -452,6 +452,31 @@ export const appRouter = router({
         return results;
       }),
 
+    // Generate optimized product description with AI
+    generateDescription: protectedProcedure
+      .input(
+        z.object({
+          product: z.object({
+            name: z.string(),
+            description: z.string().default(""),
+            features: z.record(z.string(), z.string()).default({}),
+            category: z.string().default(""),
+            ean: z.string().optional(),
+          }),
+          marketplace: z.string(),
+          style: z.enum(["seo", "detailed", "short", "custom"]).default("seo"),
+          customInstruction: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        return aiMapper.generateOptimizedDescription(
+          input.product,
+          input.marketplace,
+          input.style,
+          input.customInstruction
+        );
+      }),
+
     // Generate product image with AI
     generateProductImage: protectedProcedure
       .input(
