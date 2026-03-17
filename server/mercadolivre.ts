@@ -317,34 +317,51 @@ export async function getMlUserInfo(accessToken: string) {
 export async function predictCategory(query: string) {
   // domain_discovery is a public endpoint, no auth needed
   const url = `${ML_API_BASE}/sites/${ML_SITE_ID}/domain_discovery/search?q=${encodeURIComponent(query)}`;
+  console.log(`[ML predictCategory] Calling domain_discovery for: "${query}"`);
+  console.log(`[ML predictCategory] URL: ${url}`);
+  
   const response = await fetch(url);
   
   if (!response.ok) {
-    console.error("[ML] Category prediction failed:", response.status);
+    const errorBody = await response.text();
+    console.error(`[ML predictCategory] domain_discovery failed: ${response.status}`, errorBody);
     return [];
   }
 
   const data = await response.json();
+  console.log(`[ML predictCategory] domain_discovery raw response:`, JSON.stringify(data).substring(0, 500));
   
   // Returns array of domain matches with categories
-  return (data || []).map((item: any) => ({
+  const results = (data || []).map((item: any) => ({
     domainId: item.domain_id,
     domainName: item.domain_name,
     categoryId: item.category_id,
     categoryName: item.category_name,
     attributes: item.attributes || [],
   }));
+  
+  console.log(`[ML predictCategory] Parsed ${results.length} predictions:`, results.map((r: any) => `${r.categoryId} (${r.categoryName})`).join(', '));
+  return results;
 }
 
 /**
  * Get category details and path
  */
 export async function getCategoryInfo(categoryId: string) {
+  // Validate category ID format (should be MLB followed by digits)
+  if (!categoryId || !categoryId.match(/^MLB\d+$/)) {
+    console.error(`[ML getCategoryInfo] Invalid category ID format: "${categoryId}"`);
+    throw new Error(`Invalid ML category ID format: "${categoryId}". Expected format: MLB followed by digits (e.g., MLB39567)`);
+  }
+  
   const url = `${ML_API_BASE}/categories/${categoryId}`;
+  console.log(`[ML getCategoryInfo] Fetching: ${url}`);
   const response = await fetch(url);
   
   if (!response.ok) {
-    throw new Error(`Failed to get category info for ${categoryId}`);
+    const errorBody = await response.text();
+    console.error(`[ML getCategoryInfo] Failed for ${categoryId}: ${response.status}`, errorBody);
+    throw new Error(`Failed to get category info for ${categoryId} (HTTP ${response.status})`);
   }
 
   const data = await response.json();
@@ -363,11 +380,20 @@ export async function getCategoryInfo(categoryId: string) {
  * Get required and optional attributes for a category
  */
 export async function getCategoryAttributes(categoryId: string) {
+  // Validate category ID format
+  if (!categoryId || !categoryId.match(/^MLB\d+$/)) {
+    console.error(`[ML getCategoryAttributes] Invalid category ID format: "${categoryId}"`);
+    throw new Error(`Invalid ML category ID format: "${categoryId}". Expected format: MLB followed by digits (e.g., MLB39567)`);
+  }
+  
   const url = `${ML_API_BASE}/categories/${categoryId}/attributes`;
+  console.log(`[ML getCategoryAttributes] Fetching attributes for: ${categoryId}`);
   const response = await fetch(url);
   
   if (!response.ok) {
-    throw new Error(`Failed to get attributes for category ${categoryId}`);
+    const errorBody = await response.text();
+    console.error(`[ML getCategoryAttributes] Failed for ${categoryId}: ${response.status}`, errorBody);
+    throw new Error(`Failed to get attributes for category ${categoryId} (HTTP ${response.status})`);
   }
 
   const data = await response.json();
@@ -433,7 +459,9 @@ export async function createItem(
     body.sale_terms = itemData.saleTerms;
   }
 
+  console.log(`[ML createItem] Sending POST /items with body:`, JSON.stringify(body).substring(0, 500));
   const result = await mlApiCall(accessToken, "POST", "/items", body);
+  console.log(`[ML createItem] Response:`, JSON.stringify(result).substring(0, 300));
 
   // Set description separately (ML requires it as a separate call)
   if (itemData.description && result.id) {
@@ -690,23 +718,52 @@ export async function publishProduct(
   }
 ) {
   try {
+    console.log(`[ML publishProduct] Starting for product: "${product.name}" (ID: ${product.productId})`);
+    console.log(`[ML publishProduct] Input categoryId: ${product.categoryId || 'NOT PROVIDED (will use domain_discovery)'}`);
+    
     // 1. Predict category if not provided
     let categoryId = product.categoryId;
     let categoryName = "";
 
+    // Validate provided categoryId format
+    if (categoryId && !categoryId.match(/^MLB\d+$/)) {
+      console.warn(`[ML publishProduct] Provided categoryId "${categoryId}" has invalid format, ignoring and using domain_discovery instead`);
+      categoryId = undefined;
+    }
+
     if (!categoryId) {
+      console.log(`[ML publishProduct] No valid categoryId, calling domain_discovery...`);
       const predictions = await predictCategory(product.name);
       if (predictions.length > 0) {
-        categoryId = predictions[0].categoryId;
-        categoryName = predictions[0].categoryName;
+        // Validate the predicted categoryId
+        const predicted = predictions[0];
+        if (predicted.categoryId && predicted.categoryId.match(/^MLB\d+$/)) {
+          categoryId = predicted.categoryId;
+          categoryName = predicted.categoryName;
+          console.log(`[ML publishProduct] domain_discovery predicted: ${categoryId} (${categoryName})`);
+        } else {
+          console.error(`[ML publishProduct] domain_discovery returned invalid categoryId: "${predicted.categoryId}"`);
+          // Try other predictions
+          const validPrediction = predictions.find((p: any) => p.categoryId && p.categoryId.match(/^MLB\d+$/));
+          if (validPrediction) {
+            categoryId = validPrediction.categoryId;
+            categoryName = validPrediction.categoryName;
+            console.log(`[ML publishProduct] Using alternative prediction: ${categoryId} (${categoryName})`);
+          } else {
+            throw new Error(`domain_discovery retornou IDs de categoria inválidos: ${predictions.map((p: any) => p.categoryId).join(', ')}`);
+          }
+        }
       } else {
-        throw new Error("Não foi possível determinar a categoria do produto no Mercado Livre");
+        throw new Error("Não foi possível determinar a categoria do produto no Mercado Livre (domain_discovery retornou vazio)");
       }
     }
 
+    // Double-check: validate categoryId exists on ML before proceeding
+    console.log(`[ML publishProduct] Validating categoryId ${categoryId} on ML API...`);
     if (categoryId && !categoryName) {
       const catInfo = await getCategoryInfo(categoryId);
       categoryName = catInfo.name;
+      console.log(`[ML publishProduct] Category validated: ${categoryId} = ${categoryName}`);
     }
 
     // 2. Get required attributes for the category
@@ -743,6 +800,8 @@ export async function publishProduct(
     const pictures = (product.images || []).map((url) => ({ source: url }));
 
     // 5. Create item on ML
+    console.log(`[ML publishProduct] Creating item with categoryId=${categoryId}, title="${product.name.substring(0, 60)}", price=${product.price}, stock=${product.stock}`);
+    console.log(`[ML publishProduct] Attributes to send:`, JSON.stringify(filledAttributes).substring(0, 300));
     const mlItem = await createItem(accountId, {
       title: product.name.substring(0, 60), // ML title limit is 60 chars
       categoryId: categoryId!,

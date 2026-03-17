@@ -113,3 +113,4 @@
 - [x] Mostrar thumbnail/foto principal do produto em todas as listagens (seleção, mapeamento, review, logs)
 - [x] Exibir atributos obrigatórios vs opcionais na etapa de mapeamento IA (obrigatórios em destaque, opcionais colapsáveis)
 - [x] Permitir edição dos atributos mapeados antes de publicar
+- [x] BUG: Predição de categoria ML retorna IDs inválidos (ex: MLB1735) - corrigido: adicionada validação de formato (regex MLB\d+), logging detalhado em todo o fluxo de publicação, fallback para predições alternativas, e rejeição de categoryIds inválidos antes de chamar API do ML

@@ -1,0 +1,8 @@
+{
+  "query": "SELECT id, job_id, product_id, product_name, status, error_message, created_at FROM export_logs WHERE error_message LIKE '%MLB1735%' OR error_message LIKE '%category%' ORDER BY created_at DESC LIMIT 5",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, job_id, product_id, product_name, status, error_message, created_at FROM export_logs WHERE error_message LIKE '%MLB1735%' OR error_message LIKE '%category%' ORDER BY created_at DESC LIMIT 5",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'error_message' in 'where clause'"
+  ]
+}

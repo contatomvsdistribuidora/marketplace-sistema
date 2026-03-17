@@ -1,0 +1,37 @@
+{
+  "query": "SELECT id, productName, categoryId, categoryName, ml_listing_status, errorMessage, createdAt FROM ml_listings WHERE ml_listing_status = 'error' ORDER BY createdAt DESC LIMIT 5",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, productName, categoryId, categoryName, ml_listing_status, errorMessage, createdAt FROM ml_listings WHERE ml_listing_status = 'error' ORDER BY createdAt DESC LIMIT 5",
+  "rows": [
+    {
+      "id": "3",
+      "productName": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa",
+      "categoryId": "NULL",
+      "categoryName": "NULL",
+      "ml_listing_status": "error",
+      "errorMessage": "Failed to get category info for MLB1735",
+      "createdAt": "2026-03-17 16:59:16"
+    },
+    {
+      "id": "2",
+      "productName": "Triciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde",
+      "categoryId": "NULL",
+      "categoryName": "NULL",
+      "ml_listing_status": "error",
+      "errorMessage": "Failed to get category info for MLB188040",
+      "createdAt": "2026-03-17 16:27:14"
+    },
+    {
+      "id": "1",
+      "productName": "Triciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa",
+      "categoryId": "NULL",
+      "categoryName": "NULL",
+      "ml_listing_status": "error",
+      "errorMessage": "Failed to get category info for MLB179782",
+      "createdAt": "2026-03-17 16:27:12"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tproductName\tcategoryId\tcategoryName\tml_listing_status\terrorMessage\tcreatedAt\n3\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa\tNULL\tNULL\terror\tFailed to get category info for MLB1735\t2026-03-17 16:59:16\n2\tTriciclo Infantil Bandeirante Velobaby Passeio E Pedal Cor R Azul/verde\tNULL\tNULL\terror\tFailed to get category info for MLB188040\t2026-03-17 16:27:14\n1\tTriciclo Velobaby Passeio E Pedal Rosa Bandeirante Rosa Rosa\tNULL\tNULL\terror\tFailed to get category info for MLB179782\t2026-03-17 16:27:12\n",
+  "stderr": "",
+  "execution_time_ms": 393
+}

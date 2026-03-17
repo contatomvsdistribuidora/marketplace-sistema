@@ -91,6 +91,7 @@ describe("Mercado Livre Integration", () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: false,
         status: 500,
+        text: () => Promise.resolve('Internal Server Error'),
       });
 
       const result = await predictCategory("invalid query");
@@ -162,6 +163,49 @@ describe("Mercado Livre Integration", () => {
       expect(result.id).toBe("MLB1055");
       expect(result.name).toBe("Celulares e Smartphones");
       expect(result.pathFromRoot).toBe("Celulares e Telefones > Celulares e Smartphones");
+    });
+  });
+
+  describe("getCategoryInfo - validation", () => {
+    it("should reject invalid category ID format", async () => {
+      const { getCategoryInfo } = await import("./mercadolivre");
+
+      // Invalid formats should throw
+      await expect(getCategoryInfo("1735")).rejects.toThrow("Invalid ML category ID format");
+      await expect(getCategoryInfo("MLB")).rejects.toThrow("Invalid ML category ID format");
+      await expect(getCategoryInfo("")).rejects.toThrow("Invalid ML category ID format");
+      await expect(getCategoryInfo("INVALID")).rejects.toThrow("Invalid ML category ID format");
+    });
+
+    it("should accept valid MLB category ID format", async () => {
+      const { getCategoryInfo } = await import("./mercadolivre");
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          id: "MLB39567",
+          name: "Triciclos",
+          path_from_root: [
+            { id: "MLB1132", name: "Brinquedos e Hobbies" },
+            { id: "MLB39567", name: "Triciclos" },
+          ],
+          children_categories: [],
+          settings: {},
+        }),
+      });
+
+      const result = await getCategoryInfo("MLB39567");
+      expect(result.id).toBe("MLB39567");
+      expect(result.name).toBe("Triciclos");
+    });
+  });
+
+  describe("getCategoryAttributes - validation", () => {
+    it("should reject invalid category ID format", async () => {
+      const { getCategoryAttributes } = await import("./mercadolivre");
+
+      await expect(getCategoryAttributes("188040")).rejects.toThrow("Invalid ML category ID format");
+      await expect(getCategoryAttributes("abc")).rejects.toThrow("Invalid ML category ID format");
     });
   });
 
