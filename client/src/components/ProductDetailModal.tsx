@@ -1,13 +1,12 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import {
   Package, Image as ImageIcon, FileText, Tag, ChevronLeft, ChevronRight,
-  ExternalLink, Copy, Check
+  Copy, Check
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -84,97 +83,104 @@ export function ProductDetailModal({ open, onOpenChange, product, inventoryId }:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden p-0">
-        <DialogHeader className="px-6 pt-6 pb-2">
-          <DialogTitle className="text-lg font-semibold truncate pr-8">{product.name}</DialogTitle>
+      <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
+          <DialogTitle className="text-lg font-semibold pr-8 truncate">{product.name}</DialogTitle>
+          <div className="flex flex-wrap gap-2 mt-1 text-xs text-muted-foreground">
+            <span>ID: <strong className="text-foreground">{product.id}</strong></span>
+            {product.sku && <span>SKU: <strong className="text-foreground">{product.sku}</strong></span>}
+            {product.ean && <span>EAN: <strong className="text-foreground">{product.ean}</strong></span>}
+            {product.mainPrice > 0 && <span>Preço: <strong className="text-foreground">R$ {product.mainPrice.toFixed(2)}</strong></span>}
+            <span>Estoque: <strong className="text-foreground">{product.totalStock ?? 0}</strong></span>
+          </div>
         </DialogHeader>
 
-        <div className="flex flex-col md:flex-row gap-0 md:gap-6 px-6 pb-6 overflow-hidden">
-          {/* Left: Image Gallery */}
-          <div className="w-full md:w-[360px] shrink-0">
-            {detailsLoading ? (
-              <Skeleton className="w-full aspect-square rounded-lg" />
-            ) : (
-              <div className="space-y-3">
-                {/* Main image */}
-                <div className="relative aspect-square rounded-lg border overflow-hidden bg-muted/30">
-                  {allImages.length > 0 ? (
-                    <img
-                      src={allImages[selectedImageIndex]}
-                      alt={product.name}
-                      className="w-full h-full object-contain"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Package className="h-16 w-16 text-muted-foreground/30" />
+        <ScrollArea className="flex-1 overflow-auto" style={{ maxHeight: "calc(90vh - 100px)" }}>
+          <div className="flex flex-col lg:flex-row gap-6 p-6">
+            {/* Left: Image Gallery */}
+            <div className="w-full lg:w-[400px] shrink-0">
+              {detailsLoading ? (
+                <Skeleton className="w-full aspect-square rounded-lg" />
+              ) : (
+                <div className="space-y-3">
+                  {/* Main image */}
+                  <div className="relative aspect-square rounded-lg border overflow-hidden bg-white">
+                    {allImages.length > 0 ? (
+                      <img
+                        src={allImages[selectedImageIndex]}
+                        alt={product.name}
+                        className="w-full h-full object-contain p-2"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Package className="h-16 w-16 text-muted-foreground/30" />
+                      </div>
+                    )}
+                    {/* Navigation arrows */}
+                    {allImages.length > 1 && (
+                      <>
+                        <button
+                          onClick={() => setSelectedImageIndex(i => (i - 1 + allImages.length) % allImages.length)}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 transition"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => setSelectedImageIndex(i => (i + 1) % allImages.length)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 transition"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full">
+                          {selectedImageIndex + 1} / {allImages.length}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {/* Thumbnails */}
+                  {allImages.length > 1 && (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {allImages.map((img, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setSelectedImageIndex(idx)}
+                          className={`shrink-0 h-16 w-16 rounded-md border-2 overflow-hidden transition ${
+                            idx === selectedImageIndex
+                              ? "border-primary ring-1 ring-primary/30"
+                              : "border-transparent hover:border-muted-foreground/30"
+                          }`}
+                        >
+                          <img src={img} alt="" className="w-full h-full object-cover" />
+                        </button>
+                      ))}
                     </div>
                   )}
-                  {/* Navigation arrows */}
-                  {allImages.length > 1 && (
-                    <>
-                      <button
-                        onClick={() => setSelectedImageIndex(i => (i - 1 + allImages.length) % allImages.length)}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 transition"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => setSelectedImageIndex(i => (i + 1) % allImages.length)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 transition"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full">
-                        {selectedImageIndex + 1} / {allImages.length}
-                      </div>
-                    </>
-                  )}
                 </div>
-                {/* Thumbnails */}
-                {allImages.length > 1 && (
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {allImages.map((img, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => setSelectedImageIndex(idx)}
-                        className={`shrink-0 h-14 w-14 rounded-md border-2 overflow-hidden transition ${
-                          idx === selectedImageIndex
-                            ? "border-primary ring-1 ring-primary/30"
-                            : "border-transparent hover:border-muted-foreground/30"
-                        }`}
-                      >
-                        <img src={img} alt="" className="w-full h-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          {/* Right: Product Details */}
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <Tabs defaultValue="info" className="h-full">
-              <TabsList className="w-full justify-start">
-                <TabsTrigger value="info" className="gap-1.5">
-                  <Package className="h-3.5 w-3.5" />
-                  Dados
-                </TabsTrigger>
-                <TabsTrigger value="description" className="gap-1.5">
-                  <FileText className="h-3.5 w-3.5" />
-                  Descrição
-                </TabsTrigger>
-                <TabsTrigger value="images" className="gap-1.5">
-                  <ImageIcon className="h-3.5 w-3.5" />
-                  Fotos ({allImages.length})
-                </TabsTrigger>
-              </TabsList>
+            {/* Right: Product Details */}
+            <div className="flex-1 min-w-0">
+              <Tabs defaultValue="info">
+                <TabsList className="w-full justify-start mb-4">
+                  <TabsTrigger value="info" className="gap-1.5">
+                    <Package className="h-3.5 w-3.5" />
+                    Dados
+                  </TabsTrigger>
+                  <TabsTrigger value="description" className="gap-1.5">
+                    <FileText className="h-3.5 w-3.5" />
+                    Descrição
+                  </TabsTrigger>
+                  <TabsTrigger value="images" className="gap-1.5">
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    Fotos ({allImages.length})
+                  </TabsTrigger>
+                </TabsList>
 
-              <ScrollArea className="h-[400px] mt-3">
                 {/* Info Tab */}
-                <TabsContent value="info" className="mt-0 space-y-4">
+                <TabsContent value="info" className="mt-0 space-y-5">
                   {/* Basic info grid */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     <InfoField
                       label="ID Produto"
                       value={String(product.id)}
@@ -217,7 +223,7 @@ export function ProductDetailModal({ open, onOpenChange, product, inventoryId }:
 
                   {/* Tags */}
                   {product.tags && product.tags.length > 0 && (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                         <Tag className="h-3 w-3" />
                         Tags
@@ -234,15 +240,19 @@ export function ProductDetailModal({ open, onOpenChange, product, inventoryId }:
 
                   {/* Features/Parameters */}
                   {Object.keys(features).length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">Características</p>
-                      <div className="rounded-md border divide-y">
-                        {Object.entries(features).map(([key, value]) => (
-                          <div key={key} className="flex items-center px-3 py-1.5 text-xs">
-                            <span className="font-medium text-muted-foreground w-1/3 shrink-0">{key}</span>
-                            <span className="flex-1">{value}</span>
-                          </div>
-                        ))}
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Características do Produto</p>
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <tbody>
+                            {Object.entries(features).map(([key, value], idx) => (
+                              <tr key={key} className={idx % 2 === 0 ? "bg-muted/30" : ""}>
+                                <td className="px-3 py-2 font-medium text-muted-foreground w-2/5 border-r text-xs">{key}</td>
+                                <td className="px-3 py-2 text-xs">{value}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   )}
@@ -252,12 +262,12 @@ export function ProductDetailModal({ open, onOpenChange, product, inventoryId }:
                 <TabsContent value="description" className="mt-0">
                   {description ? (
                     <div
-                      className="prose prose-sm max-w-none text-sm"
+                      className="prose prose-sm max-w-none text-sm [&_img]:max-w-full [&_img]:rounded-lg [&_table]:text-xs"
                       dangerouslySetInnerHTML={{ __html: description }}
                     />
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                      <FileText className="h-8 w-8 mb-2 opacity-50" />
+                    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                      <FileText className="h-10 w-10 mb-3 opacity-40" />
                       <p className="text-sm">Sem descrição disponível</p>
                     </div>
                   )}
@@ -272,11 +282,10 @@ export function ProductDetailModal({ open, onOpenChange, product, inventoryId }:
                           key={idx}
                           onClick={() => {
                             setSelectedImageIndex(idx);
-                            // Switch to info tab to see the big image
                           }}
-                          className="relative aspect-square rounded-lg border overflow-hidden hover:ring-2 ring-primary/30 transition group"
+                          className="relative aspect-square rounded-lg border overflow-hidden hover:ring-2 ring-primary/30 transition group bg-white"
                         >
-                          <img src={img} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                          <img src={img} alt={`Foto ${idx + 1}`} className="w-full h-full object-contain p-1" />
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition" />
                           <div className="absolute top-1.5 left-1.5 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded">
                             {idx + 1}
@@ -290,16 +299,16 @@ export function ProductDetailModal({ open, onOpenChange, product, inventoryId }:
                       ))}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                      <ImageIcon className="h-8 w-8 mb-2 opacity-50" />
+                    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                      <ImageIcon className="h-10 w-10 mb-3 opacity-40" />
                       <p className="text-sm">Nenhuma foto disponível</p>
                     </div>
                   )}
                 </TabsContent>
-              </ScrollArea>
-            </Tabs>
+              </Tabs>
+            </div>
           </div>
-        </div>
+        </ScrollArea>
       </DialogContent>
     </Dialog>
   );
@@ -317,8 +326,8 @@ function InfoField({
   copied?: boolean;
 }) {
   return (
-    <div className="space-y-0.5">
-      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
+    <div className="space-y-1 p-2 rounded-lg bg-muted/30">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
       <div className="flex items-center gap-1.5">
         <p className="text-sm font-medium truncate">{value}</p>
         {onCopy && (

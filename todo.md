@@ -132,3 +132,4 @@
 - [ ] Troca de foto de capa: permitir escolher qual foto será a principal do anúncio
 - [x] Pesquisar e integrar IA de geração de fotos do Mercado Livre (se disponível via API) - NÃO tem API pública, só no painel do vendedor
 - [x] Exibir dados completos do produto na etapa de seleção/mapeamento (EAN, SKU, peso, dimensões, marca, etc.)
+- [x] BUG: Modal de detalhes do produto desconfigurado - corrigido: modal expandido para max-w-5xl, layout responsivo com flex-col/row, ScrollArea, tabela de características, info fields com background
