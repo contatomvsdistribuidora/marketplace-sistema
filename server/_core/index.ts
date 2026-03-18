@@ -6,6 +6,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerMlRoutes } from "../ml-routes.js";
 import { registerTiktokRoutes } from "../tiktok-routes.js";
+import { registerShopeeRoutes } from "../shopee-routes.js";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -42,6 +43,8 @@ async function startServer() {
   registerMlRoutes(app);
   // TikTok Shop OAuth callback
   registerTiktokRoutes(app);
+  // Shopee OAuth callback
+  registerShopeeRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",

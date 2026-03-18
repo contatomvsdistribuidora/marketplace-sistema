@@ -351,3 +351,109 @@ export const backgroundJobs = mysqlTable("background_jobs", {
 
 export type BackgroundJob = typeof backgroundJobs.$inferSelect;
 export type InsertBackgroundJob = typeof backgroundJobs.$inferInsert;
+
+/** Connected Amazon Seller accounts via SP-API OAuth / Self-Authorization */
+export const amazonAccounts = mysqlTable("amazon_accounts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  sellerId: varchar("sellerId", { length: 128 }).notNull(),
+  sellerName: varchar("sellerName", { length: 256 }),
+  email: varchar("email", { length: 320 }),
+  marketplaceId: varchar("marketplaceId", { length: 32 }).default("A2Q3Y263D00KWC").notNull(), // Brazil
+  region: varchar("region", { length: 32 }).default("na").notNull(), // na, eu, fe
+  accessToken: text("accessToken"),
+  refreshToken: text("refreshToken").notNull(),
+  tokenExpiresAt: timestamp("tokenExpiresAt"),
+  isActive: int("isActive").default(1).notNull(),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AmazonAccount = typeof amazonAccounts.$inferSelect;
+export type InsertAmazonAccount = typeof amazonAccounts.$inferInsert;
+
+/** Amazon product listings created through our system */
+export const amazonListings = mysqlTable("amazon_listings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  amazonAccountId: int("amazonAccountId").notNull(),
+  asin: varchar("asin", { length: 32 }),
+  sku: varchar("sku", { length: 256 }).notNull(),
+  productId: varchar("productId", { length: 128 }).notNull(),
+  productName: varchar("productName", { length: 512 }),
+  title: varchar("title", { length: 512 }),
+  productType: varchar("productType", { length: 256 }),
+  categoryName: varchar("categoryName", { length: 512 }),
+  price: varchar("price", { length: 32 }),
+  currency: varchar("currency", { length: 10 }).default("BRL"),
+  status: mysqlEnum("amz_listing_status", ["draft", "active", "inactive", "error", "suppressed"]).default("draft").notNull(),
+  submissionId: varchar("submissionId", { length: 128 }),
+  issues: json("issues"),
+  permalink: text("permalink"),
+  amzResponse: json("amzResponse"),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AmazonListing = typeof amazonListings.$inferSelect;
+export type InsertAmazonListing = typeof amazonListings.$inferInsert;
+
+/** Connected Shopee accounts via OAuth */
+export const shopeeAccounts = mysqlTable("shopee_accounts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  shopId: bigint("shopId", { mode: "number" }).notNull(),
+  shopName: varchar("shopName", { length: 256 }),
+  region: varchar("region", { length: 10 }).default("BR").notNull(),
+  accessToken: text("accessToken").notNull(),
+  refreshToken: text("refreshToken").notNull(),
+  tokenExpiresAt: timestamp("tokenExpiresAt").notNull(),
+  shopStatus: varchar("shopStatus", { length: 64 }),
+  totalProducts: int("totalProducts").default(0),
+  isActive: int("isActive").default(1).notNull(),
+  lastSyncAt: timestamp("lastSyncAt"),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeAccount = typeof shopeeAccounts.$inferSelect;
+export type InsertShopeeAccount = typeof shopeeAccounts.$inferInsert;
+
+/** Shopee product listings synced from the shop */
+export const shopeeProducts = mysqlTable("shopee_products", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  shopeeAccountId: int("shopeeAccountId").notNull(),
+  itemId: bigint("itemId", { mode: "number" }).notNull(),
+  itemName: varchar("itemName", { length: 1024 }),
+  itemSku: varchar("itemSku", { length: 256 }),
+  itemStatus: varchar("itemStatus", { length: 32 }),
+  categoryId: bigint("categoryId", { mode: "number" }),
+  categoryName: varchar("categoryName", { length: 512 }),
+  price: varchar("price", { length: 32 }),
+  stock: int("stock").default(0),
+  sold: int("sold").default(0),
+  rating: varchar("rating", { length: 10 }),
+  imageUrl: varchar("imageUrl", { length: 1024 }),
+  images: json("images").$type<string[]>(),
+  hasVideo: int("hasVideo").default(0),
+  attributes: json("attributes"),
+  attributesFilled: int("attributesFilled").default(0),
+  attributesTotal: int("attributesTotal").default(0),
+  qualityScore: varchar("qualityScore", { length: 32 }),
+  variations: json("variations"),
+  weight: varchar("weight", { length: 32 }),
+  dimensionLength: varchar("dimensionLength", { length: 32 }),
+  dimensionWidth: varchar("dimensionWidth", { length: 32 }),
+  dimensionHeight: varchar("dimensionHeight", { length: 32 }),
+  description: text("description"),
+  lastSyncAt: timestamp("lastSyncAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeProduct = typeof shopeeProducts.$inferSelect;
+export type InsertShopeeProduct = typeof shopeeProducts.$inferInsert;

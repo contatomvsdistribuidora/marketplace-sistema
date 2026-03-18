@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot, Link2, Send, Music, FolderTree, History, Clock } from "lucide-react";
+import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot, Link2, Send, Music, FolderTree, History, Clock, ShoppingCart, ShoppingBag } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -41,6 +41,10 @@ const menuItems = [
   { icon: FolderTree, label: "Categorias ML", path: "/ml-categories" },
   { icon: Music, label: "Contas TikTok", path: "/tiktok-accounts" },
   { icon: Music, label: "Publicar no TikTok", path: "/tiktok-publish" },
+  { icon: ShoppingCart, label: "Contas Amazon", path: "/amazon-accounts" },
+  { icon: ShoppingCart, label: "Publicar na Amazon", path: "/amazon-publish" },
+  { icon: ShoppingBag, label: "Contas Shopee", path: "/shopee-accounts" },
+  { icon: ShoppingBag, label: "Produtos Shopee", path: "/shopee-products" },
   { icon: Clock, label: "Jobs Background", path: "/background-jobs" },
 ];
 

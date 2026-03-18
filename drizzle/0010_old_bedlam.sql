@@ -1,0 +1,41 @@
+CREATE TABLE `amazon_accounts` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`sellerId` varchar(128) NOT NULL,
+	`sellerName` varchar(256),
+	`email` varchar(320),
+	`marketplaceId` varchar(32) NOT NULL DEFAULT 'A2Q3Y263D00KWC',
+	`region` varchar(32) NOT NULL DEFAULT 'na',
+	`accessToken` text,
+	`refreshToken` text NOT NULL,
+	`tokenExpiresAt` timestamp,
+	`isActive` int NOT NULL DEFAULT 1,
+	`lastUsedAt` timestamp,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `amazon_accounts_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `amazon_listings` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`amazonAccountId` int NOT NULL,
+	`asin` varchar(32),
+	`sku` varchar(256) NOT NULL,
+	`productId` varchar(128) NOT NULL,
+	`productName` varchar(512),
+	`title` varchar(512),
+	`productType` varchar(256),
+	`categoryName` varchar(512),
+	`price` varchar(32),
+	`currency` varchar(10) DEFAULT 'BRL',
+	`amz_listing_status` enum('draft','active','inactive','error','suppressed') NOT NULL DEFAULT 'draft',
+	`submissionId` varchar(128),
+	`issues` json,
+	`permalink` text,
+	`amzResponse` json,
+	`errorMessage` text,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `amazon_listings_id` PRIMARY KEY(`id`)
+);

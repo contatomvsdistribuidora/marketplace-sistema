@@ -12,6 +12,8 @@ import * as tiktok from "./tiktokshop";
 import * as mlCat from "./ml-categories";
 import { generateImage } from "./_core/imageGeneration";
 import * as bgWorker from "./background-worker";
+import * as amazon from "./amazon";
+import * as shopee from "./shopee";
 
 export const appRouter = router({
   system: systemRouter,
@@ -1406,6 +1408,279 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const success = await bgWorker.cancelBackgroundJob(input.jobId, ctx.user.id);
         return { success };
+      }),
+  }),
+
+  // ============ AMAZON SP-API ============
+  amazon: router({
+    // Get all connected Amazon accounts
+    getAccounts: protectedProcedure.query(async ({ ctx }) => {
+      return amazon.getAccounts(ctx.user.id);
+    }),
+
+    // Get OAuth authorization URL
+    getAuthUrl: protectedProcedure
+      .input(z.object({ redirectUri: z.string(), state: z.string().optional() }))
+      .query(({ input }) => {
+        return { url: amazon.getAuthorizationUrl(input.redirectUri, input.state) };
+      }),
+
+    // Handle OAuth callback
+    handleCallback: protectedProcedure
+      .input(z.object({
+        code: z.string(),
+        redirectUri: z.string(),
+        sellerId: z.string(),
+        marketplace: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const tokenData = await amazon.exchangeCodeForToken(input.code, input.redirectUri);
+        const accountId = await amazon.saveAccount(
+          ctx.user.id,
+          tokenData,
+          input.sellerId,
+          input.marketplace
+        );
+        return { success: true, accountId };
+      }),
+
+    // Connect account manually with refresh token (self-authorization)
+    connectManual: protectedProcedure
+      .input(z.object({
+        sellerId: z.string().min(1, "Seller ID obrigatório"),
+        refreshToken: z.string().min(1, "Refresh Token obrigatório"),
+        sellerName: z.string().optional(),
+        marketplace: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const accountId = await amazon.saveAccountManual(
+          ctx.user.id,
+          input.sellerId,
+          input.refreshToken,
+          input.sellerName,
+          input.marketplace
+        );
+        return { success: true, accountId };
+      }),
+
+    // Disconnect an Amazon account
+    disconnect: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await amazon.deleteAccount(ctx.user.id, input.accountId);
+        return { success: true };
+      }),
+
+    // Search Amazon catalog by EAN
+    searchCatalog: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        identifiers: z.array(z.string()),
+        identifierType: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        return amazon.searchCatalogByIdentifier(
+          input.accountId,
+          input.identifiers,
+          input.identifierType || "EAN"
+        );
+      }),
+
+    // Search product types (categories)
+    searchProductTypes: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        keywords: z.string(),
+      }))
+      .query(async ({ input }) => {
+        return amazon.searchProductTypes(input.accountId, input.keywords);
+      }),
+
+    // Check listing restrictions for an ASIN
+    checkRestrictions: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        asin: z.string(),
+        sellerId: z.string(),
+      }))
+      .query(async ({ input }) => {
+        return amazon.checkListingRestrictions(input.accountId, input.asin, input.sellerId);
+      }),
+
+    // Publish a single product to Amazon
+    publishProduct: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        product: z.object({
+          productId: z.string(),
+          name: z.string(),
+          sku: z.string(),
+          ean: z.string(),
+          price: z.string(),
+          stock: z.number(),
+          description: z.string(),
+          images: z.array(z.string()),
+          weight: z.string().optional(),
+          category: z.string().optional(),
+          brand: z.string().optional(),
+          title: z.string().optional(),
+        }),
+        productType: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return amazon.publishProduct(
+          input.accountId,
+          input.product,
+          {
+            userId: ctx.user.id,
+            productType: input.productType,
+          }
+        );
+      }),
+
+    // Batch publish products to Amazon
+    batchPublish: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        products: z.array(z.object({
+          productId: z.string(),
+          name: z.string(),
+          sku: z.string(),
+          ean: z.string(),
+          price: z.string(),
+          stock: z.number(),
+          description: z.string(),
+          images: z.array(z.string()),
+          weight: z.string().optional(),
+          category: z.string().optional(),
+          brand: z.string().optional(),
+          title: z.string().optional(),
+        })),
+        productType: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const results: any[] = [];
+        const CHUNK_SIZE = 5;
+        for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
+          const chunk = input.products.slice(i, i + CHUNK_SIZE);
+          const chunkResults = await Promise.all(
+            chunk.map(product =>
+              amazon.publishProduct(
+                input.accountId,
+                product,
+                {
+                  userId: ctx.user.id,
+                  productType: input.productType,
+                }
+              )
+            )
+          );
+          results.push(...chunkResults);
+          if (i + CHUNK_SIZE < input.products.length) {
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+        return {
+          total: results.length,
+          success: results.filter(r => r.success).length,
+          errors: results.filter(r => !r.success).length,
+          results,
+        };
+      }),
+
+    // Get supported marketplaces
+    getMarketplaces: publicProcedure.query(() => {
+      return amazon.getSupportedMarketplaces();
+    }),
+
+    // Get seller participations
+    getSellerParticipations: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .query(async ({ input }) => {
+        return amazon.getSellerParticipations(input.accountId);
+      }),
+  }),
+
+  // ============ SHOPEE ============
+  shopee: router({
+    // Get OAuth authorization URL
+    getAuthUrl: protectedProcedure
+      .input(z.object({ redirectUrl: z.string() }))
+      .query(({ input }) => {
+        const url = shopee.getAuthorizationUrl(input.redirectUrl);
+        return { url };
+      }),
+
+    // Exchange code for token after OAuth callback
+    exchangeToken: protectedProcedure
+      .input(z.object({
+        code: z.string(),
+        shopId: z.number(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const tokenData = await shopee.exchangeCodeForToken(input.code, input.shopId);
+        // Try to get shop name
+        let shopName: string | undefined;
+        try {
+          const shopInfo = await shopee.getShopInfo(tokenData.accessToken, tokenData.shopId);
+          shopName = shopInfo?.shop_name;
+        } catch (e) {
+          console.warn("[Shopee] Could not get shop name:", e);
+        }
+        const accountId = await shopee.saveAccount(
+          ctx.user.id,
+          tokenData.shopId,
+          tokenData.accessToken,
+          tokenData.refreshToken,
+          tokenData.expiresIn,
+          shopName
+        );
+        return { success: true, accountId, shopId: tokenData.shopId, shopName };
+      }),
+
+    // List connected accounts
+    getAccounts: protectedProcedure.query(async ({ ctx }) => {
+      return shopee.getAccounts(ctx.user.id);
+    }),
+
+    // Deactivate an account
+    deactivateAccount: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await shopee.deactivateAccount(ctx.user.id, input.accountId);
+        return { success: true };
+      }),
+
+    // Sync products from Shopee shop
+    syncProducts: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await shopee.syncProducts(ctx.user.id, input.accountId);
+        return result;
+      }),
+
+    // Get synced products from local DB
+    getProducts: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        offset: z.number().optional(),
+        limit: z.number().optional(),
+      }))
+      .query(async ({ input }) => {
+        const products = await shopee.getLocalProducts(
+          input.accountId,
+          input.offset || 0,
+          input.limit || 50
+        );
+        const total = await shopee.getProductCount(input.accountId);
+        return { products, total };
+      }),
+
+    // Get product quality stats
+    getQualityStats: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .query(async ({ input }) => {
+        return shopee.getProductQualityStats(input.accountId);
       }),
   }),
 });

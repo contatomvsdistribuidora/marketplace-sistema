@@ -13,4 +13,10 @@ export const ENV = {
   // TikTok Shop
   tiktokAppKey: process.env.TIKTOK_APP_KEY ?? "",
   tiktokAppSecret: process.env.TIKTOK_APP_SECRET ?? "",
+  // Amazon SP-API
+  amazonClientId: process.env.AMAZON_CLIENT_ID ?? "",
+  amazonClientSecret: process.env.AMAZON_CLIENT_SECRET ?? "",
+  // Shopee Open Platform
+  shopeePartnerId: process.env.SHOPEE_PARTNER_ID ?? "",
+  shopeePartnerKey: process.env.SHOPEE_PARTNER_KEY ?? "",
 };

@@ -205,3 +205,23 @@
 - [x] Página "Jobs Background" com tabela de jobs, filtros, detalhes e ações
 - [x] Botão "Agendar" na tela de Review para enviar exportação para background
 - [x] Testes Vitest para background jobs (7 testes)
+- [ ] Pesquisar Amazon SP-API: requisitos, OAuth, criação de produtos
+- [ ] Implementar OAuth Amazon SP-API e tabela de contas Amazon
+- [ ] Implementar criação/listagem de produtos via Amazon SP-API
+- [ ] UI para conexão de contas Amazon e publicação de produtos
+- [ ] Testes da integração Amazon
+- [x] Integração direta com Shopee Open Platform API
+- [x] Criar tabela shopee_accounts no banco para armazenar tokens de múltiplas lojas
+- [x] Implementar OAuth flow da Shopee (authorization code + access/refresh token)
+- [x] Criar endpoint /api/shopee/callback para OAuth callback
+- [x] Frontend: tela de conexão de contas Shopee via OAuth
+- [x] Importar lista de produtos da loja Shopee via API
+- [x] Dashboard de produtos Shopee com score de qualidade
+- [ ] Otimização de atributos de produtos Shopee com IA
+- [ ] Criação de variações e kits automaticamente
+- [ ] Geração de vídeos a partir de fotos de produtos
+- [ ] Shopee Ads: criação e gerenciamento de campanhas via API
+- [ ] Monitoramento de concorrentes (preço, ranking, atributos)
+- [ ] Repricing automático com regras configuráveis
+- [ ] Promoções em lote (descontos, bundles, vouchers, follow prize)
+- [x] Testes da integração Shopee (11 testes passando)

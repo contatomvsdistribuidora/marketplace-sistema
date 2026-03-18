@@ -20,7 +20,11 @@ import TikTokPublish from "./pages/TikTokPublish";
 import ExportHistory from "./pages/ExportHistory";
 import Login from "./pages/Login";
 import BackgroundJobs from "./pages/BackgroundJobs";
+import AmazonAccounts from "./pages/AmazonAccounts";
+import AmazonPublish from "./pages/AmazonPublish";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
+import ShopeeAccounts from "./pages/ShopeeAccounts";
+import ShopeeProducts from "./pages/ShopeeProducts";
 
 function DashboardRouter() {
   return (
@@ -40,6 +44,10 @@ function DashboardRouter() {
         <Route path="/tiktok-publish" component={TikTokPublish} />
         <Route path="/export-history" component={ExportHistory} />
         <Route path="/background-jobs" component={BackgroundJobs} />
+        <Route path="/amazon-accounts" component={AmazonAccounts} />
+        <Route path="/amazon-publish" component={AmazonPublish} />
+        <Route path="/shopee-accounts" component={ShopeeAccounts} />
+        <Route path="/shopee-products" component={ShopeeProducts} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
