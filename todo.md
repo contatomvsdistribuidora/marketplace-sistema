@@ -183,3 +183,5 @@
 - [x] Bug: Travamento ao gerar descrição em lote para 100+ produtos - otimizado com batches de 10 no client + chunks de 3 no server
 - [x] Botão "Gerar Descrições" em lote na barra de ações batch com progresso visível
 - [x] Endpoint batchGenerateDescriptions no server com processamento em chunks
+- [x] Adicionar opção "Todas/Todos" em todos os filtros da página de Produtos (já existia)
+- [x] Filtro combinado: "Não exportados" + loja específica = mostrar produtos que ainda não foram exportados para aquela conta/loja

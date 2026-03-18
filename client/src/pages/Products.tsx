@@ -211,32 +211,64 @@ export default function ProductsPage() {
   const products = useMemo(() => {
     let filtered = rawProducts;
 
-    // Status filter
+    const hasMarketplaceFilter = exportMarketplaceFilter !== "all";
+    const hasListingTypeFilter = exportListingTypeFilter !== "all";
+    const mpId = hasMarketplaceFilter ? Number(exportMarketplaceFilter) : null;
+
     if (exportStatusFilter === "exported") {
-      filtered = filtered.filter((p: any) => exportedSet.has(String(p.id)));
+      // Show products that WERE exported (optionally to a specific store/type)
+      filtered = filtered.filter((p: any) => {
+        const details = exportDetailsMap.get(String(p.id));
+        if (!details) return false;
+        if (hasMarketplaceFilter && !details.marketplaceIds.has(mpId!)) return false;
+        if (hasListingTypeFilter && !details.listingTypes.has(exportListingTypeFilter)) return false;
+        return true;
+      });
     } else if (exportStatusFilter === "not_exported") {
-      filtered = filtered.filter((p: any) => !exportedSet.has(String(p.id)));
-    }
-
-    // Marketplace filter
-    if (exportMarketplaceFilter !== "all") {
-      const mpId = Number(exportMarketplaceFilter);
-      filtered = filtered.filter((p: any) => {
-        const details = exportDetailsMap.get(String(p.id));
-        return details?.marketplaceIds.has(mpId);
-      });
-    }
-
-    // Listing type filter
-    if (exportListingTypeFilter !== "all") {
-      filtered = filtered.filter((p: any) => {
-        const details = exportDetailsMap.get(String(p.id));
-        return details?.listingTypes.has(exportListingTypeFilter);
-      });
+      // Show products that were NOT exported (optionally to a specific store/type)
+      if (hasMarketplaceFilter || hasListingTypeFilter) {
+        // "Não exportados" + loja/tipo = produtos que NÃO foram exportados para essa loja/tipo
+        filtered = filtered.filter((p: any) => {
+          const details = exportDetailsMap.get(String(p.id));
+          if (!details) return true; // never exported anywhere = not exported to this store
+          if (hasMarketplaceFilter && details.marketplaceIds.has(mpId!)) {
+            // Was exported to this store - check listing type too
+            if (hasListingTypeFilter) {
+              // Not exported with this listing type to this store?
+              // Check if this specific combination exists
+              const matchingExports = (exportedDetails || []).filter(d =>
+                d.productId === String(p.id) &&
+                d.marketplaceId === mpId &&
+                d.listingType === exportListingTypeFilter
+              );
+              return matchingExports.length === 0; // not exported with this type to this store
+            }
+            return false; // was exported to this store
+          }
+          return true; // not exported to this store
+        });
+      } else {
+        // Simple: not exported to any store
+        filtered = filtered.filter((p: any) => !exportedSet.has(String(p.id)));
+      }
+    } else {
+      // "all" status - still apply marketplace and listing type filters if set
+      if (hasMarketplaceFilter) {
+        filtered = filtered.filter((p: any) => {
+          const details = exportDetailsMap.get(String(p.id));
+          return details?.marketplaceIds.has(mpId!);
+        });
+      }
+      if (hasListingTypeFilter) {
+        filtered = filtered.filter((p: any) => {
+          const details = exportDetailsMap.get(String(p.id));
+          return details?.listingTypes.has(exportListingTypeFilter);
+        });
+      }
     }
 
     return filtered;
-  }, [rawProducts, exportStatusFilter, exportMarketplaceFilter, exportListingTypeFilter, exportedSet, exportDetailsMap]);
+  }, [rawProducts, exportStatusFilter, exportMarketplaceFilter, exportListingTypeFilter, exportedSet, exportDetailsMap, exportedDetails]);
 
   const [allFilteredSelected, setAllFilteredSelected] = useState(false);
   const [detailProduct, setDetailProduct] = useState<any>(null);
@@ -632,7 +664,9 @@ export default function ProductsPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-muted-foreground">Exportado p/ Loja</Label>
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    {exportStatusFilter === "not_exported" ? "Não exportado p/ Loja" : "Exportado p/ Loja"}
+                  </Label>
                   <Select value={exportMarketplaceFilter} onValueChange={setExportMarketplaceFilter}>
                     <SelectTrigger className="h-9">
                       <SelectValue placeholder="Todas as lojas" />
@@ -662,6 +696,17 @@ export default function ProductsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Hint when combining filters */}
+                {exportStatusFilter === "not_exported" && exportMarketplaceFilter !== "all" && (
+                  <div className="col-span-full">
+                    <p className="text-[11px] text-blue-600 bg-blue-50 rounded px-2 py-1 flex items-center gap-1">
+                      <Eye className="h-3 w-3" />
+                      Mostrando produtos que <strong>ainda não foram exportados</strong> para a loja selecionada
+                      {exportListingTypeFilter !== "all" && <> com o tipo de anúncio selecionado</>}.
+                    </p>
+                  </div>
+                )}
               </div>
             </CardContent>
           </CollapsibleContent>
