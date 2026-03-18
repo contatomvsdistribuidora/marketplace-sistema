@@ -448,30 +448,41 @@ export default function ExportPage() {
 
         toast.success(`Títulos gerados para ${selected.length} produto(s) × ${selectedListingTypes.length} tipos de anúncio.`);
       } else {
-        // Single title for all types
-        const results = await batchGenerateTitlesMutation.mutateAsync({
-          products: selected.map(p => ({
-            id: p.id,
-            name: p.name,
-            description: p.description || "",
-            features: p.features || {},
-            category: p.suggestedCategory?.name || p.category || "",
-            ean: p.ean,
-          })),
-          marketplace: mkLabel,
-          style: batchTitleStyle as any,
-          customInstruction: batchTitleStyle === "custom" ? customTitleInstruction : undefined,
-        });
+        // Single title for all types - process in batches of 15 on client
+        const TITLE_BATCH_SIZE = 15;
+        const allResults: Record<string, { title: string; reasoning: string }> = {};
+        let totalProcessed = 0;
 
-        setMappedProducts(prev => prev.map(p => {
-          const result = results[p.id];
-          if (result) {
-            return { ...p, optimizedTitle: result.title, titleReasoning: result.reasoning, titlesPerType: undefined };
-          }
-          return p;
-        }));
+        for (let i = 0; i < selected.length; i += TITLE_BATCH_SIZE) {
+          const batch = selected.slice(i, i + TITLE_BATCH_SIZE);
+          const results = await batchGenerateTitlesMutation.mutateAsync({
+            products: batch.map(p => ({
+              id: p.id,
+              name: p.name,
+              description: p.description || "",
+              features: p.features || {},
+              category: p.suggestedCategory?.name || p.category || "",
+              ean: p.ean,
+            })),
+            marketplace: mkLabel,
+            style: batchTitleStyle as any,
+            customInstruction: batchTitleStyle === "custom" ? customTitleInstruction : undefined,
+          });
+          Object.assign(allResults, results);
+          totalProcessed += batch.length;
+          setTitleGenProgress(Math.round((totalProcessed / selected.length) * 100));
 
-        const successCount = Object.keys(results).length;
+          // Update products progressively
+          setMappedProducts(prev => prev.map(p => {
+            const result = allResults[p.id];
+            if (result) {
+              return { ...p, optimizedTitle: result.title, titleReasoning: result.reasoning, titlesPerType: undefined };
+            }
+            return p;
+          }));
+        }
+
+        const successCount = Object.keys(allResults).length;
         toast.success(`${successCount} título(s) gerado(s) com estilo "${TITLE_STYLE_OPTIONS.find(o => o.value === batchTitleStyle)?.label}".`);
       }
     } catch (error: any) {
@@ -983,69 +994,75 @@ export default function ExportPage() {
 
       toast.success(`Mapeamento concluído: ${reusedCount} reutilizados, ${newMappingCount} novos.`);
     } else {
-      // Normal AI mapping
-      for (let i = 0; i < mappedProducts.length; i++) {
-        const product = mappedProducts[i];
-        try {
-          // Run category mapping and attribute fill in parallel (titles are generated on-demand in Review step)
-          const [categorySuggestions, attributeSuggestions] = await Promise.all([
-            mapCategoryMutation.mutateAsync({
-              product: {
-                name: product.name,
-                description: product.description,
-                features: product.features,
-                category: product.category,
-                ean: product.ean,
-                sku: product.sku,
-              },
-              marketplace: `${marketplaceName} (${accountName})`,
-              availableCategories: [],
-            }),
-            fillAttributesMutation.mutateAsync({
-              product: {
-                name: product.name,
-                description: product.description,
-                features: product.features,
-                category: product.category,
-              },
-              requiredAttributes: [
-                { name: "Marca", id: "brand", required: true },
-                { name: "Modelo", id: "model", required: true },
-                { name: "Cor", id: "color", required: false },
-                { name: "Material", id: "material", required: false },
-              ],
-              marketplace: `${marketplaceName} (${accountName})`,
-            }),
-          ]);
+      // Normal AI mapping - process in chunks of 3 for speed
+      const MAPPING_CHUNK_SIZE = 3;
+      let processed = 0;
+      for (let i = 0; i < mappedProducts.length; i += MAPPING_CHUNK_SIZE) {
+        const chunk = mappedProducts.slice(i, i + MAPPING_CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(async (product) => {
+            try {
+              // Run category mapping and attribute fill in parallel per product
+              const [categorySuggestions, attributeSuggestions] = await Promise.all([
+                mapCategoryMutation.mutateAsync({
+                  product: {
+                    name: product.name,
+                    description: product.description,
+                    features: product.features,
+                    category: product.category,
+                    ean: product.ean,
+                    sku: product.sku,
+                  },
+                  marketplace: `${marketplaceName} (${accountName})`,
+                  availableCategories: [],
+                }),
+                fillAttributesMutation.mutateAsync({
+                  product: {
+                    name: product.name,
+                    description: product.description,
+                    features: product.features,
+                    category: product.category,
+                  },
+                  requiredAttributes: [
+                    { name: "Marca", id: "brand", required: true },
+                    { name: "Modelo", id: "model", required: true },
+                    { name: "Cor", id: "color", required: false },
+                    { name: "Material", id: "material", required: false },
+                  ],
+                  marketplace: `${marketplaceName} (${accountName})`,
+                }),
+              ]);
 
-          setMappedProducts((prev) =>
-            prev.map((p) =>
-              p.id === product.id
-                ? {
-                    ...p,
-                    suggestedCategory: categorySuggestions?.[0] ? {
-                        id: categorySuggestions[0].categoryId,
-                        name: categorySuggestions[0].categoryName,
-                        path: categorySuggestions[0].categoryPath,
-                        confidence: categorySuggestions[0].confidence,
-                      } : undefined,
-                    suggestedAttributes: attributeSuggestions || undefined,
-                    status: "mapped" as const,
-                  }
-                : p
-            )
-          );
-        } catch (error: any) {
-          setMappedProducts((prev) =>
-            prev.map((p) =>
-              p.id === product.id
-                ? { ...p, status: "error" as const, errorMessage: error.message }
-                : p
-            )
-          );
-        }
-
-        setMappingProgress(Math.round(((i + 1) / mappedProducts.length) * 100));
+              setMappedProducts((prev) =>
+                prev.map((p) =>
+                  p.id === product.id
+                    ? {
+                        ...p,
+                        suggestedCategory: categorySuggestions?.[0] ? {
+                            id: categorySuggestions[0].categoryId,
+                            name: categorySuggestions[0].categoryName,
+                            path: categorySuggestions[0].categoryPath,
+                            confidence: categorySuggestions[0].confidence,
+                          } : undefined,
+                        suggestedAttributes: attributeSuggestions || undefined,
+                        status: "mapped" as const,
+                      }
+                    : p
+                )
+              );
+            } catch (error: any) {
+              setMappedProducts((prev) =>
+                prev.map((p) =>
+                  p.id === product.id
+                    ? { ...p, status: "error" as const, errorMessage: error.message }
+                    : p
+                )
+              );
+            }
+          })
+        );
+        processed += chunk.length;
+        setMappingProgress(Math.round((processed / mappedProducts.length) * 100));
       }
     }
 
@@ -1107,21 +1124,17 @@ export default function ExportPage() {
     let successCount = 0;
     let errorCount = 0;
 
-    for (let i = 0; i < pubTasks.length; i++) {
-      const { product, listingType, title } = pubTasks[i];
-
+    // Helper to process a single publication task
+    const processPubTask = async (task: typeof pubTasks[0]) => {
+      const { product, listingType, title } = task;
       try {
-        // Build features from suggested attributes
         const features: Record<string, string> = {};
         if (product.suggestedAttributes) {
           for (const attr of product.suggestedAttributes) {
-            if (attr.value) {
-              features[attr.attributeName] = attr.value;
-            }
+            if (attr.value) features[attr.attributeName] = attr.value;
           }
         }
 
-        // Build images array with cover image first
         let images: string[] = [];
         if (product.allImages && product.allImages.length > 0) {
           const coverIdx = product.coverImageIndex || 0;
@@ -1136,7 +1149,6 @@ export default function ExportPage() {
         const typeLabel = LISTING_TYPE_OPTIONS.find(o => o.value === listingType)?.label || listingType;
 
         if (mpCode === "mercadolivre") {
-          // ===== DIRECT ML API EXPORT WITH LISTING TYPE FALLBACK =====
           const listingTypeFallback: ListingType[] = [listingType];
           if (listingType !== "gold_special") listingTypeFallback.push("gold_special");
           if (listingType !== "free") listingTypeFallback.push("free");
@@ -1146,7 +1158,7 @@ export default function ExportPage() {
 
           for (const tryType of listingTypeFallback) {
             mlResult = await mlPublishMutation.mutateAsync({
-              accountId: selectedAccountInfo.id,
+              accountId: selectedAccountInfo!.id,
               productId: product.id,
               name: title,
               description: product.description || undefined,
@@ -1160,17 +1172,10 @@ export default function ExportPage() {
               categoryId: product.suggestedCategory?.id || undefined,
               listingType: tryType,
             });
-
             usedListingType = tryType;
-
-            if (mlResult.success || !mlResult.error?.includes("listing_type")) {
-              break;
-            }
-
+            if (mlResult.success || !mlResult.error?.includes("listing_type")) break;
             if (tryType !== listingTypeFallback[listingTypeFallback.length - 1]) {
-              const fallbackLabel = LISTING_TYPE_OPTIONS.find(o => o.value === listingTypeFallback[listingTypeFallback.indexOf(tryType) + 1])?.label;
-              toast.info(`Tipo "${LISTING_TYPE_OPTIONS.find(o => o.value === tryType)?.label}" indisponível para "${product.name.substring(0, 25)}...", tentando "${fallbackLabel}"...`, { duration: 3000 });
-              await new Promise(r => setTimeout(r, 500));
+              await new Promise(r => setTimeout(r, 300));
             }
           }
 
@@ -1178,7 +1183,7 @@ export default function ExportPage() {
             jobId,
             productId: product.id,
             productName: `${product.name} [${typeLabel}]`,
-            marketplaceId: marketplace.id,
+            marketplaceId: marketplace!.id,
             listingType: usedListingType,
             mlItemId: mlResult.mlItemId || undefined,
             status: mlResult.success ? "success" : "error",
@@ -1200,20 +1205,19 @@ export default function ExportPage() {
             jobId,
             productId: product.id,
             productName: product.name,
-            marketplaceId: marketplace.id,
+            marketplaceId: marketplace!.id,
             status: "error",
             errorMessage: "TikTok Shop: use a página 'Publicar no TikTok' para publicação individual por enquanto.",
           });
-          toast.error(`TikTok: Use a página dedicada para publicar "${product.name.substring(0, 30)}..."`, { duration: 4000 });
         } else {
           errorCount++;
           await addLogMutation.mutateAsync({
             jobId,
             productId: product.id,
             productName: product.name,
-            marketplaceId: marketplace.id,
+            marketplaceId: marketplace!.id,
             status: "error",
-            errorMessage: `API direta para ${marketplace.name} ainda não disponível.`,
+            errorMessage: `API direta para ${marketplace!.name} ainda não disponível.`,
           });
         }
       } catch (error: any) {
@@ -1222,24 +1226,31 @@ export default function ExportPage() {
           jobId,
           productId: product.id,
           productName: product.name,
-          marketplaceId: marketplace.id,
+          marketplaceId: marketplace!.id,
           status: "error",
           errorMessage: error.message,
         });
-        toast.error(`Erro em "${product.name.substring(0, 30)}...": ${error.message}`, { duration: 3000 });
       }
+    };
 
-      setExportProgress(Math.round(((i + 1) / totalTasks) * 100));
+    // Process in chunks of 3 for parallel publishing
+    const PUB_CHUNK_SIZE = 3;
+    for (let i = 0; i < pubTasks.length; i += PUB_CHUNK_SIZE) {
+      const chunk = pubTasks.slice(i, i + PUB_CHUNK_SIZE);
+      await Promise.all(chunk.map(processPubTask));
+
+      const processed = Math.min(i + PUB_CHUNK_SIZE, totalTasks);
+      setExportProgress(Math.round((processed / totalTasks) * 100));
       await updateExportMutation.mutateAsync({
         jobId,
-        processedProducts: i + 1,
+        processedProducts: processed,
         successCount,
         errorCount,
       });
 
-      // Small delay between API calls to avoid rate limiting
-      if (i < pubTasks.length - 1) {
-        await new Promise(r => setTimeout(r, 500));
+      // Small delay between chunks to avoid rate limiting
+      if (i + PUB_CHUNK_SIZE < pubTasks.length) {
+        await new Promise(r => setTimeout(r, 200));
       }
     }
 

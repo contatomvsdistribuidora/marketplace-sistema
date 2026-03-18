@@ -18,6 +18,15 @@ const ML_API_BASE = "https://api.mercadolibre.com";
 const ML_AUTH_URL = "https://auth.mercadolivre.com.br";
 const ML_SITE_ID = "MLB";
 
+// ============ IN-MEMORY CACHES ============
+// Cache isUserProductSeller per accountId (rarely changes)
+const userProductSellerCache = new Map<number, { value: boolean; expiry: number }>();
+const SELLER_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// Cache getCategoryAttributes per categoryId (static data)
+const categoryAttributesCache = new Map<string, { data: any[]; expiry: number }>();
+const CATEGORY_ATTRS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
 // ============ DATABASE HELPERS ============
 
 function getDb() {
@@ -336,16 +345,22 @@ export async function getMlUserInfo(accessToken: string) {
  * Sellers with tag "user_product_seller" must publish without title field
  */
 export async function isUserProductSeller(accountId: number): Promise<boolean> {
+  // Check cache first
+  const cached = userProductSellerCache.get(accountId);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.value;
+  }
   try {
     const accessToken = await getValidToken(accountId);
     const userInfo = await mlApiCall(accessToken, "GET", "/users/me");
     const tags = (userInfo.tags || []) as string[];
     const isUP = tags.includes("user_product_seller");
     console.log(`[ML] Seller ${userInfo.nickname} tags: ${tags.join(', ')} | isUserProductSeller: ${isUP}`);
+    // Cache the result
+    userProductSellerCache.set(accountId, { value: isUP, expiry: Date.now() + SELLER_CACHE_TTL });
     return isUP;
   } catch (err) {
     console.error("[ML] Failed to check user_product_seller tag:", err);
-    // Default to true (safer - most sellers are being migrated)
     return true;
   }
 }
@@ -426,6 +441,13 @@ export async function getCategoryAttributes(categoryId: string) {
     console.error(`[ML getCategoryAttributes] Invalid category ID format: "${categoryId}"`);
     throw new Error(`Invalid ML category ID format: "${categoryId}". Expected format: MLB followed by digits (e.g., MLB39567)`);
   }
+
+  // Check cache first
+  const cached = categoryAttributesCache.get(categoryId);
+  if (cached && cached.expiry > Date.now()) {
+    console.log(`[ML getCategoryAttributes] Cache hit for: ${categoryId}`);
+    return cached.data;
+  }
   
   const url = `${ML_API_BASE}/categories/${categoryId}/attributes`;
   console.log(`[ML getCategoryAttributes] Fetching attributes for: ${categoryId}`);
@@ -439,7 +461,7 @@ export async function getCategoryAttributes(categoryId: string) {
 
   const data = await response.json();
   
-  return (data || []).map((attr: any) => ({
+  const result = (data || []).map((attr: any) => ({
     id: attr.id,
     name: attr.name,
     type: attr.value_type,
@@ -451,6 +473,10 @@ export async function getCategoryAttributes(categoryId: string) {
     hint: attr.hint,
     defaultValue: attr.default_value,
   }));
+
+  // Cache the result
+  categoryAttributesCache.set(categoryId, { data: result, expiry: Date.now() + CATEGORY_ATTRS_CACHE_TTL });
+  return result;
 }
 
 // ============ ITEM CREATION ============

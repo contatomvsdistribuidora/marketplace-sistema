@@ -399,16 +399,29 @@ export const appRouter = router({
       )
       .mutation(async ({ input }) => {
         const results: Record<string, { title: string; reasoning: string }> = {};
-        for (const product of input.products) {
-          try {
-            const result = await aiMapper.generateOptimizedTitle(
-              product, input.marketplace, input.style, input.customInstruction
-            );
-            results[product.id] = result;
-          } catch (error: any) {
-            results[product.id] = { title: product.name, reasoning: `Erro: ${error.message}` };
+        // Process in chunks of 3 for parallel title generation
+        const CHUNK_SIZE = 3;
+        for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
+          const chunk = input.products.slice(i, i + CHUNK_SIZE);
+          const chunkResults = await Promise.all(
+            chunk.map(async (product) => {
+              try {
+                const result = await aiMapper.generateOptimizedTitle(
+                  product, input.marketplace, input.style, input.customInstruction
+                );
+                return { id: product.id, result };
+              } catch (error: any) {
+                return { id: product.id, result: { title: product.name, reasoning: `Erro: ${error.message}` } };
+              }
+            })
+          );
+          for (const { id, result } of chunkResults) {
+            results[id] = result;
           }
-          await new Promise(r => setTimeout(r, 300));
+          // Small delay between chunks
+          if (i + CHUNK_SIZE < input.products.length) {
+            await new Promise(r => setTimeout(r, 200));
+          }
         }
         return results;
       }),
@@ -437,16 +450,29 @@ export const appRouter = router({
       )
       .mutation(async ({ input }) => {
         const results: Record<string, any> = {};
-        for (const product of input.products) {
-          try {
-            const suggestions = await aiMapper.mapProductCategory(
-              product,
-              input.marketplace,
-              input.availableCategories
-            );
-            results[product.id] = { success: true, suggestions };
-          } catch (error: any) {
-            results[product.id] = { success: false, error: error.message };
+        // Process in chunks of 3 for parallel category mapping
+        const CHUNK_SIZE = 3;
+        for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
+          const chunk = input.products.slice(i, i + CHUNK_SIZE);
+          const chunkResults = await Promise.all(
+            chunk.map(async (product) => {
+              try {
+                const suggestions = await aiMapper.mapProductCategory(
+                  product,
+                  input.marketplace,
+                  input.availableCategories
+                );
+                return { id: product.id, data: { success: true, suggestions } };
+              } catch (error: any) {
+                return { id: product.id, data: { success: false, error: error.message } };
+              }
+            })
+          );
+          for (const { id, data } of chunkResults) {
+            results[id] = data;
+          }
+          if (i + CHUNK_SIZE < input.products.length) {
+            await new Promise(r => setTimeout(r, 200));
           }
         }
         return results;
@@ -923,27 +949,36 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const results = [];
-        for (const product of input.products) {
-          const result = await ml.publishProduct(ctx.user.id, input.accountId, {
-            productId: product.productId,
-            name: product.name,
-            description: product.description,
-            price: product.price,
-            stock: product.stock,
-            ean: product.ean,
-            sku: product.sku,
-            brand: product.brand,
-            images: product.images,
-            features: product.features,
-            categoryId: product.categoryId,
-            listingType: product.listingType,
-          });
-          results.push(result);
-          // Small delay between requests to avoid rate limiting
-          await new Promise((r) => setTimeout(r, 500));
+        const results: any[] = [];
+        // Process in chunks of 3 for parallel publishing
+        const CHUNK_SIZE = 3;
+        for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
+          const chunk = input.products.slice(i, i + CHUNK_SIZE);
+          const chunkResults = await Promise.all(
+            chunk.map(product =>
+              ml.publishProduct(ctx.user.id, input.accountId, {
+                productId: product.productId,
+                name: product.name,
+                description: product.description,
+                price: product.price,
+                stock: product.stock,
+                ean: product.ean,
+                sku: product.sku,
+                brand: product.brand,
+                images: product.images,
+                features: product.features,
+                categoryId: product.categoryId,
+                listingType: product.listingType,
+              })
+            )
+          );
+          results.push(...chunkResults);
+          // Small delay between chunks to avoid rate limiting
+          if (i + CHUNK_SIZE < input.products.length) {
+            await new Promise((r) => setTimeout(r, 200));
+          }
         }
-        return { results, total: results.length, success: results.filter((r) => r.success).length };
+        return { results, total: results.length, success: results.filter((r: any) => r.success).length };
       }),
 
     // Get listings created through our system

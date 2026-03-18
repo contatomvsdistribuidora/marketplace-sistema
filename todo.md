@@ -185,3 +185,9 @@
 - [x] Endpoint batchGenerateDescriptions no server com processamento em chunks
 - [x] Adicionar opção "Todas/Todos" em todos os filtros da página de Produtos (já existia)
 - [x] Filtro combinado: "Não exportados" + loja específica = mostrar produtos que ainda não foram exportados para aquela conta/loja
+- [x] Otimizar velocidade do mapeamento IA (chunks de 3 produtos em paralelo no frontend + server)
+- [x] Otimizar velocidade da exportação para marketplace (chunks de 3 em paralelo, cache de isUserProductSeller e getCategoryAttributes)
+- [x] Cache in-memory para isUserProductSeller (TTL 10min) e getCategoryAttributes (TTL 30min)
+- [x] Batch titles em chunks de 15 no client + 3 no server com progresso progressivo
+- [x] Batch descriptions em chunks de 10 no client + 3 no server
+- [x] Batch publish em chunks de 3 no server com Promise.all
