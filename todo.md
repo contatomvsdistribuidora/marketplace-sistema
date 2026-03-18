@@ -177,3 +177,4 @@
 - [x] Endpoint exportedProductIds retornar dados detalhados (marketplace name, listingType) para suportar filtros avançados
 - [x] Troca de foto de capa individual visível na tela de Review (setas ◀ ▶ ou galeria clicável no card do produto)
 - [x] Troca de foto de capa em lote na barra de ações (ex: "Definir 1ª foto como capa para todos" ou navegação em lote)
+- [x] Bug: Row 4 (Foto de Capa em lote) não aparece na tela de Review - corrigido (botões estavam disabled quando produtos tinham só 1 foto)

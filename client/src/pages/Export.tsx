@@ -716,13 +716,16 @@ export default function ExportPage() {
   const setBatchCoverImage = useCallback((mode: "first" | "second" | "third" | "last") => {
     let count = 0;
     setMappedProducts(prev => prev.map(p => {
-      if (!p.selected || !p.allImages || p.allImages.length <= 1) return p;
+      if (!p.selected) return p;
+      // Work with allImages if available, otherwise single imageUrl
+      const totalImages = p.allImages ? p.allImages.length : (p.imageUrl ? 1 : 0);
+      if (totalImages === 0) return p;
       let newIdx: number;
       switch (mode) {
         case "first": newIdx = 0; break;
-        case "second": newIdx = Math.min(1, p.allImages.length - 1); break;
-        case "third": newIdx = Math.min(2, p.allImages.length - 1); break;
-        case "last": newIdx = p.allImages.length - 1; break;
+        case "second": newIdx = Math.min(1, totalImages - 1); break;
+        case "third": newIdx = Math.min(2, totalImages - 1); break;
+        case "last": newIdx = totalImages - 1; break;
       }
       if (newIdx !== (p.coverImageIndex || 0)) {
         count++;
@@ -731,7 +734,11 @@ export default function ExportPage() {
       return p;
     }));
     const label = mode === "first" ? "1\u00AA" : mode === "second" ? "2\u00AA" : mode === "third" ? "3\u00AA" : "\u00FAltima";
-    toast.success(`Capa definida como ${label} foto para ${count} produto(s)`);
+    if (count > 0) {
+      toast.success(`Capa definida como ${label} foto para ${count} produto(s)`);
+    } else {
+      toast.info(`Nenhum produto alterado. Os produtos selecionados j\u00e1 est\u00e3o com a ${label} foto como capa, ou n\u00e3o possuem fotos suficientes.`);
+    }
   }, []);
 
   // ===== TOGGLE EXPANDED =====
@@ -2374,7 +2381,7 @@ export default function ExportPage() {
                           size="sm"
                           className="h-7 text-[11px] gap-1"
                           onClick={() => setBatchCoverImage(opt.mode)}
-                          disabled={selectedProducts.filter(p => p.allImages && p.allImages.length > 1).length === 0}
+                          disabled={selectedProducts.length === 0}
                         >
                           {opt.label}
                         </Button>
