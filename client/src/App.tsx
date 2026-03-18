@@ -19,6 +19,7 @@ import TikTokAccounts from "./pages/TikTokAccounts";
 import TikTokPublish from "./pages/TikTokPublish";
 import ExportHistory from "./pages/ExportHistory";
 import Login from "./pages/Login";
+import BackgroundJobs from "./pages/BackgroundJobs";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 function DashboardRouter() {
@@ -38,6 +39,7 @@ function DashboardRouter() {
         <Route path="/tiktok-accounts" component={TikTokAccounts} />
         <Route path="/tiktok-publish" component={TikTokPublish} />
         <Route path="/export-history" component={ExportHistory} />
+        <Route path="/background-jobs" component={BackgroundJobs} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

@@ -311,3 +311,43 @@ export const mlCategories = mysqlTable("ml_categories", {
 
 export type MlCategory = typeof mlCategories.$inferSelect;
 export type InsertMlCategory = typeof mlCategories.$inferInsert;
+
+/** Background processing jobs for large-scale exports */
+export const backgroundJobs = mysqlTable("background_jobs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  type: mysqlEnum("bg_job_type", ["export_ml", "generate_titles", "generate_descriptions", "generate_images"]).notNull(),
+  status: mysqlEnum("bg_job_status", ["scheduled", "queued", "processing", "completed", "failed", "cancelled"]).default("queued").notNull(),
+  // Job configuration
+  marketplaceId: int("marketplaceId"),
+  accountId: int("accountId"),
+  accountName: varchar("accountName", { length: 256 }),
+  tagFilter: varchar("tagFilter", { length: 256 }),
+  listingTypes: json("listingTypes").$type<string[]>(),
+  titleStyle: varchar("titleStyle", { length: 64 }),
+  descriptionStyle: varchar("descriptionStyle", { length: 64 }),
+  imageStyle: varchar("imageStyle", { length: 64 }),
+  concurrency: int("concurrency").default(5).notNull(),
+  // Products to process (stored as JSON array of product data)
+  productIds: json("productIds").$type<string[]>(),
+  productData: json("productData"),
+  // Progress tracking
+  totalItems: int("totalItems").default(0).notNull(),
+  processedItems: int("processedItems").default(0).notNull(),
+  successCount: int("successCount").default(0).notNull(),
+  errorCount: int("errorCount").default(0).notNull(),
+  // Scheduling
+  scheduledFor: timestamp("scheduledFor"),
+  // Timing
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  // Error info
+  lastError: text("lastError"),
+  // Results log
+  resultLog: json("resultLog"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type BackgroundJob = typeof backgroundJobs.$inferSelect;
+export type InsertBackgroundJob = typeof backgroundJobs.$inferInsert;

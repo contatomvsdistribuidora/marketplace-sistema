@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot, Link2, Send, Music, FolderTree, History } from "lucide-react";
+import { LayoutDashboard, Package, Upload, ScrollText, Settings, LogOut, PanelLeft, Store, Bot, Link2, Send, Music, FolderTree, History, Clock } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -41,6 +41,7 @@ const menuItems = [
   { icon: FolderTree, label: "Categorias ML", path: "/ml-categories" },
   { icon: Music, label: "Contas TikTok", path: "/tiktok-accounts" },
   { icon: Music, label: "Publicar no TikTok", path: "/tiktok-publish" },
+  { icon: Clock, label: "Jobs Background", path: "/background-jobs" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";

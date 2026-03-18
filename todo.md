@@ -191,3 +191,17 @@
 - [x] Batch titles em chunks de 15 no client + 3 no server com progresso progressivo
 - [x] Batch descriptions em chunks de 10 no client + 3 no server
 - [x] Batch publish em chunks de 3 no server com Promise.all
+- [x] Aumentar concorrência LLM (títulos/descrições/categorias) de 3 para 5 no server
+- [x] Aumentar concorrência de mapeamento IA no frontend de 3 para 5 produtos simultâneos
+- [x] Aumentar concorrência de publicação ML de 3 para 5 simultâneos
+- [x] Aumentar batch size do client para títulos de 15 para 30, descrições de 10 para 20
+- [x] Tabela background_jobs no banco para fila de processamento
+- [x] Worker de background no servidor para processar exportações automaticamente
+- [x] Agendamento de exportação para horário específico (ex: 22h, 2h)
+- [x] Controle de concorrência configurável no job (5, 10, 15 simultâneos)
+- [x] Notificação ao owner quando job terminar
+- [x] UI para agendar exportação em background e monitorar progresso
+- [x] Botão de cancelar job em andamento
+- [x] Página "Jobs Background" com tabela de jobs, filtros, detalhes e ações
+- [x] Botão "Agendar" na tela de Review para enviar exportação para background
+- [x] Testes Vitest para background jobs (7 testes)

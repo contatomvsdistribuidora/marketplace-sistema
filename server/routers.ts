@@ -11,6 +11,7 @@ import * as localAuth from "./local-auth";
 import * as tiktok from "./tiktokshop";
 import * as mlCat from "./ml-categories";
 import { generateImage } from "./_core/imageGeneration";
+import * as bgWorker from "./background-worker";
 
 export const appRouter = router({
   system: systemRouter,
@@ -399,8 +400,8 @@ export const appRouter = router({
       )
       .mutation(async ({ input }) => {
         const results: Record<string, { title: string; reasoning: string }> = {};
-        // Process in chunks of 3 for parallel title generation
-        const CHUNK_SIZE = 3;
+        // Process in chunks of 5 for parallel title generation
+        const CHUNK_SIZE = 5;
         for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
           const chunk = input.products.slice(i, i + CHUNK_SIZE);
           const chunkResults = await Promise.all(
@@ -418,9 +419,9 @@ export const appRouter = router({
           for (const { id, result } of chunkResults) {
             results[id] = result;
           }
-          // Small delay between chunks
+          // Minimal delay between chunks
           if (i + CHUNK_SIZE < input.products.length) {
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 100));
           }
         }
         return results;
@@ -450,8 +451,8 @@ export const appRouter = router({
       )
       .mutation(async ({ input }) => {
         const results: Record<string, any> = {};
-        // Process in chunks of 3 for parallel category mapping
-        const CHUNK_SIZE = 3;
+        // Process in chunks of 5 for parallel category mapping
+        const CHUNK_SIZE = 5;
         for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
           const chunk = input.products.slice(i, i + CHUNK_SIZE);
           const chunkResults = await Promise.all(
@@ -472,7 +473,7 @@ export const appRouter = router({
             results[id] = data;
           }
           if (i + CHUNK_SIZE < input.products.length) {
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 100));
           }
         }
         return results;
@@ -524,8 +525,8 @@ export const appRouter = router({
       )
       .mutation(async ({ input }) => {
         const results: Record<string, { description: string }> = {};
-        // Process in chunks of 3 to avoid timeout
-        const CHUNK_SIZE = 3;
+        // Process in chunks of 5 for parallel description generation
+        const CHUNK_SIZE = 5;
         for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
           const chunk = input.products.slice(i, i + CHUNK_SIZE);
           const promises = chunk.map(async (product) => {
@@ -548,9 +549,9 @@ export const appRouter = router({
               results[r.id] = { description: r.description };
             }
           }
-          // Small delay between chunks
+          // Minimal delay between chunks
           if (i + CHUNK_SIZE < input.products.length) {
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 100));
           }
         }
         return results;
@@ -950,8 +951,8 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const results: any[] = [];
-        // Process in chunks of 3 for parallel publishing
-        const CHUNK_SIZE = 3;
+        // Process in chunks of 5 for parallel publishing
+        const CHUNK_SIZE = 5;
         for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
           const chunk = input.products.slice(i, i + CHUNK_SIZE);
           const chunkResults = await Promise.all(
@@ -973,9 +974,9 @@ export const appRouter = router({
             )
           );
           results.push(...chunkResults);
-          // Small delay between chunks to avoid rate limiting
+          // Minimal delay between chunks
           if (i + CHUNK_SIZE < input.products.length) {
-            await new Promise((r) => setTimeout(r, 200));
+            await new Promise((r) => setTimeout(r, 100));
           }
         }
         return { results, total: results.length, success: results.filter((r: any) => r.success).length };
@@ -1336,6 +1337,75 @@ export const appRouter = router({
         const token = await tiktok.getValidToken(input.accountId);
         const result = await tiktok.createProduct(token, input.shopCipher, input.product);
         return { success: true, productId: result.productId, skuIds: result.skuIds };
+      }),
+  }),
+
+  // ============ BACKGROUND JOBS ============
+  backgroundJobs: router({
+    // Create a new background job
+    create: protectedProcedure
+      .input(
+        z.object({
+          type: z.enum(["export_ml", "generate_titles", "generate_descriptions", "generate_images"]),
+          marketplaceId: z.number().optional(),
+          accountId: z.number().optional(),
+          accountName: z.string().optional(),
+          tagFilter: z.string().optional(),
+          listingTypes: z.array(z.string()).optional(),
+          titleStyle: z.string().optional(),
+          descriptionStyle: z.string().optional(),
+          imageStyle: z.string().optional(),
+          concurrency: z.number().min(1).max(20).optional(),
+          productIds: z.array(z.string()).optional(),
+          productData: z.any().optional(),
+          totalItems: z.number(),
+          scheduledFor: z.string().optional(), // ISO date string
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const scheduledFor = input.scheduledFor ? new Date(input.scheduledFor) : undefined;
+        const jobId = await bgWorker.createBackgroundJob({
+          userId: ctx.user.id,
+          type: input.type,
+          marketplaceId: input.marketplaceId,
+          accountId: input.accountId,
+          accountName: input.accountName,
+          tagFilter: input.tagFilter,
+          listingTypes: input.listingTypes,
+          titleStyle: input.titleStyle,
+          descriptionStyle: input.descriptionStyle,
+          imageStyle: input.imageStyle,
+          concurrency: input.concurrency,
+          productIds: input.productIds,
+          productData: input.productData,
+          totalItems: input.totalItems,
+          scheduledFor,
+        });
+        return { jobId };
+      }),
+
+    // List all background jobs for the user
+    list: protectedProcedure
+      .input(z.object({ limit: z.number().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        return bgWorker.getBackgroundJobs(ctx.user.id, input?.limit || 50);
+      }),
+
+    // Get a specific job by ID
+    get: protectedProcedure
+      .input(z.object({ jobId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const job = await bgWorker.getBackgroundJob(input.jobId);
+        if (!job || job.userId !== ctx.user.id) return null;
+        return job;
+      }),
+
+    // Cancel a running or scheduled job
+    cancel: protectedProcedure
+      .input(z.object({ jobId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const success = await bgWorker.cancelBackgroundJob(input.jobId, ctx.user.id);
+        return { success };
       }),
   }),
 });

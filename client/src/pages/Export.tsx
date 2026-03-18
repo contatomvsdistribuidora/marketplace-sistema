@@ -19,7 +19,7 @@ import {
   Upload, Store, Loader2, Sparkles, CheckCircle, XCircle, AlertCircle,
   ArrowRight, ArrowLeft, Package, Edit3, Save, Info, Link2, RefreshCw, ExternalLink,
   ChevronDown, ChevronUp, Image as ImageIcon, ChevronLeft, ChevronRight, Crown, Tag, Wand2,
-  Star, ImagePlus, Type, Settings2, SquareCheck, Square, FileText, Images
+  Star, ImagePlus, Type, Settings2, SquareCheck, Square, FileText, Images, Clock, CalendarClock
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
@@ -325,6 +325,11 @@ export default function ExportPage() {
   const [batchDescGenProgress, setBatchDescGenProgress] = useState(0);
   const batchGenerateDescsMutation = trpc.ai.batchGenerateDescriptions.useMutation();
 
+  // Background job states
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleTime, setScheduleTime] = useState<string>("");
+  const createBgJobMutation = trpc.backgroundJobs.create.useMutation();
+
   // Check if this is a re-export to the same marketplace type (can skip AI mapping)
   const canSkipMapping = useMemo(() => {
     if (!reExportJobId || !reExportMarketplaceId || !selectedMarketplace) return false;
@@ -449,7 +454,7 @@ export default function ExportPage() {
         toast.success(`Títulos gerados para ${selected.length} produto(s) × ${selectedListingTypes.length} tipos de anúncio.`);
       } else {
         // Single title for all types - process in batches of 15 on client
-        const TITLE_BATCH_SIZE = 15;
+        const TITLE_BATCH_SIZE = 30;
         const allResults: Record<string, { title: string; reasoning: string }> = {};
         let totalProcessed = 0;
 
@@ -799,7 +804,7 @@ export default function ExportPage() {
 
     try {
       // Process in batches of 10 on the client side to avoid request timeout
-      const BATCH_SIZE = 10;
+      const BATCH_SIZE = 20;
       let totalProcessed = 0;
       const allResults: Record<string, { description: string }> = {};
 
@@ -995,7 +1000,7 @@ export default function ExportPage() {
       toast.success(`Mapeamento concluído: ${reusedCount} reutilizados, ${newMappingCount} novos.`);
     } else {
       // Normal AI mapping - process in chunks of 3 for speed
-      const MAPPING_CHUNK_SIZE = 3;
+      const MAPPING_CHUNK_SIZE = 5;
       let processed = 0;
       for (let i = 0; i < mappedProducts.length; i += MAPPING_CHUNK_SIZE) {
         const chunk = mappedProducts.slice(i, i + MAPPING_CHUNK_SIZE);
@@ -1234,7 +1239,7 @@ export default function ExportPage() {
     };
 
     // Process in chunks of 3 for parallel publishing
-    const PUB_CHUNK_SIZE = 3;
+    const PUB_CHUNK_SIZE = 5;
     for (let i = 0; i < pubTasks.length; i += PUB_CHUNK_SIZE) {
       const chunk = pubTasks.slice(i, i + PUB_CHUNK_SIZE);
       await Promise.all(chunk.map(processPubTask));
@@ -1248,9 +1253,9 @@ export default function ExportPage() {
         errorCount,
       });
 
-      // Small delay between chunks to avoid rate limiting
+      // Minimal delay between chunks
       if (i + PUB_CHUNK_SIZE < pubTasks.length) {
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 100));
       }
     }
 
@@ -2273,6 +2278,121 @@ export default function ExportPage() {
                 <Upload className="mr-2 h-4 w-4" />
                 Publicar {totalPublications} anúncio(s) no {getMarketplaceDisplayName()}
               </Button>
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                  disabled={selectedProducts.filter(p => p.status === "mapped").length === 0}
+                  onClick={() => setShowScheduleModal(!showScheduleModal)}
+                >
+                  <CalendarClock className="mr-2 h-4 w-4" />
+                  Agendar
+                </Button>
+                {showScheduleModal && (
+                  <div className="absolute right-0 top-full mt-2 z-50 bg-white border rounded-lg shadow-lg p-4 w-80">
+                    <h4 className="font-semibold text-sm mb-3">Agendar Exportação em Background</h4>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      O servidor processará os {totalPublications} anúncios automaticamente, mesmo com o navegador fechado.
+                    </p>
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs">Horário (opcional - vazio = agora)</Label>
+                        <Input
+                          type="datetime-local"
+                          value={scheduleTime}
+                          onChange={(e) => setScheduleTime(e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          className="flex-1 bg-blue-600 hover:bg-blue-700"
+                          onClick={async () => {
+                            const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
+                            if (!marketplace || !selectedAccountInfo) return;
+                            const productsToExport = mappedProducts.filter(p => p.selected !== false && p.status === "mapped");
+                            if (productsToExport.length === 0) return;
+
+                            // Build product data for background job
+                            const productData = productsToExport.map(p => {
+                              const features: Record<string, string> = {};
+                              if (p.suggestedAttributes) {
+                                for (const attr of p.suggestedAttributes) {
+                                  if (attr.value) features[attr.attributeName] = attr.value;
+                                }
+                              }
+                              let images: string[] = [];
+                              if (p.allImages && p.allImages.length > 0) {
+                                const coverIdx = p.coverImageIndex || 0;
+                                images = [p.allImages[coverIdx]];
+                                for (let j = 0; j < p.allImages.length; j++) {
+                                  if (j !== coverIdx) images.push(p.allImages[j]);
+                                }
+                              } else if (p.imageUrl) {
+                                images = [p.imageUrl];
+                              }
+                              return {
+                                id: p.id,
+                                name: p.optimizedTitle || p.name,
+                                description: p.description || "",
+                                price: p.mainPrice || 0,
+                                stock: p.totalStock || 1,
+                                ean: p.ean || "",
+                                sku: p.sku || "",
+                                brand: features["Marca"] || features["brand"] || "",
+                                images,
+                                features,
+                                categoryId: p.suggestedCategory?.id || "",
+                                titlesPerType: p.titlesPerType,
+                              };
+                            });
+
+                            const totalTasks = productsToExport.length * selectedListingTypes.length;
+
+                            try {
+                              const result = await createBgJobMutation.mutateAsync({
+                                type: "export_ml",
+                                marketplaceId: marketplace.id,
+                                accountId: selectedAccountInfo.id,
+                                accountName: selectedAccountInfo.name,
+                                tagFilter: preSelectedTag || undefined,
+                                listingTypes: selectedListingTypes,
+                                concurrency: 5,
+                                productIds: productsToExport.map(p => p.id),
+                                productData,
+                                totalItems: totalTasks,
+                                scheduledFor: scheduleTime || undefined,
+                              });
+                              setShowScheduleModal(false);
+                              toast.success(
+                                scheduleTime
+                                  ? `Exportação agendada! Job #${result.jobId} será executado em ${new Date(scheduleTime).toLocaleString("pt-BR")}`
+                                  : `Exportação enviada para background! Job #${result.jobId} iniciará em breve.`,
+                                { duration: 6000 }
+                              );
+                              setLocation("/background-jobs");
+                            } catch (err: any) {
+                              toast.error("Erro ao agendar: " + err.message);
+                            }
+                          }}
+                          disabled={createBgJobMutation.isPending}
+                        >
+                          {createBgJobMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                          ) : (
+                            <Clock className="h-4 w-4 mr-1" />
+                          )}
+                          {scheduleTime ? "Agendar" : "Enviar Agora (Background)"}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setShowScheduleModal(false)}>
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
