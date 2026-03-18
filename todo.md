@@ -178,3 +178,8 @@
 - [x] Troca de foto de capa individual visível na tela de Review (setas ◀ ▶ ou galeria clicável no card do produto)
 - [x] Troca de foto de capa em lote na barra de ações (ex: "Definir 1ª foto como capa para todos" ou navegação em lote)
 - [x] Bug: Row 4 (Foto de Capa em lote) não aparece na tela de Review - corrigido (botões estavam disabled quando produtos tinham só 1 foto)
+- [x] Botão de troca de capa em lote não visível na tela - tornar proeminente (simplificado com Anterior/Próxima/Última)
+- [x] Simplificar para botões intuitivos de trocar foto de capa de todos os selecionados
+- [x] Bug: Travamento ao gerar descrição em lote para 100+ produtos - otimizado com batches de 10 no client + chunks de 3 no server
+- [x] Botão "Gerar Descrições" em lote na barra de ações batch com progresso visível
+- [x] Endpoint batchGenerateDescriptions no server com processamento em chunks

@@ -321,6 +321,9 @@ export default function ExportPage() {
   // Description generation states
   const [generatingDescFor, setGeneratingDescFor] = useState<Set<string>>(new Set());
   const [descriptionStyle, setDescriptionStyle] = useState<"seo" | "detailed" | "short">("seo");
+  const [isBatchGeneratingDescs, setIsBatchGeneratingDescs] = useState(false);
+  const [batchDescGenProgress, setBatchDescGenProgress] = useState(0);
+  const batchGenerateDescsMutation = trpc.ai.batchGenerateDescriptions.useMutation();
 
   // Check if this is a re-export to the same marketplace type (can skip AI mapping)
   const canSkipMapping = useMemo(() => {
@@ -713,33 +716,131 @@ export default function ExportPage() {
   }, []);
 
   // ===== BATCH CHANGE COVER IMAGE =====
-  const setBatchCoverImage = useCallback((mode: "first" | "second" | "third" | "last") => {
+  const handleBatchNextCover = useCallback(() => {
     let count = 0;
     setMappedProducts(prev => prev.map(p => {
       if (!p.selected) return p;
-      // Work with allImages if available, otherwise single imageUrl
       const totalImages = p.allImages ? p.allImages.length : (p.imageUrl ? 1 : 0);
-      if (totalImages === 0) return p;
-      let newIdx: number;
-      switch (mode) {
-        case "first": newIdx = 0; break;
-        case "second": newIdx = Math.min(1, totalImages - 1); break;
-        case "third": newIdx = Math.min(2, totalImages - 1); break;
-        case "last": newIdx = totalImages - 1; break;
-      }
+      if (totalImages <= 1) return p;
+      const currentIdx = p.coverImageIndex || 0;
+      const newIdx = (currentIdx + 1) % totalImages;
+      count++;
+      return { ...p, coverImageIndex: newIdx };
+    }));
+    if (count > 0) {
+      toast.success(`Capa avan\u00e7ada para pr\u00f3xima foto em ${count} produto(s)`);
+    } else {
+      toast.info("Nenhum produto alterado. Os produtos selecionados possuem apenas 1 foto.");
+    }
+  }, []);
+
+  const handleBatchPrevCover = useCallback(() => {
+    let count = 0;
+    setMappedProducts(prev => prev.map(p => {
+      if (!p.selected) return p;
+      const totalImages = p.allImages ? p.allImages.length : (p.imageUrl ? 1 : 0);
+      if (totalImages <= 1) return p;
+      const currentIdx = p.coverImageIndex || 0;
+      const newIdx = currentIdx === 0 ? totalImages - 1 : currentIdx - 1;
+      count++;
+      return { ...p, coverImageIndex: newIdx };
+    }));
+    if (count > 0) {
+      toast.success(`Capa voltada para foto anterior em ${count} produto(s)`);
+    } else {
+      toast.info("Nenhum produto alterado. Os produtos selecionados possuem apenas 1 foto.");
+    }
+  }, []);
+
+  const handleBatchLastCover = useCallback(() => {
+    let count = 0;
+    setMappedProducts(prev => prev.map(p => {
+      if (!p.selected) return p;
+      const totalImages = p.allImages ? p.allImages.length : (p.imageUrl ? 1 : 0);
+      if (totalImages <= 1) return p;
+      const newIdx = totalImages - 1;
       if (newIdx !== (p.coverImageIndex || 0)) {
         count++;
         return { ...p, coverImageIndex: newIdx };
       }
       return p;
     }));
-    const label = mode === "first" ? "1\u00AA" : mode === "second" ? "2\u00AA" : mode === "third" ? "3\u00AA" : "\u00FAltima";
     if (count > 0) {
-      toast.success(`Capa definida como ${label} foto para ${count} produto(s)`);
+      toast.success(`Capa definida como \u00FAltima foto em ${count} produto(s)`);
     } else {
-      toast.info(`Nenhum produto alterado. Os produtos selecionados j\u00e1 est\u00e3o com a ${label} foto como capa, ou n\u00e3o possuem fotos suficientes.`);
+      toast.info("Nenhum produto alterado.");
     }
   }, []);
+
+  // ===== BATCH GENERATE DESCRIPTIONS =====
+  const handleBatchGenerateDescriptions = useCallback(async () => {
+    const selected = mappedProducts.filter(p => p.selected && p.status === "mapped");
+    if (selected.length === 0) {
+      toast.error("Selecione pelo menos um produto mapeado.");
+      return;
+    }
+
+    const marketplace = (marketplaces || []).find((m: any) => m.id.toString() === selectedMarketplace);
+    const marketplaceName = marketplace?.name || "Marketplace";
+
+    setIsBatchGeneratingDescs(true);
+    setBatchDescGenProgress(0);
+
+    try {
+      // Process in batches of 10 on the client side to avoid request timeout
+      const BATCH_SIZE = 10;
+      let totalProcessed = 0;
+      const allResults: Record<string, { description: string }> = {};
+
+      for (let i = 0; i < selected.length; i += BATCH_SIZE) {
+        const batch = selected.slice(i, i + BATCH_SIZE);
+
+        try {
+          const results = await batchGenerateDescsMutation.mutateAsync({
+            products: batch.map(p => ({
+              id: p.id,
+              name: p.optimizedTitle || p.name,
+              description: p.description || "",
+              features: p.features || {},
+              category: p.suggestedCategory?.name || p.category || "",
+              ean: p.ean,
+            })),
+            marketplace: marketplaceName,
+            style: descriptionStyle,
+          });
+
+          Object.assign(allResults, results);
+        } catch (error: any) {
+          console.error(`Batch ${i} error:`, error.message);
+        }
+
+        totalProcessed += batch.length;
+        setBatchDescGenProgress(Math.round((totalProcessed / selected.length) * 100));
+
+        // Update products progressively so user sees results appearing
+        setMappedProducts(prev => prev.map(p => {
+          const result = allResults[p.id];
+          if (result) {
+            return { ...p, description: result.description };
+          }
+          return p;
+        }));
+      }
+
+      const successCount = Object.keys(allResults).length;
+      const errorCount = selected.length - successCount;
+      if (errorCount > 0) {
+        toast.warning(`Descri\u00e7\u00f5es geradas: ${successCount} sucesso, ${errorCount} erro(s).`);
+      } else {
+        toast.success(`${successCount} descri\u00e7\u00e3o(\u00f5es) gerada(s) com IA!`);
+      }
+    } catch (error: any) {
+      toast.error(`Erro ao gerar descri\u00e7\u00f5es: ${error.message}`);
+    } finally {
+      setIsBatchGeneratingDescs(false);
+      setBatchDescGenProgress(0);
+    }
+  }, [mappedProducts, selectedMarketplace, marketplaces, descriptionStyle, batchGenerateDescsMutation]);
 
   // ===== TOGGLE EXPANDED =====
   const toggleExpanded = useCallback((productId: string) => {
@@ -2361,32 +2462,80 @@ export default function ExportPage() {
                   </Tooltip>
                 </div>
 
-                {/* Row 4: Batch Cover Image Selection */}
-                <div className="flex flex-wrap items-center gap-3">
+                {/* Row 4: Batch Cover Image + Batch Description */}
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* Cover image controls */}
                   <div className="flex items-center gap-2">
                     <Label className="text-xs font-medium flex items-center gap-1 whitespace-nowrap">
                       <ImageIcon className="h-3.5 w-3.5" />
                       Foto de Capa:
                     </Label>
                     <div className="flex gap-1">
-                      {([
-                        { mode: "first" as const, label: "1\u00AA Foto" },
-                        { mode: "second" as const, label: "2\u00AA Foto" },
-                        { mode: "third" as const, label: "3\u00AA Foto" },
-                        { mode: "last" as const, label: "\u00DAltima Foto" },
-                      ]).map(opt => (
-                        <Button
-                          key={opt.mode}
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-[11px] gap-1"
-                          onClick={() => setBatchCoverImage(opt.mode)}
-                          disabled={selectedProducts.length === 0}
-                        >
-                          {opt.label}
-                        </Button>
-                      ))}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px] gap-1"
+                        onClick={handleBatchPrevCover}
+                        disabled={selectedProducts.length === 0}
+                        title="Foto anterior como capa para todos"
+                      >
+                        <ChevronLeft className="h-3 w-3" />
+                        Anterior
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px] gap-1"
+                        onClick={handleBatchNextCover}
+                        disabled={selectedProducts.length === 0}
+                        title="Pr\u00f3xima foto como capa para todos"
+                      >
+                        Pr\u00f3xima
+                        <ChevronRight className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px] gap-1 border-purple-300 text-purple-700 hover:bg-purple-50"
+                        onClick={handleBatchLastCover}
+                        disabled={selectedProducts.length === 0}
+                        title="\u00DAltima foto (gerada por IA) como capa para todos"
+                      >
+                        \u00DAltima (IA)
+                      </Button>
                     </div>
+                  </div>
+
+                  <Separator orientation="vertical" className="h-6" />
+
+                  {/* Batch description generation */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-medium flex items-center gap-1 whitespace-nowrap">
+                      <FileText className="h-3.5 w-3.5" />
+                      Descri\u00e7\u00f5es:
+                    </Label>
+                    <select
+                      className="h-7 text-[11px] border rounded px-1.5 bg-background"
+                      value={descriptionStyle}
+                      onChange={(e) => setDescriptionStyle(e.target.value as any)}
+                    >
+                      <option value="seo">SEO</option>
+                      <option value="detailed">Detalhada</option>
+                      <option value="short">Curta</option>
+                    </select>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1"
+                      onClick={handleBatchGenerateDescriptions}
+                      disabled={isBatchGeneratingDescs || selectedProducts.filter(p => p.status === "mapped").length === 0}
+                    >
+                      {isBatchGeneratingDescs ? (
+                        <><Loader2 className="h-3 w-3 animate-spin" />{batchDescGenProgress > 0 ? `${batchDescGenProgress}%` : "Gerando..."}</>
+                      ) : (
+                        <><Sparkles className="h-3 w-3" />Gerar Descri\u00e7\u00f5es ({selectedProducts.filter(p => p.status === "mapped").length})</>
+                      )}
+                    </Button>
                   </div>
 
                   <Tooltip>
@@ -2394,7 +2543,7 @@ export default function ExportPage() {
                       <Info className="h-3.5 w-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
-                      <p className="text-xs">Define a foto de capa em lote para todos os produtos selecionados. "\u00DAltima Foto" \u00e9 \u00fatil ap\u00f3s gerar fotos com IA. Voc\u00ea tamb\u00e9m pode trocar a capa individualmente passando o mouse sobre a foto de cada produto.</p>
+                      <p className="text-xs">Use \u25C0 Anterior / Pr\u00f3xima \u25B6 para navegar entre as fotos de todos os produtos. "\u00DAltima (IA)" define a foto gerada por IA como capa. Gerar Descri\u00e7\u00f5es cria descri\u00e7\u00f5es otimizadas em lote (processadas em grupos para n\u00e3o travar).</p>
                     </TooltipContent>
                   </Tooltip>
                 </div>

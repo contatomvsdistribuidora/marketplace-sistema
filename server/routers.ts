@@ -477,6 +477,59 @@ export const appRouter = router({
         );
       }),
 
+    // Batch generate descriptions with chunked processing
+    batchGenerateDescriptions: protectedProcedure
+      .input(
+        z.object({
+          products: z.array(
+            z.object({
+              id: z.string(),
+              name: z.string(),
+              description: z.string().default(""),
+              features: z.record(z.string(), z.string()).default({}),
+              category: z.string().default(""),
+              ean: z.string().optional(),
+            })
+          ),
+          marketplace: z.string(),
+          style: z.enum(["seo", "detailed", "short", "custom"]).default("seo"),
+          customInstruction: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const results: Record<string, { description: string }> = {};
+        // Process in chunks of 3 to avoid timeout
+        const CHUNK_SIZE = 3;
+        for (let i = 0; i < input.products.length; i += CHUNK_SIZE) {
+          const chunk = input.products.slice(i, i + CHUNK_SIZE);
+          const promises = chunk.map(async (product) => {
+            try {
+              const result = await aiMapper.generateOptimizedDescription(
+                product,
+                input.marketplace,
+                input.style,
+                input.customInstruction
+              );
+              return { id: product.id, description: result.description || "" };
+            } catch (error: any) {
+              console.error(`Error generating description for ${product.id}:`, error.message);
+              return { id: product.id, description: "" };
+            }
+          });
+          const chunkResults = await Promise.all(promises);
+          for (const r of chunkResults) {
+            if (r.description) {
+              results[r.id] = { description: r.description };
+            }
+          }
+          // Small delay between chunks
+          if (i + CHUNK_SIZE < input.products.length) {
+            await new Promise(r => setTimeout(r, 500));
+          }
+        }
+        return results;
+      }),
+
     // Generate product image with AI
     generateProductImage: protectedProcedure
       .input(
