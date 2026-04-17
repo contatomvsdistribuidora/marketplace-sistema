@@ -1,0 +1,76 @@
+{
+  "query": "SHOW TABLES;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SHOW TABLES;",
+  "rows": [
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "__drizzle_migrations"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "agent_actions"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "agent_queue"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "amazon_accounts"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "amazon_listings"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "attribute_templates"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "background_jobs"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "cache_sync"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "category_mappings"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "export_jobs"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "export_logs"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "marketplaces"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "ml_accounts"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "ml_categories"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "ml_listings"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "product_cache"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "settings"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "shopee_accounts"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "shopee_products"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "tiktok_accounts"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "tiktok_listings"
+    },
+    {
+      "Tables_in_nQNUJejXd53raznAt7q8o4": "users"
+    }
+  ],
+  "messages": [],
+  "stdout": "Tables_in_nQNUJejXd53raznAt7q8o4\n__drizzle_migrations\nagent_actions\nagent_queue\namazon_accounts\namazon_listings\nattribute_templates\nbackground_jobs\ncache_sync\ncategory_mappings\nexport_jobs\nexport_logs\nmarketplaces\nml_accounts\nml_categories\nml_listings\nproduct_cache\nsettings\nshopee_accounts\nshopee_products\ntiktok_accounts\ntiktok_listings\nusers\n",
+  "stderr": "",
+  "execution_time_ms": 345
+}

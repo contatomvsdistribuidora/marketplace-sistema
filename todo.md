@@ -225,3 +225,9 @@
 - [ ] Repricing automático com regras configuráveis
 - [ ] Promoções em lote (descontos, bundles, vouchers, follow prize)
 - [x] Testes da integração Shopee (11 testes passando)
+- [x] BUG: Shopee OAuth retorna "Invalid partner_id" - aguardando Go-Live approval (App em modo Developing)
+- [x] Exportação de produtos para planilha Shopee Mass Upload (.xlsx)
+- [x] Backend: rota tRPC para gerar planilha Shopee preenchida com produtos do BaseLinker
+- [x] Frontend: botão de exportação na página de produtos com seleção de produtos
+- [x] Criar variações automáticas (Kit 2, Kit 3, Kit 4) na planilha exportada
+- [x] Preencher campos obrigatórios (nome, descrição, preço, peso, estoque, imagens)

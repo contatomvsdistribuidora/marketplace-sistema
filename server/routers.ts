@@ -14,6 +14,7 @@ import { generateImage } from "./_core/imageGeneration";
 import * as bgWorker from "./background-worker";
 import * as amazon from "./amazon";
 import * as shopee from "./shopee";
+import * as shopeeExport from "./shopee-export";
 
 export const appRouter = router({
   system: systemRouter,
@@ -1681,6 +1682,78 @@ export const appRouter = router({
       .input(z.object({ accountId: z.number() }))
       .query(async ({ input }) => {
         return shopee.getProductQualityStats(input.accountId);
+      }),
+
+    // Generate Shopee mass upload spreadsheet from selected products
+    generateSpreadsheet: protectedProcedure
+      .input(z.object({
+        inventoryId: z.number(),
+        productIds: z.array(z.number()),
+        options: z.object({
+          categoryId: z.string().optional(),
+          createKitVariations: z.boolean().optional(),
+          kitQuantities: z.array(z.number()).optional(),
+          kitDiscountPercent: z.array(z.number()).optional(),
+          enableDirectDelivery: z.boolean().optional(),
+          enableBuyerPickup: z.boolean().optional(),
+          enableShopeeXpress: z.boolean().optional(),
+          defaultNcm: z.string().optional(),
+        }).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+
+        // Get product details from BaseLinker
+        const productsData = await baselinker.getInventoryProductsData(
+          token,
+          input.inventoryId,
+          input.productIds
+        );
+
+        // Convert to Shopee format
+        const shopeeProducts: shopeeExport.ProductForShopee[] = Object.entries(productsData).map(
+          ([id, p]: [string, any]) => {
+            // Collect all images
+            const images: string[] = [];
+            if (p.images) {
+              Object.values(p.images).forEach((url: any) => {
+                if (url && typeof url === "string") images.push(url);
+              });
+            }
+            const mainImage = images[0] || p.image_url || "";
+
+            return {
+              id: parseInt(id),
+              name: p.text_fields?.name || p.name || "",
+              description: p.text_fields?.description || p.description || "",
+              sku: p.sku || "",
+              ean: p.ean || "",
+              price: parseFloat(p.prices?.["0"] || p.price_brutto || "0"),
+              stock: Object.values(p.stock || {}).reduce((sum: number, v: any) => sum + (parseInt(v) || 0), 0),
+              weight: parseFloat(p.weight || "0"),
+              imageUrl: mainImage,
+              images: images.slice(1), // Additional images (exclude cover)
+              category: p.category_id?.toString(),
+              brand: p.text_fields?.features?.Marca || p.text_fields?.features?.Brand || "",
+              length: parseFloat(p.length || "0") || undefined,
+              width: parseFloat(p.width || "0") || undefined,
+              height: parseFloat(p.height || "0") || undefined,
+            };
+          }
+        );
+
+        if (shopeeProducts.length === 0) {
+          throw new Error("Nenhum produto encontrado para exportar");
+        }
+
+        // Generate and upload spreadsheet
+        const result = await shopeeExport.generateAndUploadShopeeSpreadsheet(
+          shopeeProducts,
+          input.options || {}
+        );
+
+        return result;
       }),
   }),
 });

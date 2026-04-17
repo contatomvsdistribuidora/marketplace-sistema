@@ -1,0 +1,9 @@
+{
+  "query": "SELECT * FROM settings WHERE settingKey LIKE '%password%' OR settingKey LIKE '%auth%' OR settingKey LIKE '%login%' OR settingKey LIKE '%local%' LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT * FROM settings WHERE settingKey LIKE '%password%' OR settingKey LIKE '%auth%' OR settingKey LIKE '%login%' OR settingKey LIKE '%local%' LIMIT 10;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 365
+}

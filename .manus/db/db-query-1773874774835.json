@@ -1,0 +1,28 @@
+{
+  "query": "SELECT id, openId, name, email, passwordHash, loginMethod, role FROM users LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3Zv4Qvr7xnDv85L.fd0c5f77ba12 --database nQNUJejXd53raznAt7q8o4 --execute SELECT id, openId, name, email, passwordHash, loginMethod, role FROM users LIMIT 10;",
+  "rows": [
+    {
+      "id": "1",
+      "openId": "ja4cUPWkr5yTjaJAHemYY8",
+      "name": "marcos dias",
+      "email": "contato.mvsdistribuidora@gmail.com",
+      "passwordHash": "$2b$12$Cm8SytJyWxjACdCDIZxH3urjBPQSkBwBUkqJslgUnTjzU7lxTIrAG",
+      "loginMethod": "google",
+      "role": "admin"
+    },
+    {
+      "id": "3032",
+      "openId": "local_e818bd4faa6f4468b6b1ae82af18ffdd",
+      "name": "douglas dias",
+      "email": "douglas@higipack.com.br",
+      "passwordHash": "$2b$12$9eWB5s/lT/9ArV630wuPauE4Fh1rCplqZb/IbrD2w4Rz1UWBjzcIK",
+      "loginMethod": "email",
+      "role": "user"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\topenId\tname\temail\tpasswordHash\tloginMethod\trole\n1\tja4cUPWkr5yTjaJAHemYY8\tmarcos dias\tcontato.mvsdistribuidora@gmail.com\t$2b$12$Cm8SytJyWxjACdCDIZxH3urjBPQSkBwBUkqJslgUnTjzU7lxTIrAG\tgoogle\tadmin\n3032\tlocal_e818bd4faa6f4468b6b1ae82af18ffdd\tdouglas dias\tdouglas@higipack.com.br\t$2b$12$9eWB5s/lT/9ArV630wuPauE4Fh1rCplqZb/IbrD2w4Rz1UWBjzcIK\temail\tuser\n",
+  "stderr": "",
+  "execution_time_ms": 373
+}
