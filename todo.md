@@ -250,3 +250,10 @@
 - [x] Verificação e sugestão de vídeo do produto
 - [x] Dashboard de qualidade com score por produto e ações de melhoria
 - [x] Otimização em lote (aplicar melhorias para múltiplos produtos de uma vez) - diagnóstico em batch implementado
+- [x] Botão para abrir produto diretamente na Shopee (link para Seller Center) - IMPLEMENTADO: botões "Ver na Shopee" e "Editar no Seller Center" com links diretos
+- [x] Checklist "Anúncio Perfeito" - mostra exatamente o que falta para nota A (100/100) - IMPLEMENTADO: tab com checklist completo, status de cada item, prioridade e ações- [x] Filtros avançados por qualidade: nota (A/B/C/D/F), problema específ ico (sem vídeo, título curto, poucas imagens, etc.) - IMPLEMENTADO: select com filtros por problema
+- [x] Otimização de títulos em lote com IA (múltiplos produtos de uma vez) - IMPLEMENTADO: seleção com checkboxes + botão batch
+- [x] Otimização de descrições em lote com IA (múltiplos produtos de uma vez) - IMPLEMENTADO: seleção com checkboxes + botão batch
+- [x] Plano de ação priorizado por produto (o que fazer primeiro para melhorar ranking) - IMPLEMENTADO: sugestões com prioridade e impacto
+- [x] Indicador visual de progresso: quantos produtos "perfeitos" vs "precisam atenção" - IMPLEMENTADO: card com contagem de produtos A (perfeitos) e % de progresso
+- [x] Seleção múltipla de produtos para otimização em lote - IMPLEMENTADO: checkboxes em cada produto + contador de selecionados

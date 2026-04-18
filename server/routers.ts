@@ -1950,6 +1950,49 @@ export const appRouter = router({
         if (!product) throw new Error("Produto não encontrado");
         return shopeeOptimizer.getOptimizationSuggestions(product);
       }),
+
+    // Get perfect listing checklist for a product
+    getProductChecklist: protectedProcedure
+      .input(z.object({ productId: z.number() }))
+      .query(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        return shopeeOptimizer.generatePerfectChecklist(product);
+      }),
+
+    // Get Shopee product URLs
+    getProductUrls: protectedProcedure
+      .input(z.object({ accountId: z.number(), productId: z.number() }))
+      .query(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts, shopeeAccounts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        const [account] = await db.select().from(shopeeAccounts).where(eq(shopeeAccounts.id, input.accountId)).limit(1);
+        if (!account) throw new Error("Conta não encontrada");
+        return {
+          shopeeUrl: shopeeOptimizer.getShopeeProductUrl(account.shopId, product.itemId, account.region),
+          sellerCenterUrl: shopeeOptimizer.getSellerCenterUrl(account.shopId, product.itemId, account.region),
+        };
+      }),
+
+    // Batch optimize titles
+    batchOptimizeTitles: protectedProcedure
+      .input(z.object({ productIds: z.array(z.number()) }))
+      .mutation(async ({ input }) => {
+        return shopeeOptimizer.batchOptimizeTitles(input.productIds);
+      }),
+
+    // Batch optimize descriptions
+    batchOptimizeDescriptions: protectedProcedure
+      .input(z.object({ productIds: z.array(z.number()) }))
+      .mutation(async ({ input }) => {
+        return shopeeOptimizer.batchOptimizeDescriptions(input.productIds);
+      }),
   }),
 });
 

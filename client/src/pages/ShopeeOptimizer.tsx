@@ -27,6 +27,10 @@ import {
   Zap,
   Star,
   Search,
+  ExternalLink,
+  ListChecks,
+  Layers,
+  TrendingDown,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -46,6 +50,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Grade color mapping
 function gradeColor(grade: string) {
@@ -79,13 +84,20 @@ export default function ShopeeOptimizer() {
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [filterGrade, setFilterGrade] = useState<string>("all");
+  const [filterProblem, setFilterProblem] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [optimizedTitle, setOptimizedTitle] = useState<any>(null);
   const [optimizedDesc, setOptimizedDesc] = useState<any>(null);
   const [showTitleDialog, setShowTitleDialog] = useState(false);
   const [showDescDialog, setShowDescDialog] = useState(false);
   const [showSuggestionsDialog, setShowSuggestionsDialog] = useState(false);
+  const [showChecklistDialog, setShowChecklistDialog] = useState(false);
+  const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [suggestions, setSuggestions] = useState<any>(null);
+  const [checklist, setChecklist] = useState<any>(null);
+  const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
+  const [batchOptimizing, setBatchOptimizing] = useState(false);
+  const [batchResults, setBatchResults] = useState<any>(null);
 
   const { data: accounts } = trpc.shopee.getAccounts.useQuery();
   const { data: diagnostics, isLoading: diagLoading, refetch: refetchDiag } =
@@ -101,6 +113,16 @@ export default function ShopeeOptimizer() {
   const optimizeTitleMutation = trpc.shopee.optimizeTitle.useMutation();
   const optimizeDescMutation = trpc.shopee.optimizeDescription.useMutation();
   const getSuggestionsMutation = trpc.shopee.getOptimizationSuggestions.useMutation();
+  const getChecklistQuery = trpc.shopee.getProductChecklist.useQuery(
+    { productId: selectedProductId! },
+    { enabled: !!selectedProductId }
+  );
+  const getUrlsQuery = trpc.shopee.getProductUrls.useQuery(
+    { accountId: selectedAccountId!, productId: selectedProductId! },
+    { enabled: !!selectedAccountId && !!selectedProductId }
+  );
+  const batchOptimizeTitlesMutation = trpc.shopee.batchOptimizeTitles.useMutation();
+  const batchOptimizeDescsMutation = trpc.shopee.batchOptimizeDescriptions.useMutation();
 
   // Auto-select first active account
   const activeAccounts = useMemo(
@@ -119,12 +141,24 @@ export default function ShopeeOptimizer() {
     if (filterGrade !== "all") {
       filtered = filtered.filter((p: any) => p.grade === filterGrade);
     }
+    if (filterProblem !== "all") {
+      filtered = filtered.filter((p: any) => {
+        const issues = Object.values(p.categories).flatMap((cat: any) => cat.issues);
+        const issuesStr = issues.join(" ").toLowerCase();
+        return issuesStr.includes(filterProblem.toLowerCase());
+      });
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter((p: any) => p.itemName?.toLowerCase().includes(q));
     }
     return filtered;
-  }, [diagnostics, filterGrade, searchQuery]);
+  }, [diagnostics, filterGrade, filterProblem, searchQuery]);
+
+  // Count perfect products
+  const perfectCount = useMemo(() => {
+    return (diagnostics?.products || []).filter((p: any) => p.grade === "A").length;
+  }, [diagnostics]);
 
   const handleOptimizeTitle = async (productId: number) => {
     try {
@@ -153,6 +187,45 @@ export default function ShopeeOptimizer() {
       setShowSuggestionsDialog(true);
     } catch (error: any) {
       toast.error(`Erro ao gerar sugestões: ${error.message}`);
+    }
+  };
+
+  const handleGetChecklist = async (productId: number) => {
+    if (getChecklistQuery.data) {
+      setChecklist(getChecklistQuery.data);
+      setShowChecklistDialog(true);
+    }
+  };
+
+  const handleOpenShopee = async (productId: number) => {
+    if (getUrlsQuery.data) {
+      window.open(getUrlsQuery.data.shopeeUrl, "_blank");
+    }
+  };
+
+  const handleOpenSellerCenter = async (productId: number) => {
+    if (getUrlsQuery.data) {
+      window.open(getUrlsQuery.data.sellerCenterUrl, "_blank");
+    }
+  };
+
+  const handleBatchOptimize = async (type: "titles" | "descriptions") => {
+    if (selectedProducts.size === 0) {
+      toast.error("Selecione pelo menos um produto");
+      return;
+    }
+    try {
+      setBatchOptimizing(true);
+      const productIds = Array.from(selectedProducts);
+      const result = type === "titles"
+        ? await batchOptimizeTitlesMutation.mutateAsync({ productIds })
+        : await batchOptimizeDescsMutation.mutateAsync({ productIds });
+      setBatchResults({ type, results: result });
+      toast.success(`${result.length} produtos otimizados!`);
+    } catch (error: any) {
+      toast.error(`Erro na otimização em lote: ${error.message}`);
+    } finally {
+      setBatchOptimizing(false);
     }
   };
 
@@ -195,187 +268,187 @@ export default function ShopeeOptimizer() {
               <span className="text-sm text-muted-foreground">Vendas: {product.sold}</span>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
             <Button
-              onClick={() => handleGetSuggestions(product.id)}
-              disabled={getSuggestionsMutation.isPending}
+              onClick={() => handleOpenShopee(product.id)}
               className="gap-2"
+              variant="outline"
             >
-              {getSuggestionsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Sugestões IA
+              <ExternalLink className="h-4 w-4" />
+              Ver na Shopee
+            </Button>
+            <Button
+              onClick={() => handleOpenSellerCenter(product.id)}
+              className="gap-2"
+              variant="outline"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Editar no Seller Center
             </Button>
           </div>
         </div>
 
-        {/* Score Breakdown */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Title */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                    <Tag className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <CardTitle className="text-sm">Título</CardTitle>
-                </div>
-                <span className={`font-bold ${scoreColor((diagnostic.categories.title.score / diagnostic.categories.title.maxScore) * 100)}`}>
-                  {diagnostic.categories.title.score}/{diagnostic.categories.title.maxScore}
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Progress
-                value={(diagnostic.categories.title.score / diagnostic.categories.title.maxScore) * 100}
-                className="h-2 mb-3"
-              />
-              <p className="text-xs text-muted-foreground mb-2">{product.itemName?.length || 0} caracteres</p>
-              {diagnostic.categories.title.issues.map((issue: string, i: number) => (
-                <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
-                  <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                  {issue}
-                </p>
-              ))}
-              {diagnostic.categories.title.suggestions.map((sug: string, i: number) => (
-                <p key={i} className="text-xs text-blue-600 flex items-start gap-1 mb-1">
-                  <Sparkles className="h-3 w-3 mt-0.5 shrink-0" />
-                  {sug}
-                </p>
-              ))}
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full mt-3 gap-2"
-                onClick={() => handleOptimizeTitle(product.id)}
-                disabled={optimizeTitleMutation.isPending}
-              >
-                {optimizeTitleMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
-                Otimizar com IA
-              </Button>
-            </CardContent>
-          </Card>
+        {/* Tabs for Diagnostics and Checklist */}
+        <Tabs defaultValue="diagnostics" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="diagnostics">Diagnóstico</TabsTrigger>
+            <TabsTrigger value="checklist">Checklist Perfeito</TabsTrigger>
+          </TabsList>
 
-          {/* Description */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-purple-100 flex items-center justify-center">
-                    <FileText className="h-4 w-4 text-purple-600" />
+          <TabsContent value="diagnostics" className="space-y-4">
+            {/* Score Breakdown */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Title */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <Tag className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <CardTitle className="text-sm">Título</CardTitle>
+                    </div>
+                    <span className={`font-bold ${scoreColor((diagnostic.categories.title.score / diagnostic.categories.title.maxScore) * 100)}`}>
+                      {diagnostic.categories.title.score}/{diagnostic.categories.title.maxScore}
+                    </span>
                   </div>
-                  <CardTitle className="text-sm">Descrição</CardTitle>
-                </div>
-                <span className={`font-bold ${scoreColor((diagnostic.categories.description.score / diagnostic.categories.description.maxScore) * 100)}`}>
-                  {diagnostic.categories.description.score}/{diagnostic.categories.description.maxScore}
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Progress
-                value={(diagnostic.categories.description.score / diagnostic.categories.description.maxScore) * 100}
-                className="h-2 mb-3"
-              />
-              <p className="text-xs text-muted-foreground mb-2">
-                {product.description?.split(/\s+/).filter((w: string) => w.length > 0).length || 0} palavras
-              </p>
-              {diagnostic.categories.description.issues.map((issue: string, i: number) => (
-                <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
-                  <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                  {issue}
-                </p>
-              ))}
-              {diagnostic.categories.description.suggestions.map((sug: string, i: number) => (
-                <p key={i} className="text-xs text-blue-600 flex items-start gap-1 mb-1">
-                  <Sparkles className="h-3 w-3 mt-0.5 shrink-0" />
-                  {sug}
-                </p>
-              ))}
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full mt-3 gap-2"
-                onClick={() => handleOptimizeDesc(product.id)}
-                disabled={optimizeDescMutation.isPending}
-              >
-                {optimizeDescMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
-                Otimizar com IA
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Images */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-green-100 flex items-center justify-center">
-                    <Image className="h-4 w-4 text-green-600" />
-                  </div>
-                  <CardTitle className="text-sm">Imagens</CardTitle>
-                </div>
-                <span className={`font-bold ${scoreColor((diagnostic.categories.images.score / diagnostic.categories.images.maxScore) * 100)}`}>
-                  {diagnostic.categories.images.score}/{diagnostic.categories.images.maxScore}
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Progress
-                value={(diagnostic.categories.images.score / diagnostic.categories.images.maxScore) * 100}
-                className="h-2 mb-3"
-              />
-              <p className="text-xs text-muted-foreground mb-2">
-                {Array.isArray(product.images) ? product.images.length : 0} imagens
-              </p>
-              {diagnostic.categories.images.issues.map((issue: string, i: number) => (
-                <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
-                  <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                  {issue}
-                </p>
-              ))}
-              {diagnostic.categories.images.suggestions.map((sug: string, i: number) => (
-                <p key={i} className="text-xs text-blue-600 flex items-start gap-1 mb-1">
-                  <Sparkles className="h-3 w-3 mt-0.5 shrink-0" />
-                  {sug}
-                </p>
-              ))}
-              {/* Image thumbnails */}
-              {Array.isArray(product.images) && product.images.length > 0 && (
-                <div className="flex gap-1 mt-3 flex-wrap">
-                  {product.images.slice(0, 9).map((img: string, i: number) => (
-                    <img key={i} src={img} alt={`img-${i}`} className="h-10 w-10 rounded object-cover border" />
+                </CardHeader>
+                <CardContent>
+                  <Progress
+                    value={(diagnostic.categories.title.score / diagnostic.categories.title.maxScore) * 100}
+                    className="h-2 mb-3"
+                  />
+                  <p className="text-xs text-muted-foreground mb-2">{product.itemName?.length || 0} caracteres</p>
+                  {diagnostic.categories.title.issues.map((issue: string, i: number) => (
+                    <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
+                      <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                      {issue}
+                    </p>
                   ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  {diagnostic.categories.title.suggestions.map((sug: string, i: number) => (
+                    <p key={i} className="text-xs text-blue-600 flex items-start gap-1 mb-1">
+                      <Sparkles className="h-3 w-3 mt-0.5 shrink-0" />
+                      {sug}
+                    </p>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-3 gap-2"
+                    onClick={() => handleOptimizeTitle(product.id)}
+                    disabled={optimizeTitleMutation.isPending}
+                  >
+                    {optimizeTitleMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                    Otimizar com IA
+                  </Button>
+                </CardContent>
+              </Card>
 
-          {/* Video */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-pink-100 flex items-center justify-center">
-                    <Video className="h-4 w-4 text-pink-600" />
+              {/* Description */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-lg bg-purple-100 flex items-center justify-center">
+                        <FileText className="h-4 w-4 text-purple-600" />
+                      </div>
+                      <CardTitle className="text-sm">Descrição</CardTitle>
+                    </div>
+                    <span className={`font-bold ${scoreColor((diagnostic.categories.description.score / diagnostic.categories.description.maxScore) * 100)}`}>
+                      {diagnostic.categories.description.score}/{diagnostic.categories.description.maxScore}
+                    </span>
                   </div>
-                  <CardTitle className="text-sm">Vídeo</CardTitle>
-                </div>
-                <span className={`font-bold ${scoreColor((diagnostic.categories.video.score / diagnostic.categories.video.maxScore) * 100)}`}>
-                  {diagnostic.categories.video.score}/{diagnostic.categories.video.maxScore}
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Progress
-                value={(diagnostic.categories.video.score / diagnostic.categories.video.maxScore) * 100}
-                className="h-2 mb-3"
-              />
-              {product.hasVideo ? (
-                <p className="text-xs text-green-600 flex items-center gap-1">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Produto possui vídeo
-                </p>
-              ) : (
-                <>
+                </CardHeader>
+                <CardContent>
+                  <Progress
+                    value={(diagnostic.categories.description.score / diagnostic.categories.description.maxScore) * 100}
+                    className="h-2 mb-3"
+                  />
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {(product.description || "").split(/\s+/).filter((w: string) => w.length > 0).length} palavras
+                  </p>
+                  {diagnostic.categories.description.issues.map((issue: string, i: number) => (
+                    <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
+                      <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                      {issue}
+                    </p>
+                  ))}
+                  {diagnostic.categories.description.suggestions.map((sug: string, i: number) => (
+                    <p key={i} className="text-xs text-blue-600 flex items-start gap-1 mb-1">
+                      <Sparkles className="h-3 w-3 mt-0.5 shrink-0" />
+                      {sug}
+                    </p>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-3 gap-2"
+                    onClick={() => handleOptimizeDesc(product.id)}
+                    disabled={optimizeDescMutation.isPending}
+                  >
+                    {optimizeDescMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                    Otimizar com IA
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Images */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-lg bg-green-100 flex items-center justify-center">
+                        <Image className="h-4 w-4 text-green-600" />
+                      </div>
+                      <CardTitle className="text-sm">Imagens</CardTitle>
+                    </div>
+                    <span className={`font-bold ${scoreColor((diagnostic.categories.images.score / diagnostic.categories.images.maxScore) * 100)}`}>
+                      {diagnostic.categories.images.score}/{diagnostic.categories.images.maxScore}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Progress
+                    value={(diagnostic.categories.images.score / diagnostic.categories.images.maxScore) * 100}
+                    className="h-2 mb-3"
+                  />
+                  <p className="text-xs text-muted-foreground mb-2">{(product.images || []).length} imagens</p>
+                  {diagnostic.categories.images.issues.map((issue: string, i: number) => (
+                    <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
+                      <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                      {issue}
+                    </p>
+                  ))}
+                  {diagnostic.categories.images.suggestions.map((sug: string, i: number) => (
+                    <p key={i} className="text-xs text-blue-600 flex items-start gap-1 mb-1">
+                      <Sparkles className="h-3 w-3 mt-0.5 shrink-0" />
+                      {sug}
+                    </p>
+                  ))}
+                </CardContent>
+              </Card>
+
+              {/* Video */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-lg bg-red-100 flex items-center justify-center">
+                        <Video className="h-4 w-4 text-red-600" />
+                      </div>
+                      <CardTitle className="text-sm">Vídeo</CardTitle>
+                    </div>
+                    <span className={`font-bold ${scoreColor((diagnostic.categories.video.score / diagnostic.categories.video.maxScore) * 100)}`}>
+                      {diagnostic.categories.video.score}/{diagnostic.categories.video.maxScore}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Progress
+                    value={(diagnostic.categories.video.score / diagnostic.categories.video.maxScore) * 100}
+                    className="h-2 mb-3"
+                  />
+                  <p className="text-xs text-muted-foreground mb-2">{product.hasVideo ? "Presente" : "Ausente"}</p>
                   {diagnostic.categories.video.issues.map((issue: string, i: number) => (
                     <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
                       <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
@@ -388,94 +461,148 @@ export default function ShopeeOptimizer() {
                       {sug}
                     </p>
                   ))}
-                </>
-              )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
 
-          {/* Attributes */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-amber-100 flex items-center justify-center">
-                    <BarChart3 className="h-4 w-4 text-amber-600" />
+              {/* Attributes */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-lg bg-yellow-100 flex items-center justify-center">
+                        <Tag className="h-4 w-4 text-yellow-600" />
+                      </div>
+                      <CardTitle className="text-sm">Atributos</CardTitle>
+                    </div>
+                    <span className={`font-bold ${scoreColor((diagnostic.categories.attributes.score / diagnostic.categories.attributes.maxScore) * 100)}`}>
+                      {diagnostic.categories.attributes.score}/{diagnostic.categories.attributes.maxScore}
+                    </span>
                   </div>
-                  <CardTitle className="text-sm">Atributos</CardTitle>
-                </div>
-                <span className={`font-bold ${scoreColor((diagnostic.categories.attributes.score / diagnostic.categories.attributes.maxScore) * 100)}`}>
-                  {diagnostic.categories.attributes.score}/{diagnostic.categories.attributes.maxScore}
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Progress
-                value={(diagnostic.categories.attributes.score / diagnostic.categories.attributes.maxScore) * 100}
-                className="h-2 mb-3"
-              />
-              <p className="text-xs text-muted-foreground mb-2">
-                {product.attributesFilled}/{product.attributesTotal} preenchidos
-              </p>
-              {diagnostic.categories.attributes.issues.map((issue: string, i: number) => (
-                <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
-                  <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                  {issue}
-                </p>
-              ))}
-              {diagnostic.categories.attributes.suggestions.map((sug: string, i: number) => (
-                <p key={i} className="text-xs text-blue-600 flex items-start gap-1 mb-1">
-                  <Sparkles className="h-3 w-3 mt-0.5 shrink-0" />
-                  {sug}
-                </p>
-              ))}
-            </CardContent>
-          </Card>
+                </CardHeader>
+                <CardContent>
+                  <Progress
+                    value={(diagnostic.categories.attributes.score / diagnostic.categories.attributes.maxScore) * 100}
+                    className="h-2 mb-3"
+                  />
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {product.attributesFilled}/{product.attributesTotal}
+                  </p>
+                  {diagnostic.categories.attributes.issues.map((issue: string, i: number) => (
+                    <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
+                      <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                      {issue}
+                    </p>
+                  ))}
+                </CardContent>
+              </Card>
 
-          {/* Dimensions */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-teal-100 flex items-center justify-center">
-                    <Ruler className="h-4 w-4 text-teal-600" />
+              {/* Dimensions */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-lg bg-cyan-100 flex items-center justify-center">
+                        <Ruler className="h-4 w-4 text-cyan-600" />
+                      </div>
+                      <CardTitle className="text-sm">Dimensões</CardTitle>
+                    </div>
+                    <span className={`font-bold ${scoreColor((diagnostic.categories.dimensions.score / diagnostic.categories.dimensions.maxScore) * 100)}`}>
+                      {diagnostic.categories.dimensions.score}/{diagnostic.categories.dimensions.maxScore}
+                    </span>
                   </div>
-                  <CardTitle className="text-sm">Dimensões</CardTitle>
-                </div>
-                <span className={`font-bold ${scoreColor((diagnostic.categories.dimensions.score / diagnostic.categories.dimensions.maxScore) * 100)}`}>
-                  {diagnostic.categories.dimensions.score}/{diagnostic.categories.dimensions.maxScore}
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Progress
-                value={(diagnostic.categories.dimensions.score / diagnostic.categories.dimensions.maxScore) * 100}
-                className="h-2 mb-3"
-              />
-              <div className="text-xs space-y-1">
-                <p>Peso: {product.weight || "N/A"} kg</p>
-                <p>C: {product.dimensionLength || "N/A"} x L: {product.dimensionWidth || "N/A"} x A: {product.dimensionHeight || "N/A"} cm</p>
-              </div>
-              {diagnostic.categories.dimensions.issues.map((issue: string, i: number) => (
-                <p key={i} className="text-xs text-red-600 flex items-start gap-1 mt-1">
-                  <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                  {issue}
-                </p>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
+                </CardHeader>
+                <CardContent>
+                  <Progress
+                    value={(diagnostic.categories.dimensions.score / diagnostic.categories.dimensions.maxScore) * 100}
+                    className="h-2 mb-3"
+                  />
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {product.weight ? `${product.weight} kg` : "Sem peso"}
+                  </p>
+                  {diagnostic.categories.dimensions.issues.map((issue: string, i: number) => (
+                    <p key={i} className="text-xs text-red-600 flex items-start gap-1 mb-1">
+                      <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                      {issue}
+                    </p>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
 
-        {/* Current Description Preview */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Descrição Atual</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="text-xs whitespace-pre-wrap bg-muted p-4 rounded-lg max-h-48 overflow-y-auto">
-              {product.description || "Sem descrição"}
-            </pre>
-          </CardContent>
-        </Card>
+            {/* Suggestions Button */}
+            <Button
+              onClick={() => handleGetSuggestions(product.id)}
+              disabled={getSuggestionsMutation.isPending}
+              className="w-full gap-2"
+            >
+              {getSuggestionsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Ver Sugestões de Otimização
+            </Button>
+          </TabsContent>
+
+          <TabsContent value="checklist" className="space-y-4">
+            <Button
+              onClick={() => handleGetChecklist(product.id)}
+              disabled={getChecklistQuery.isLoading}
+              className="w-full gap-2"
+            >
+              {getChecklistQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListChecks className="h-4 w-4" />}
+              Gerar Checklist Perfeito
+            </Button>
+            {checklist && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                  <span className="font-medium">{checklist.completedCount}/{checklist.totalCount} itens concluídos</span>
+                  <span className={`text-lg font-bold ${scoreColor((checklist.completionPercent / 100) * 100)}`}>
+                    {checklist.completionPercent}%
+                  </span>
+                </div>
+                <Progress value={checklist.completionPercent} className="h-2" />
+                <div className="space-y-2">
+                  {checklist.items.map((item: any) => (
+                    <Card key={item.id}>
+                      <CardContent className="py-3">
+                        <div className="flex items-start gap-3">
+                          <div className="mt-1">
+                            {item.status === "done" ? (
+                              <CheckCircle2 className="h-5 w-5 text-green-600" />
+                            ) : item.status === "partial" ? (
+                              <AlertTriangle className="h-5 w-5 text-yellow-600" />
+                            ) : (
+                              <XCircle className="h-5 w-5 text-red-600" />
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-sm">{item.label}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {item.category}
+                              </Badge>
+                              <Badge className={
+                                item.impact === "critical" ? "bg-red-100 text-red-800" :
+                                item.impact === "high" ? "bg-orange-100 text-orange-800" :
+                                item.impact === "medium" ? "bg-yellow-100 text-yellow-800" :
+                                "bg-blue-100 text-blue-800"
+                              }>
+                                {item.impact}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-1">
+                              Atual: {item.currentValue} → Alvo: {item.targetValue}
+                            </p>
+                            {item.actionRequired !== "OK" && (
+                              <p className="text-xs text-blue-600 font-medium">{item.actionRequired}</p>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     );
   }
@@ -484,45 +611,59 @@ export default function ShopeeOptimizer() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="h-6 w-6 text-orange-500" />
-            Otimizador de Qualidade Shopee
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Analise e otimize seus produtos com IA para maximizar o ranking na Shopee.
-          </p>
-        </div>
-      </div>
-
-      {/* Account Selector */}
-      {activeAccounts.length > 0 && (
-        <div className="flex items-center gap-4">
-          <Select
-            value={selectedAccountId?.toString() || ""}
-            onValueChange={(v) => setSelectedAccountId(parseInt(v))}
-          >
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Selecione uma conta" />
-            </SelectTrigger>
-            <SelectContent>
-              {activeAccounts.map((acc: any) => (
-                <SelectItem key={acc.id} value={acc.id.toString()}>
-                  {acc.shopName || `Loja ${acc.shopId}`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetchDiag()}
-            disabled={diagLoading}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${diagLoading ? "animate-spin" : ""}`} />
-            Atualizar Diagnóstico
-          </Button>
+      {selectedAccountId && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Select
+              value={selectedAccountId?.toString() || ""}
+              onValueChange={(v) => setSelectedAccountId(parseInt(v))}
+            >
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="Selecione uma conta" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeAccounts.map((acc: any) => (
+                  <SelectItem key={acc.id} value={acc.id.toString()}>
+                    {acc.shopName || `Loja ${acc.shopId}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetchDiag()}
+              disabled={diagLoading}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${diagLoading ? "animate-spin" : ""}`} />
+              Atualizar Diagnóstico
+            </Button>
+          </div>
+          {selectedProducts.size > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                {selectedProducts.size} selecionado(s)
+              </span>
+              <Button
+                size="sm"
+                onClick={() => handleBatchOptimize("titles")}
+                disabled={batchOptimizing}
+                className="gap-2"
+              >
+                {batchOptimizing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                Otimizar Títulos
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => handleBatchOptimize("descriptions")}
+                disabled={batchOptimizing}
+                className="gap-2"
+              >
+                {batchOptimizing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                Otimizar Descrições
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -568,25 +709,29 @@ export default function ShopeeOptimizer() {
               </CardContent>
             </Card>
 
-            {/* Grade Distribution */}
-            {(["A", "B", "C", "D", "F"] as const).map((grade) => {
-              const count = diagnostics.gradeDistribution[grade];
-              const pct = diagnostics.total > 0 ? Math.round((count / diagnostics.total) * 100) : 0;
-              const colors: Record<string, string> = {
-                A: "border-l-green-500 bg-green-50",
-                B: "border-l-blue-500 bg-blue-50",
-                C: "border-l-yellow-500 bg-yellow-50",
-                D: "border-l-orange-500 bg-orange-50",
-                F: "border-l-red-500 bg-red-50",
-              };
-              return null; // We'll show these inline below
-            })}
+            {/* Perfect Products */}
+            <Card className="border-l-4 border-l-green-500">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-xl bg-green-100 flex items-center justify-center">
+                    <Star className="h-6 w-6 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Anúncios Perfeitos</p>
+                    <p className="text-3xl font-bold text-green-600">{perfectCount}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {diagnostics.total > 0 ? Math.round((perfectCount / diagnostics.total) * 100) : 0}%
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Grade Cards */}
             {(["A", "B", "C", "D"] as const).map((grade) => {
               const count = diagnostics.gradeDistribution[grade];
               const pct = diagnostics.total > 0 ? Math.round((count / diagnostics.total) * 100) : 0;
-              const icons: Record<string, any> = { A: Star, B: TrendingUp, C: AlertTriangle, D: XCircle };
+              const icons: Record<string, any> = { A: Star, B: TrendingUp, C: AlertTriangle, D: TrendingDown };
               const colors: Record<string, string> = {
                 A: "text-green-600 bg-green-100",
                 B: "text-blue-600 bg-blue-100",
@@ -632,7 +777,7 @@ export default function ShopeeOptimizer() {
                         <Progress value={issue.percent} className="h-1.5 mt-1" />
                       </div>
                       <Badge variant="secondary" className="shrink-0">
-                        {issue.count} produtos ({issue.percent}%)
+                        {issue.count} ({issue.percent}%)
                       </Badge>
                     </div>
                   ))}
@@ -642,7 +787,7 @@ export default function ShopeeOptimizer() {
           )}
 
           {/* Filters */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -665,8 +810,22 @@ export default function ShopeeOptimizer() {
                 <SelectItem value="F">Nota F</SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-sm text-muted-foreground">
-              {filteredProducts.length} de {diagnostics.total} produtos
+            <Select value={filterProblem} onValueChange={setFilterProblem}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Filtrar por problema" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os produtos</SelectItem>
+                <SelectItem value="vídeo">Sem vídeo</SelectItem>
+                <SelectItem value="título">Título curto/longo</SelectItem>
+                <SelectItem value="descrição">Descrição curta</SelectItem>
+                <SelectItem value="imagens">Poucas imagens</SelectItem>
+                <SelectItem value="atributos">Atributos incompletos</SelectItem>
+                <SelectItem value="dimensões">Dimensões faltando</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
+              {filteredProducts.length} de {diagnostics.total}
             </span>
           </div>
 
@@ -676,10 +835,22 @@ export default function ShopeeOptimizer() {
               <Card
                 key={product.productId}
                 className="cursor-pointer hover:shadow-md transition-all"
-                onClick={() => setSelectedProductId(product.productId)}
               >
                 <CardContent className="py-3">
                   <div className="flex items-center gap-4">
+                    <Checkbox
+                      checked={selectedProducts.has(product.productId)}
+                      onCheckedChange={(checked) => {
+                        const newSelected = new Set(selectedProducts);
+                        if (checked) {
+                          newSelected.add(product.productId);
+                        } else {
+                          newSelected.delete(product.productId);
+                        }
+                        setSelectedProducts(newSelected);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
                     {product.imageUrl ? (
                       <img src={product.imageUrl} alt={product.itemName} className="h-14 w-14 rounded-lg object-cover border" />
                     ) : (
@@ -687,7 +858,10 @@ export default function ShopeeOptimizer() {
                         <Package className="h-6 w-6 text-muted-foreground" />
                       </div>
                     )}
-                    <div className="flex-1 min-w-0">
+                    <div
+                      className="flex-1 min-w-0 cursor-pointer"
+                      onClick={() => setSelectedProductId(product.productId)}
+                    >
                       <p className="font-medium truncate">{product.itemName}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-muted-foreground">R$ {product.price}</span>
@@ -726,7 +900,7 @@ export default function ShopeeOptimizer() {
             <Card>
               <CardContent className="py-12 text-center">
                 <p className="text-muted-foreground">
-                  {searchQuery || filterGrade !== "all"
+                  {searchQuery || filterGrade !== "all" || filterProblem !== "all"
                     ? "Nenhum produto encontrado com os filtros selecionados."
                     : "Nenhum produto sincronizado. Sincronize os produtos na página de Contas Shopee."}
                 </p>
@@ -902,6 +1076,73 @@ export default function ShopeeOptimizer() {
                     </Card>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Checklist Dialog */}
+      <Dialog open={showChecklistDialog} onOpenChange={setShowChecklistDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ListChecks className="h-5 w-5 text-blue-500" />
+              Checklist para Anúncio Perfeito
+            </DialogTitle>
+            <DialogDescription>
+              Siga este checklist para atingir nota A (100/100)
+            </DialogDescription>
+          </DialogHeader>
+          {checklist && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                <span className="font-medium">{checklist.completedCount}/{checklist.totalCount} itens concluídos</span>
+                <span className={`text-lg font-bold ${scoreColor((checklist.completionPercent / 100) * 100)}`}>
+                  {checklist.completionPercent}%
+                </span>
+              </div>
+              <Progress value={checklist.completionPercent} className="h-2" />
+              <div className="space-y-2">
+                {checklist.items.map((item: any) => (
+                  <Card key={item.id}>
+                    <CardContent className="py-3">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                          {item.status === "done" ? (
+                            <CheckCircle2 className="h-5 w-5 text-green-600" />
+                          ) : item.status === "partial" ? (
+                            <AlertTriangle className="h-5 w-5 text-yellow-600" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-600" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm">{item.label}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {item.category}
+                            </Badge>
+                            <Badge className={
+                              item.impact === "critical" ? "bg-red-100 text-red-800" :
+                              item.impact === "high" ? "bg-orange-100 text-orange-800" :
+                              item.impact === "medium" ? "bg-yellow-100 text-yellow-800" :
+                              "bg-blue-100 text-blue-800"
+                            }>
+                              {item.impact}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mb-1">
+                            Atual: {item.currentValue} → Alvo: {item.targetValue}
+                          </p>
+                          {item.actionRequired !== "OK" && (
+                            <p className="text-xs text-blue-600 font-medium">{item.actionRequired}</p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             </div>
           )}
