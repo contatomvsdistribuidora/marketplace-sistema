@@ -46,6 +46,7 @@ const menuItems = [
   { icon: ShoppingBag, label: "Contas Shopee", path: "/shopee-accounts" },
   { icon: ShoppingBag, label: "Produtos Shopee", path: "/shopee-products" },
   { icon: FileSpreadsheet, label: "Planilha Shopee", path: "/shopee-spreadsheet" },
+  { icon: Send, label: "Publicar na Shopee", path: "/shopee-publish" },
   { icon: Clock, label: "Jobs Background", path: "/background-jobs" },
 ];
 

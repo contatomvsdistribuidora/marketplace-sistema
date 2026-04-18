@@ -15,6 +15,7 @@ import * as bgWorker from "./background-worker";
 import * as amazon from "./amazon";
 import * as shopee from "./shopee";
 import * as shopeeExport from "./shopee-export";
+import * as shopeePublish from "./shopee-publish";
 
 export const appRouter = router({
   system: systemRouter,
@@ -1754,6 +1755,125 @@ export const appRouter = router({
         );
 
         return result;
+      }),
+    // Get Shopee categories for product creation
+    getCategories: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .query(async ({ input }) => {
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+        return shopeePublish.getCategories(accessToken, shopId);
+      }),
+
+    // Get attributes for a category
+    getCategoryAttributes: protectedProcedure
+      .input(z.object({ accountId: z.number(), categoryId: z.number() }))
+      .query(async ({ input }) => {
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+        return shopeePublish.getCategoryAttributes(accessToken, shopId, input.categoryId);
+      }),
+
+    // Get logistics channels
+    getLogisticsChannels: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .query(async ({ input }) => {
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+        return shopeePublish.getLogisticsChannels(accessToken, shopId);
+      }),
+
+    // Publish products directly to Shopee
+    publishProducts: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        inventoryId: z.number(),
+        productIds: z.array(z.number()),
+        categoryId: z.number(),
+        logisticIds: z.array(z.number()).optional(),
+        createKits: z.boolean().optional(),
+        kitQuantities: z.array(z.number()).optional(),
+        kitDiscounts: z.array(z.number()).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+
+        // Get logistics channels if not provided
+        let logisticIds = input.logisticIds || [];
+        if (logisticIds.length === 0) {
+          try {
+            const channels = await shopeePublish.getLogisticsChannels(accessToken, shopId);
+            logisticIds = channels
+              .filter((c: any) => c.enabled)
+              .map((c: any) => c.logistics_channel_id)
+              .slice(0, 5);
+          } catch (e) {
+            console.warn("[Shopee] Could not get logistics channels:", e);
+          }
+        }
+
+        // Get product details from BaseLinker
+        const productsData = await baselinker.getInventoryProductsData(
+          token,
+          input.inventoryId,
+          input.productIds
+        );
+
+        // Convert to publish format
+        const productsToPublish: shopeePublish.ProductToPublish[] = Object.entries(productsData).map(
+          ([id, p]: [string, any]) => {
+            const images: string[] = [];
+            if (p.images) {
+              Object.values(p.images).forEach((url: any) => {
+                if (url && typeof url === "string") images.push(url);
+              });
+            }
+            if (images.length === 0 && p.image_url) {
+              images.push(p.image_url);
+            }
+
+            return {
+              name: p.text_fields?.name || p.name || "",
+              description: p.text_fields?.description || p.description || "Produto importado do BaseLinker",
+              sku: p.sku || id,
+              ean: p.ean || "",
+              price: parseFloat(p.prices?.["0"] || p.price_brutto || "0"),
+              stock: Object.values(p.stock || {}).reduce((sum: number, v: any) => sum + (parseInt(v) || 0), 0),
+              weight: parseFloat(p.weight || "0.1") || 0.1,
+              imageUrls: images,
+              categoryId: input.categoryId,
+              brand: p.text_fields?.features?.Marca || "",
+              length: parseFloat(p.length || "0") || undefined,
+              width: parseFloat(p.width || "0") || undefined,
+              height: parseFloat(p.height || "0") || undefined,
+              createKits: input.createKits,
+              kitQuantities: input.kitQuantities,
+              kitDiscounts: input.kitDiscounts,
+              logisticIds,
+            };
+          }
+        );
+
+        if (productsToPublish.length === 0) {
+          throw new Error("Nenhum produto encontrado para publicar");
+        }
+
+        // Publish in batch
+        const results = await shopeePublish.batchPublish(
+          accessToken,
+          shopId,
+          productsToPublish
+        );
+
+        const successCount = results.filter((r) => r.success).length;
+        const failCount = results.filter((r) => !r.success).length;
+
+        return {
+          total: results.length,
+          success: successCount,
+          failed: failCount,
+          results,
+        };
       }),
   }),
 });

@@ -231,3 +231,10 @@
 - [x] Frontend: botão de exportação na página de produtos com seleção de produtos
 - [x] Criar variações automáticas (Kit 2, Kit 3, Kit 4) na planilha exportada
 - [x] Preencher campos obrigatórios (nome, descrição, preço, peso, estoque, imagens)
+- [x] Atualizar credenciais Shopee para Live (Partner ID: 2030365)
+- [x] Refatorar módulo Shopee para usar endpoint de produção (partner.shopeemobile.com)
+- [x] Implementar OAuth flow Live para conectar lojas reais
+- [x] Implementar publicação direta de produtos na Shopee via API (v2.product.add_item)
+- [x] Upload de imagens para Shopee via API (v2.mediaSpace.upload_image)
+- [x] Criar variações de produto (Kit 2, Kit 3, Kit 4) via API
+- [x] Frontend: página de publicação direta na Shopee com seleção de produtos e configurações
