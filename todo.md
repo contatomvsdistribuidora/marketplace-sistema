@@ -238,3 +238,4 @@
 - [x] Upload de imagens para Shopee via API (v2.mediaSpace.upload_image)
 - [x] Criar variações de produto (Kit 2, Kit 3, Kit 4) via API
 - [x] Frontend: página de publicação direta na Shopee com seleção de produtos e configurações
+- [x] Reorganizar sidebar: agrupar itens por marketplace com seções colapsáveis (Geral, Mercado Livre, TikTok, Amazon, Shopee, Sistema)
