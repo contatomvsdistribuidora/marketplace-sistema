@@ -27,6 +27,7 @@ import ShopeeAccounts from "./pages/ShopeeAccounts";
 import ShopeeProducts from "./pages/ShopeeProducts";
 import ShopeeSpreadsheet from "./pages/ShopeeSpreadsheet";
 import ShopeePublish from "./pages/ShopeePublish";
+import ShopeeOptimizer from "./pages/ShopeeOptimizer";
 
 function DashboardRouter() {
   return (
@@ -52,6 +53,7 @@ function DashboardRouter() {
         <Route path="/shopee-products" component={ShopeeProducts} />
         <Route path="/shopee-spreadsheet" component={ShopeeSpreadsheet} />
         <Route path="/shopee-publish" component={ShopeePublish} />
+        <Route path="/shopee-optimizer" component={ShopeeOptimizer} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

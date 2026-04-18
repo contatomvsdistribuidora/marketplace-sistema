@@ -240,3 +240,13 @@
 - [x] Frontend: página de publicação direta na Shopee com seleção de produtos e configurações
 - [x] Reorganizar sidebar: agrupar itens por marketplace com seções colapsáveis (Geral, Mercado Livre, TikTok, Amazon, Shopee, Sistema)
 - [x] BUG: Shopee OAuth retorna "Wrong sign" - CORRIGIDO: endpoint atualizado para partner.shopeemobile.com, credenciais Live (Partner ID 2030365, Live Key) aplicadas em shopee.ts e testes
+- [x] BUG: Shopee OAuth redirect URL usa domínio de dev (3000-io3d58o9rzo40ecgvtfnp...) ao invés do domínio de produção (blmarketexp-nqnujejx.manus.space) - CORRIGIDO: hardcoded production domain
+- [x] Sistema de Otimização de Qualidade Shopee - Diagnóstico de Conteúdo completo
+- [x] Pesquisar critérios do Diagnóstico de Conteúdo da Shopee e fatores de ranking
+- [x] Otimização de títulos com IA (SEO Shopee, palavras-chave, formato ideal)
+- [x] Otimização de descrições com IA (rich text, bullet points, keywords)
+- [x] Análise e otimização de imagens (mínimo 5 fotos, resolução, fundo branco)
+- [x] Preenchimento completo de atributos obrigatórios e opcionais
+- [x] Verificação e sugestão de vídeo do produto
+- [x] Dashboard de qualidade com score por produto e ações de melhoria
+- [x] Otimização em lote (aplicar melhorias para múltiplos produtos de uma vez) - diagnóstico em batch implementado

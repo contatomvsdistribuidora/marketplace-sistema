@@ -50,6 +50,7 @@ import {
   FileSpreadsheet,
   ChevronRight,
   Gauge,
+  Sparkles,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -103,6 +104,7 @@ const menuGroups: MenuGroup[] = [
       { icon: Package, label: "Produtos", path: "/shopee-products" },
       { icon: Send, label: "Publicar", path: "/shopee-publish" },
       { icon: FileSpreadsheet, label: "Planilha", path: "/shopee-spreadsheet" },
+      { icon: Sparkles, label: "Otimizar IA", path: "/shopee-optimizer" },
     ],
   },
   {

@@ -45,8 +45,10 @@ export default function ShopeeAccounts() {
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   const { data: accounts, isLoading, refetch } = trpc.shopee.getAccounts.useQuery();
+  // Use production domain for OAuth redirect (Shopee requires matching domain registered in console)
+  const productionDomain = "https://blmarketexp-nqnujejx.manus.space";
   const { data: authUrlData } = trpc.shopee.getAuthUrl.useQuery({
-    redirectUrl: `${window.location.origin}/api/shopee/callback`,
+    redirectUrl: `${productionDomain}/api/shopee/callback`,
   });
   const deactivateMutation = trpc.shopee.deactivateAccount.useMutation();
   const syncMutation = trpc.shopee.syncProducts.useMutation();

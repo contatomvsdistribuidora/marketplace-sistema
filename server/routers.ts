@@ -16,6 +16,7 @@ import * as amazon from "./amazon";
 import * as shopee from "./shopee";
 import * as shopeeExport from "./shopee-export";
 import * as shopeePublish from "./shopee-publish";
+import * as shopeeOptimizer from "./shopee-optimizer";
 
 export const appRouter = router({
   system: systemRouter,
@@ -1874,6 +1875,80 @@ export const appRouter = router({
           failed: failCount,
           results,
         };
+      }),
+
+    // ========== QUALITY OPTIMIZER ==========
+
+    // Get batch diagnostics for all products of an account
+    getBatchDiagnostics: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .query(async ({ input }) => {
+        return shopeeOptimizer.getBatchDiagnostics(input.accountId);
+      }),
+
+    // Get quality diagnostic for a single product
+    getProductDiagnostic: protectedProcedure
+      .input(z.object({ productId: z.number() }))
+      .query(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        const diagnostic = shopeeOptimizer.calculateQualityScore(product);
+        // Update score in DB
+        await shopeeOptimizer.updateProductQualityScore(product.id, diagnostic.overallScore, diagnostic.grade);
+        return { product, diagnostic };
+      }),
+
+    // AI optimize title
+    optimizeTitle: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        return shopeeOptimizer.optimizeTitle(
+          product.itemName || "",
+          product.description || "",
+          product.categoryName || undefined
+        );
+      }),
+
+    // AI optimize description
+    optimizeDescription: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        return shopeeOptimizer.optimizeDescription(
+          product.itemName || "",
+          product.description || "",
+          product.categoryName || undefined
+        );
+      }),
+
+    // AI get optimization suggestions
+    getOptimizationSuggestions: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        return shopeeOptimizer.getOptimizationSuggestions(product);
       }),
   }),
 });
