@@ -2,9 +2,9 @@
  * Shopee Open Platform API Integration Module
  * Direct integration with Shopee API for OAuth, product management, and marketing.
  *
- * API Base (Brazil): https://openplatform.shopee.com.br
- * Sandbox: https://openplatform.sandbox.test-stable.shopee.sg
- * Partner ID: 1219908 (Test)
+ * Live API Base: https://partner.shopeemobile.com
+ * Auth Base: https://partner.shopeemobile.com
+ * Live Partner ID: 2030365
  */
 
 import crypto from "crypto";
@@ -13,9 +13,9 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { shopeeAccounts, shopeeProducts } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
-// Use test/sandbox environment while in Developing status
-const SHOPEE_API_BASE = "https://openplatform.shopee.com.br";
-const SHOPEE_AUTH_BASE = "https://openplatform.shopee.com.br";
+// Live production endpoints
+const SHOPEE_API_BASE = "https://partner.shopeemobile.com";
+const SHOPEE_AUTH_BASE = "https://partner.shopeemobile.com";
 
 // ============ DATABASE HELPERS ============
 

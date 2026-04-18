@@ -239,3 +239,4 @@
 - [x] Criar variações de produto (Kit 2, Kit 3, Kit 4) via API
 - [x] Frontend: página de publicação direta na Shopee com seleção de produtos e configurações
 - [x] Reorganizar sidebar: agrupar itens por marketplace com seções colapsáveis (Geral, Mercado Livre, TikTok, Amazon, Shopee, Sistema)
+- [x] BUG: Shopee OAuth retorna "Wrong sign" - CORRIGIDO: endpoint atualizado para partner.shopeemobile.com, credenciais Live (Partner ID 2030365, Live Key) aplicadas em shopee.ts e testes

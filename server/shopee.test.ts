@@ -4,8 +4,8 @@ import crypto from "crypto";
 // Mock ENV before importing shopee module
 vi.mock("./_core/env", () => ({
   ENV: {
-    shopeePartnerId: "1219908",
-    shopeePartnerKey: "shpk4f796d4b6555686a6745634765556f794558516667616c6d777a73487171",
+    shopeePartnerId: "2030365",
+    shopeePartnerKey: "shpk6a6b436a7271784d7048465a487a474561757279456d4d4c4c5044425873",
   },
 }));
 
@@ -25,8 +25,8 @@ vi.mock("drizzle-orm/mysql2", () => ({
 describe("Shopee Integration", () => {
   describe("Signature Generation", () => {
     it("generates correct HMAC-SHA256 signature format", () => {
-      const partnerId = 1219908;
-      const partnerKey = "shpk4f796d4b6555686a6745634765556f794558516667616c6d777a73487171";
+      const partnerId = 2030365;
+      const partnerKey = "shpk6a6b436a7271784d7048465a487a474561757279456d4d4c4c5044425873";
       const path = "/api/v2/shop/auth_partner";
       const timestamp = 1710000000;
 
@@ -42,8 +42,8 @@ describe("Shopee Integration", () => {
     });
 
     it("includes access_token and shop_id in signature when provided", () => {
-      const partnerId = 1219908;
-      const partnerKey = "shpk4f796d4b6555686a6745634765556f794558516667616c6d777a73487171";
+      const partnerId = 2030365;
+      const partnerKey = "shpk6a6b436a7271784d7048465a487a474561757279456d4d4c4c5044425873";
       const path = "/api/v2/product/get_item_list";
       const timestamp = 1710000000;
       const accessToken = "test_access_token";
@@ -74,7 +74,7 @@ describe("Shopee Integration", () => {
       const url = getAuthorizationUrl(redirectUrl);
 
       expect(url).toContain("/api/v2/shop/auth_partner");
-      expect(url).toContain("partner_id=1219908");
+      expect(url).toContain("partner_id=2030365");
       expect(url).toContain("timestamp=");
       expect(url).toContain("sign=");
       expect(url).toContain(`redirect=${encodeURIComponent(redirectUrl)}`);
@@ -93,14 +93,14 @@ describe("Shopee Integration", () => {
 
   describe("Partner Credentials Validation", () => {
     it("has valid partner ID configured", () => {
-      const partnerId = "1219908";
+      const partnerId = "2030365";
       expect(partnerId).toBeTruthy();
       expect(parseInt(partnerId)).toBeGreaterThan(0);
-      expect(parseInt(partnerId)).toBe(1219908);
+      expect(parseInt(partnerId)).toBe(2030365);
     });
 
     it("has valid partner key configured", () => {
-      const partnerKey = "shpk4f796d4b6555686a6745634765556f794558516667616c6d777a73487171";
+      const partnerKey = "shpk6a6b436a7271784d7048465a487a474561757279456d4d4c4c5044425873";
       expect(partnerKey).toBeTruthy();
       expect(partnerKey.startsWith("shpk")).toBe(true);
       expect(partnerKey.length).toBeGreaterThan(20);
@@ -110,18 +110,18 @@ describe("Shopee Integration", () => {
   describe("Token Exchange Request Format", () => {
     it("constructs correct token exchange URL", () => {
       const path = "/api/v2/auth/token/get";
-      const partnerId = 1219908;
+      const partnerId = 2030365;
       const timestamp = Math.floor(Date.now() / 1000);
-      const partnerKey = "shpk4f796d4b6555686a6745634765556f794558516667616c6d777a73487171";
+      const partnerKey = "shpk6a6b436a7271784d7048465a487a474561757279456d4d4c4c5044425873";
 
       const sign = crypto
         .createHmac("sha256", partnerKey)
         .update(`${partnerId}${path}${timestamp}`)
         .digest("hex");
 
-      const url = `https://openplatform.shopee.com.br${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}`;
+      const url = `https://partner.shopeemobile.com${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}`;
 
-      expect(url).toContain("openplatform.shopee.com.br");
+      expect(url).toContain("partner.shopeemobile.com");
       expect(url).toContain("/api/v2/auth/token/get");
       expect(url).toContain(`partner_id=${partnerId}`);
     });
@@ -129,7 +129,7 @@ describe("Shopee Integration", () => {
     it("constructs correct token exchange body", () => {
       const code = "test_auth_code";
       const shopId = 123456;
-      const partnerId = 1219908;
+      const partnerId = 2030365;
 
       const body = {
         code,
@@ -139,14 +139,14 @@ describe("Shopee Integration", () => {
 
       expect(body.code).toBe("test_auth_code");
       expect(body.shop_id).toBe(123456);
-      expect(body.partner_id).toBe(1219908);
+      expect(body.partner_id).toBe(2030365);
     });
   });
 
   describe("API URL Construction", () => {
     it("builds signed URL for product list API", () => {
-      const partnerId = 1219908;
-      const partnerKey = "shpk4f796d4b6555686a6745634765556f794558516667616c6d777a73487171";
+      const partnerId = 2030365;
+      const partnerKey = "shpk6a6b436a7271784d7048465a487a474561757279456d4d4c4c5044425873";
       const path = "/api/v2/product/get_item_list";
       const timestamp = Math.floor(Date.now() / 1000);
       const accessToken = "test_token";
@@ -166,7 +166,7 @@ describe("Shopee Integration", () => {
         item_status: "NORMAL",
       });
 
-      const url = `https://openplatform.shopee.com.br${path}?${params.toString()}`;
+      const url = `https://partner.shopeemobile.com${path}?${params.toString()}`;
 
       expect(url).toContain("get_item_list");
       expect(url).toContain("offset=0");
@@ -181,7 +181,7 @@ describe("Shopee Integration", () => {
       const path = "/api/v2/product/get_item_base_info";
 
       const params = new URLSearchParams({
-        partner_id: "1219908",
+        partner_id: "2030365",
         timestamp: Math.floor(Date.now() / 1000).toString(),
         sign: "test_sign",
         access_token: "test_token",
@@ -189,7 +189,7 @@ describe("Shopee Integration", () => {
         item_id_list: itemIds.join(","),
       });
 
-      const url = `https://openplatform.shopee.com.br${path}?${params.toString()}`;
+      const url = `https://partner.shopeemobile.com${path}?${params.toString()}`;
 
       expect(url).toContain("get_item_base_info");
       expect(url).toContain("item_id_list=1001%2C1002%2C1003%2C1004%2C1005");
