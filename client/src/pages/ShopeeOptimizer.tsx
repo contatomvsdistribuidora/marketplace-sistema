@@ -182,10 +182,14 @@ export default function ShopeeOptimizer() {
 
   const handleGetSuggestions = async (productId: number) => {
     try {
+      console.log("[ShopeeOptimizer] Fetching suggestions for product:", productId);
       const result = await getSuggestionsMutation.mutateAsync({ productId });
+      console.log("[ShopeeOptimizer] Suggestions result:", result);
       setSuggestions(result);
       setShowSuggestionsDialog(true);
+      console.log("[ShopeeOptimizer] Dialog should be visible now");
     } catch (error: any) {
+      console.error("[ShopeeOptimizer] Error getting suggestions:", error);
       toast.error(`Erro ao gerar sugestões: ${error.message}`);
     }
   };
@@ -531,7 +535,10 @@ export default function ShopeeOptimizer() {
 
             {/* Suggestions Button */}
             <Button
-              onClick={() => handleGetSuggestions(product.id)}
+              onClick={() => {
+                console.log("[DEBUG] Button clicked!");
+                handleGetSuggestions(product.id);
+              }}
               disabled={getSuggestionsMutation.isPending}
               className="w-full gap-2"
             >

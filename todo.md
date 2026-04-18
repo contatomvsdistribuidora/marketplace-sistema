@@ -257,3 +257,4 @@
 - [x] Plano de ação priorizado por produto (o que fazer primeiro para melhorar ranking) - IMPLEMENTADO: sugestões com prioridade e impacto
 - [x] Indicador visual de progresso: quantos produtos "perfeitos" vs "precisam atenção" - IMPLEMENTADO: card com contagem de produtos A (perfeitos) e % de progresso
 - [x] Seleção múltipla de produtos para otimização em lote - IMPLEMENTADO: checkboxes em cada produto + contador de selecionados
+- [ ] BUG: Botão "Ver Sugestões de Otimização" não abre o dialog - investigar se a mutação está sendo chamada corretamente
