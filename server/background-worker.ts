@@ -20,8 +20,13 @@ let isRunning = false;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 function getDbInstance() {
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
-  return drizzle(process.env.DATABASE_URL);
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL not configured");
+  try {
+    return drizzle(url);
+  } catch (error: any) {
+    throw new Error(`DATABASE_URL inválida ("${url.slice(0, 30)}..."): ${error.message}`);
+  }
 }
 
 // ============ JOB MANAGEMENT ============
@@ -678,7 +683,13 @@ const TOKEN_REFRESH_INTERVAL = 60 * 60 * 1000; // every hour
 const TOKEN_REFRESH_BUFFER_MS = 30 * 60 * 1000; // refresh if expiring within 30 min
 
 async function refreshExpiringShopeeTokens() {
-  const db = getDbInstance();
+  let db;
+  try {
+    db = getDbInstance();
+  } catch (error: any) {
+    console.warn("[BG Worker] Shopee token refresh skipped:", error.message);
+    return;
+  }
   const threshold = new Date(Date.now() + TOKEN_REFRESH_BUFFER_MS);
   try {
     const expiring = await db
