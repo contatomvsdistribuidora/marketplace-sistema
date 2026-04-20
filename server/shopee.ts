@@ -149,7 +149,8 @@ export async function exchangeCodeForToken(code: string, shopId: number) {
   return {
     accessToken: data.access_token as string,
     refreshToken: data.refresh_token as string,
-    expiresIn: data.expire_in as number, // seconds (usually 14400 = 4 hours)
+    expiresIn: data.expire_in as number,           // access token lifetime (~4h)
+    refreshTokenExpiresIn: (data.refresh_token_expire_in as number) || 2592000, // ~30 days
     shopId: shopId,
   };
 }
@@ -190,15 +191,25 @@ export async function refreshAccessToken(refreshToken: string, shopId: number) {
     accessToken: data.access_token as string,
     refreshToken: data.refresh_token as string,
     expiresIn: data.expire_in as number,
+    refreshTokenExpiresIn: (data.refresh_token_expire_in as number) || 2592000,
   };
 }
 
 // ============ TOKEN MANAGEMENT ============
 
+// Per-account lock to prevent concurrent token refreshes (avoids Shopee rotating the
+// refresh token while a second request is still trying to use the old one).
+const refreshLocks = new Map<number, Promise<void>>();
+
 /**
  * Get a valid access token for a Shopee account, refreshing if expired.
+ * Thread-safe: concurrent calls for the same account share one refresh promise.
  */
 export async function getValidToken(accountId: number): Promise<{ accessToken: string; shopId: number }> {
+  // Wait if another caller is already refreshing this account
+  const existing = refreshLocks.get(accountId);
+  if (existing) await existing;
+
   const db = getDb();
   const [account] = await db
     .select()
@@ -208,29 +219,55 @@ export async function getValidToken(accountId: number): Promise<{ accessToken: s
 
   if (!account) throw new Error("Shopee account not found");
   if (!account.isActive) throw new Error("Shopee account is inactive");
+  if (account.tokenStatus === "needs_reauth") {
+    throw new Error("Shopee account needs re-authorization. Please reconnect.");
+  }
 
   const now = new Date();
   const expiresAt = new Date(account.tokenExpiresAt);
   const bufferMs = 5 * 60 * 1000; // 5 min buffer
 
   if (now.getTime() + bufferMs < expiresAt.getTime()) {
-    // Token still valid
     return { accessToken: account.accessToken, shopId: account.shopId };
   }
 
-  // Token expired or about to expire, refresh it
+  // Token expired or about to expire — acquire lock and refresh
   console.log(`[Shopee] Refreshing token for shop ${account.shopId}...`);
-  const refreshed = await refreshAccessToken(account.refreshToken, account.shopId);
+  let resolveLock!: () => void;
+  const lockPromise = new Promise<void>(r => { resolveLock = r; });
+  refreshLocks.set(accountId, lockPromise);
 
-  // Update in database
-  await db
-    .update(shopeeAccounts)
-    .set({
-      accessToken: refreshed.accessToken,
-      refreshToken: refreshed.refreshToken,
-      tokenExpiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-    })
-    .where(eq(shopeeAccounts.id, accountId));
+  try {
+    const refreshed = await refreshAccessToken(account.refreshToken, account.shopId);
+    const newExpiresAt = new Date(Date.now() + refreshed.expiresIn * 1000);
+    const newRefreshExpiresAt = new Date(Date.now() + refreshed.refreshTokenExpiresIn * 1000);
+
+    await db
+      .update(shopeeAccounts)
+      .set({
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        tokenExpiresAt: newExpiresAt,
+        refreshTokenExpiresAt: newRefreshExpiresAt,
+        tokenStatus: "active",
+        lastUsedAt: new Date(),
+      })
+      .where(eq(shopeeAccounts.id, accountId));
+
+    console.log(`[Shopee] Token refreshed for shop ${account.shopId}, expires ${newExpiresAt.toISOString()}`);
+    return { accessToken: refreshed.accessToken, shopId: account.shopId };
+  } catch (err: any) {
+    console.error(`[Shopee] Token refresh failed for account ${accountId}:`, err.message);
+    // Mark as needing re-authorization so the frontend can show the right state
+    await db
+      .update(shopeeAccounts)
+      .set({ tokenStatus: "needs_reauth" })
+      .where(eq(shopeeAccounts.id, accountId));
+    throw err;
+  } finally {
+    resolveLock();
+    refreshLocks.delete(accountId);
+  }
 
   return { accessToken: refreshed.accessToken, shopId: account.shopId };
 }
@@ -359,6 +396,41 @@ export async function getItemExtraInfo(
   return data.response?.item_list || [];
 }
 
+/**
+ * Update one or more fields of an item via Shopee API (update_item).
+ * Pass only the fields you want to change alongside item_id.
+ */
+export async function updateItemFields(
+  accessToken: string,
+  shopId: number,
+  itemId: number,
+  fields: { name?: string; description?: string }
+): Promise<void> {
+  const path = "/api/v2/product/update_item";
+  const url = buildSignedUrl(path, {}, accessToken, shopId);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_id: itemId, ...fields }),
+  });
+
+  const data = await response.json();
+  if (!response.ok || (data.error && data.error !== "")) {
+    throw new Error(`Shopee update_item failed: ${data.error || response.status} - ${data.message || response.statusText}`);
+  }
+}
+
+/** Convenience wrapper — update title only. */
+export async function updateItemName(
+  accessToken: string,
+  shopId: number,
+  itemId: number,
+  name: string
+): Promise<void> {
+  return updateItemFields(accessToken, shopId, itemId, { name });
+}
+
 // ============ ACCOUNT MANAGEMENT ============
 
 /**
@@ -370,12 +442,15 @@ export async function saveAccount(
   accessToken: string,
   refreshToken: string,
   expiresIn: number,
-  shopName?: string
+  shopName?: string,
+  refreshTokenExpiresIn?: number
 ) {
   const db = getDb();
   const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
+  const refreshTokenExpiresAt = new Date(
+    Date.now() + (refreshTokenExpiresIn ?? 2592000) * 1000
+  );
 
-  // Check if account already exists
   const [existing] = await db
     .select()
     .from(shopeeAccounts)
@@ -383,20 +458,20 @@ export async function saveAccount(
     .limit(1);
 
   if (existing) {
-    // Update existing account
     await db
       .update(shopeeAccounts)
       .set({
         accessToken,
         refreshToken,
         tokenExpiresAt,
+        refreshTokenExpiresAt,
+        tokenStatus: "active",
         shopName: shopName || existing.shopName,
         isActive: 1,
       })
       .where(eq(shopeeAccounts.id, existing.id));
     return existing.id;
   } else {
-    // Insert new account
     const [result] = await db.insert(shopeeAccounts).values({
       userId,
       shopId,
@@ -404,6 +479,8 @@ export async function saveAccount(
       accessToken,
       refreshToken,
       tokenExpiresAt,
+      refreshTokenExpiresAt,
+      tokenStatus: "active",
       region: "BR",
       isActive: 1,
     });
@@ -425,6 +502,9 @@ export async function getAccounts(userId: number) {
       shopStatus: shopeeAccounts.shopStatus,
       totalProducts: shopeeAccounts.totalProducts,
       isActive: shopeeAccounts.isActive,
+      tokenStatus: shopeeAccounts.tokenStatus,
+      tokenExpiresAt: shopeeAccounts.tokenExpiresAt,
+      refreshTokenExpiresAt: shopeeAccounts.refreshTokenExpiresAt,
       lastSyncAt: shopeeAccounts.lastSyncAt,
       createdAt: shopeeAccounts.createdAt,
     })
@@ -446,60 +526,105 @@ export async function deactivateAccount(userId: number, accountId: number) {
 
 // ============ PRODUCT SYNC ============
 
+// ─── INTERNAL: collect item IDs across all statuses ──────────────────────────
+
+async function _collectIds(
+  accessToken: string,
+  shopId: number
+): Promise<{ itemIds: number[]; byStatus: Record<string, number> }> {
+  const ALL_STATUSES = ["NORMAL", "UNLIST", "BANNED"] as const;
+  const PAGE_SIZE = 100;
+  const DELAY_MS = 300;
+
+  const allIds = new Set<number>();
+  const byStatus: Record<string, number> = {};
+
+  for (const status of ALL_STATUSES) {
+    let offset = 0;
+    let page = 0;
+    let statusCount = 0;
+    while (true) {
+      page++;
+      const result = await getItemList(accessToken, shopId, offset, PAGE_SIZE, status);
+      const items = result.items || [];
+
+      console.log(
+        `[Shopee] ${status} page ${page} offset ${offset}: ${items.length} items` +
+        ` (total=${result.totalCount}, has_next=${result.hasNextPage}, next_offset=${result.nextOffset})`
+      );
+
+      if (items.length === 0) break;
+      items.forEach((i) => allIds.add(i.item_id));
+      statusCount += items.length;
+      if (!result.hasNextPage) break;
+      offset = result.nextOffset > 0 ? result.nextOffset : offset + PAGE_SIZE;
+      await new Promise((r) => setTimeout(r, DELAY_MS));
+    }
+    if (statusCount > 0) byStatus[status] = statusCount;
+  }
+
+  return { itemIds: Array.from(allIds), byStatus };
+}
+
+// ─── PUBLIC BUILDING BLOCKS (used by background worker for checkpointed sync) ─
+
 /**
- * Sync all products from a Shopee shop to local database.
- * Returns the count of synced products.
+ * Collect all item IDs using an existing access token.
+ * Call getValidToken once before this — avoids redundant token fetches.
  */
-export async function syncProducts(
+export async function collectAllItemIds(
+  accessToken: string,
+  shopId: number
+): Promise<{ itemIds: number[]; byStatus: Record<string, number> }> {
+  return _collectIds(accessToken, shopId);
+}
+
+/**
+ * Count all item IDs across NORMAL/UNLIST/BANNED (no product details, fast).
+ */
+export async function countShopeeItems(
+  accountId: number
+): Promise<{ total: number; byStatus: Record<string, number> }> {
+  const { accessToken, shopId } = await getValidToken(accountId);
+  const { itemIds, byStatus } = await _collectIds(accessToken, shopId);
+  return { total: itemIds.length, byStatus };
+}
+
+/**
+ * Upsert a single batch (max 50) of items into the local DB.
+ * Returns per-batch add/update/error counts.
+ */
+export async function upsertItemBatch(
+  accessToken: string,
+  shopId: number,
   userId: number,
   accountId: number,
-  onProgress?: (current: number, total: number) => void
-): Promise<{ synced: number; total: number }> {
-  const { accessToken, shopId } = await getValidToken(accountId);
+  itemIds: number[]
+): Promise<{ added: number; updated: number; errors: Array<{ itemId: number; error: string }> }> {
   const db = getDb();
+  let added = 0;
+  let updated = 0;
+  const errors: Array<{ itemId: number; error: string }> = [];
 
-  let allItemIds: number[] = [];
-  let offset = 0;
-  let hasMore = true;
-
-  // Step 1: Get all item IDs
-  while (hasMore) {
-    const result = await getItemList(accessToken, shopId, offset, 100, "NORMAL");
-    allItemIds.push(...result.items.map((i) => i.item_id));
-    hasMore = result.hasNextPage;
-    offset = result.nextOffset;
+  let items: any[] = [];
+  try {
+    items = await getItemBaseInfo(accessToken, shopId, itemIds);
+  } catch (e: any) {
+    console.warn(`[Shopee] getItemBaseInfo failed:`, e.message);
+    itemIds.forEach((id) => errors.push({ itemId: id, error: `getItemBaseInfo: ${e.message}` }));
+    return { added, updated, errors };
   }
 
-  // Also get UNLIST items
-  offset = 0;
-  hasMore = true;
-  while (hasMore) {
-    const result = await getItemList(accessToken, shopId, offset, 100, "UNLIST");
-    allItemIds.push(...result.items.map((i) => i.item_id));
-    hasMore = result.hasNextPage;
-    offset = result.nextOffset;
+  let extraInfoMap: Record<number, any> = {};
+  try {
+    const extraItems = await getItemExtraInfo(accessToken, shopId, itemIds);
+    for (const ei of extraItems) extraInfoMap[ei.item_id] = ei;
+  } catch (e) {
+    console.warn("[Shopee] Failed to get extra info for batch:", e);
   }
 
-  const totalItems = allItemIds.length;
-  let synced = 0;
-
-  // Step 2: Get base info in batches of 50
-  for (let i = 0; i < allItemIds.length; i += 50) {
-    const batch = allItemIds.slice(i, i + 50);
-    const items = await getItemBaseInfo(accessToken, shopId, batch);
-
-    // Get extra info for this batch
-    let extraInfoMap: Record<number, any> = {};
+  for (const item of items) {
     try {
-      const extraItems = await getItemExtraInfo(accessToken, shopId, batch);
-      for (const ei of extraItems) {
-        extraInfoMap[ei.item_id] = ei;
-      }
-    } catch (e) {
-      console.warn("[Shopee] Failed to get extra info for batch:", e);
-    }
-
-    for (const item of items) {
       const extra = extraInfoMap[item.item_id] || {};
       const mainImage = item.image?.image_url_list?.[0] || "";
       const allImages = item.image?.image_url_list || [];
@@ -508,19 +633,13 @@ export async function syncProducts(
       const attrs = item.attribute_list || [];
       const filledAttrs = attrs.filter((a: any) => a.attribute_value_list?.length > 0).length;
 
-      // Upsert product
       const [existing] = await db
-        .select()
+        .select({ id: shopeeProducts.id })
         .from(shopeeProducts)
-        .where(
-          and(
-            eq(shopeeProducts.shopeeAccountId, accountId),
-            eq(shopeeProducts.itemId, item.item_id)
-          )
-        )
+        .where(and(eq(shopeeProducts.shopeeAccountId, accountId), eq(shopeeProducts.itemId, item.item_id)))
         .limit(1);
 
-      const productData = {
+      const payload = {
         userId,
         shopeeAccountId: accountId,
         itemId: item.item_id,
@@ -548,34 +667,98 @@ export async function syncProducts(
       };
 
       if (existing) {
-        await db
-          .update(shopeeProducts)
-          .set(productData)
-          .where(eq(shopeeProducts.id, existing.id));
+        await db.update(shopeeProducts).set(payload).where(eq(shopeeProducts.id, existing.id));
+        updated++;
       } else {
-        await db.insert(shopeeProducts).values(productData);
+        await db.insert(shopeeProducts).values(payload);
+        added++;
       }
-
-      synced++;
-      if (onProgress) {
-        onProgress(synced, totalItems);
-      }
+    } catch (e: any) {
+      console.warn(`[Shopee] Failed to upsert item ${item.item_id}:`, e.message);
+      errors.push({ itemId: item.item_id, error: e.message });
     }
-
-    // Rate limiting: Shopee allows ~10 requests/second for shop-level APIs
-    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 
-  // Update account total products
+  return { added, updated, errors };
+}
+
+/**
+ * Delete local products whose IDs are no longer present in Shopee.
+ */
+export async function removeStaleProducts(
+  accountId: number,
+  liveIds: Set<number>
+): Promise<number> {
+  const db = getDb();
+  const local = await db
+    .select({ id: shopeeProducts.id, itemId: shopeeProducts.itemId })
+    .from(shopeeProducts)
+    .where(eq(shopeeProducts.shopeeAccountId, accountId));
+
+  let removed = 0;
+  for (const p of local) {
+    if (!liveIds.has(Number(p.itemId))) {
+      await db.delete(shopeeProducts).where(eq(shopeeProducts.id, p.id));
+      removed++;
+    }
+  }
+  return removed;
+}
+
+/**
+ * Update totalProducts + lastSyncAt on a Shopee account row.
+ */
+export async function updateAccountSyncMeta(
+  accountId: number,
+  totalProducts: number
+): Promise<void> {
+  const db = getDb();
   await db
     .update(shopeeAccounts)
-    .set({
-      totalProducts: totalItems,
-      lastSyncAt: new Date(),
-    })
+    .set({ totalProducts, lastSyncAt: new Date() })
     .where(eq(shopeeAccounts.id, accountId));
+}
 
-  return { synced, total: totalItems };
+// ─── FULL BLOCKING SYNC (used directly via tRPC for small shops) ──────────────
+
+/**
+ * Sync all products from a Shopee shop to local database (blocking).
+ */
+export async function syncProducts(
+  userId: number,
+  accountId: number,
+  onProgress?: (current: number, total: number, page?: number) => void
+): Promise<{ added: number; updated: number; removed: number; total: number; errors: Array<{ itemId: number; error: string }> }> {
+  const { accessToken, shopId } = await getValidToken(accountId);
+
+  const { itemIds: allItemIds } = await collectAllItemIds(accessToken, shopId);
+  const totalItems = allItemIds.length;
+  let added = 0;
+  let updated = 0;
+  let page = 0;
+  const errors: Array<{ itemId: number; error: string }> = [];
+
+  console.log(`[Shopee] Collected ${totalItems} item IDs. Starting upsert...`);
+
+  for (let i = 0; i < allItemIds.length; i += 50) {
+    page++;
+    const batch = allItemIds.slice(i, i + 50);
+    const result = await upsertItemBatch(accessToken, shopId, userId, accountId, batch);
+    added += result.added;
+    updated += result.updated;
+    errors.push(...result.errors);
+    if (onProgress) onProgress(added + updated, totalItems, page);
+    if (i + 50 < allItemIds.length) await new Promise((r) => setTimeout(r, 500));
+  }
+
+  const removed = await removeStaleProducts(accountId, new Set(allItemIds));
+  await updateAccountSyncMeta(accountId, totalItems);
+
+  console.log(
+    `[Shopee] Sync done — added: ${added}, updated: ${updated}, removed: ${removed}, ` +
+    `total: ${totalItems}, errors: ${errors.length}`
+  );
+  return { added, updated, removed, total: totalItems, errors };
 }
 
 /**

@@ -19,4 +19,9 @@ export const ENV = {
   // Shopee Open Platform
   shopeePartnerId: process.env.SHOPEE_PARTNER_ID ?? "",
   shopeePartnerKey: process.env.SHOPEE_PARTNER_KEY ?? "",
+  // Google Gemini API
+  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
+  geminiApiKey2: process.env.GEMINI_API_KEY_2 ?? "",
+  // Groq
+  groqApiKey: process.env.GROQ_API_KEY ?? "",
 };

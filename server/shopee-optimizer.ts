@@ -14,11 +14,29 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { shopeeProducts, shopeeAccounts } from "../drizzle/schema";
-import { invokeLLM } from "./_core/llm";
+import { invokeLLM, type InvokeResult } from "./_core/llm";
+import { getValidToken, updateItemFields } from "./shopee";
 
 function getDb() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
   return drizzle(process.env.DATABASE_URL);
+}
+
+function extractJsonFromResponse(response: InvokeResult): string {
+  const raw = response.choices[0]?.message?.content;
+  let text: string;
+  if (Array.isArray(raw)) {
+    text = raw
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("");
+  } else {
+    text = raw ?? "";
+  }
+  if (!text) throw new Error("AI response was empty");
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) return match[0];
+  return text;
 }
 
 // ============ QUALITY SCORE CALCULATION ============
@@ -241,37 +259,36 @@ export async function optimizeTitle(
   currentTitle: string,
   description: string,
   category?: string
-): Promise<{ optimizedTitle: string; keywords: string[]; explanation: string }> {
+): Promise<{ optimizedTitle: string; alternatives: string[]; keywords: string[]; explanation: string }> {
   const response = await invokeLLM({
     messages: [
       {
         role: "system",
-        content: `Você é um especialista em SEO para Shopee Brasil. Sua tarefa é otimizar títulos de produtos para maximizar o ranking na busca da Shopee.
+        content: `Você é especialista em SEO para Shopee Brasil. Gere títulos de produto otimizados para alta conversão e ranking de busca.
 
 REGRAS OBRIGATÓRIAS:
-1. Formato: [Marca] + [Tipo de Produto] + [Características Principais] + [Benefício/Diferencial]
-2. Comprimento: 80-120 caracteres (NUNCA menos de 60 ou mais de 140)
-3. Coloque as palavras-chave mais importantes nos primeiros 50 caracteres
-4. Use palavras de impacto: Premium, Original, Profissional, Kit, etc.
-5. NÃO repita palavras-chave (keyword stuffing)
-6. NÃO use caracteres especiais desnecessários
-7. Inclua variações de busca relevantes (ex: "Capa Case" ao invés de só "Capa")
-8. Mantenha o título em português brasileiro natural
+- Entre 70 e 100 caracteres (conte os caracteres, não palavras)
+- Formato: [Palavra-chave principal] + [Característica: material/tamanho/cor/quantidade] + [Benefício] + [Palavra de conversão]
+- Palavras-chave principais nos primeiros 40 caracteres
+- Inclua palavras de alta conversão quando relevante: Kit, Original, Premium, Promoção, Oferta, Profissional, Oficial, Brinde, Grátis, Novo
+- Sem caracteres especiais (!, @, #, *, /)
+- Sem repetição desnecessária de palavras
+- Português brasileiro natural
+- Exemplo de bom título: "Kit 10 Canetas Coloridas Profissional Ponta Fina Escolar Arte Premium"
 
-Responda APENAS em JSON com o formato:
-{
-  "optimizedTitle": "título otimizado aqui",
-  "keywords": ["palavra1", "palavra2", "palavra3"],
-  "explanation": "explicação breve das mudanças"
-}`
+Retorne JSON com:
+- optimizedTitle: o melhor título (70-100 chars)
+- alternatives: array com 3 títulos alternativos diferentes, cada um com abordagem distinta (70-100 chars cada)
+- keywords: palavras-chave principais usadas
+- explanation: explicação breve das escolhas`
       },
       {
         role: "user",
         content: `Título atual: "${currentTitle}"
-${description ? `Descrição do produto: "${description.substring(0, 500)}"` : ""}
+${description ? `Informações do produto: "${description.substring(0, 600)}"` : ""}
 ${category ? `Categoria: "${category}"` : ""}
 
-Otimize este título seguindo as regras de SEO da Shopee Brasil.`
+Gere o título otimizado e 3 alternativas seguindo as regras.`
       }
     ],
     response_format: {
@@ -282,22 +299,19 @@ Otimize este título seguindo as regras de SEO da Shopee Brasil.`
         schema: {
           type: "object",
           properties: {
-            optimizedTitle: { type: "string", description: "Título otimizado para SEO Shopee" },
-            keywords: { type: "array", items: { type: "string" }, description: "Palavras-chave principais" },
-            explanation: { type: "string", description: "Explicação das mudanças feitas" },
+            optimizedTitle: { type: "string" },
+            alternatives: { type: "array", items: { type: "string" } },
+            keywords: { type: "array", items: { type: "string" } },
+            explanation: { type: "string" },
           },
-          required: ["optimizedTitle", "keywords", "explanation"],
+          required: ["optimizedTitle", "alternatives", "keywords", "explanation"],
           additionalProperties: false,
         },
       },
     },
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content || typeof content !== "string") {
-    throw new Error("AI response was empty");
-  }
-  return JSON.parse(content);
+  return JSON.parse(extractJsonFromResponse(response));
 }
 
 /**
@@ -364,11 +378,7 @@ Crie uma descrição otimizada para este produto na Shopee Brasil.`
     },
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content || typeof content !== "string") {
-    throw new Error("AI response was empty");
-  }
-  return JSON.parse(content);
+  return JSON.parse(extractJsonFromResponse(response));
 }
 
 /**
@@ -458,11 +468,7 @@ Forneça recomendações priorizadas para melhorar o ranking deste produto na Sh
     },
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content || typeof content !== "string") {
-    throw new Error("AI response was empty");
-  }
-  return JSON.parse(content);
+  return JSON.parse(extractJsonFromResponse(response));
 }
 
 // ============ BATCH OPERATIONS ============
@@ -801,14 +807,12 @@ export async function batchOptimizeTitles(
   const db = getDb();
   const results: Array<{ productId: number; itemName: string; result?: any; error?: string }> = [];
 
-  // Fetch all products
   const products = [];
   for (const id of productIds) {
     const [p] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, id)).limit(1);
     if (p) products.push(p);
   }
 
-  // Process in chunks of 3
   const chunkSize = 3;
   for (let i = 0; i < products.length; i += chunkSize) {
     const chunk = products.slice(i, i + chunkSize);
@@ -819,6 +823,10 @@ export async function batchOptimizeTitles(
           p.description || "",
           p.categoryName || undefined
         );
+        // Save to DB and push to Shopee API
+        const { accessToken, shopId } = await getValidToken(p.shopeeAccountId);
+        await updateItemFields(accessToken, shopId, p.itemId, { name: result.optimizedTitle });
+        await db.update(shopeeProducts).set({ itemName: result.optimizedTitle }).where(eq(shopeeProducts.id, p.id));
         return { productId: p.id, itemName: p.itemName || "", result };
       })
     );
@@ -859,6 +867,10 @@ export async function batchOptimizeDescriptions(
           p.description || "",
           p.categoryName || undefined
         );
+        // Save to DB and push to Shopee API
+        const { accessToken, shopId } = await getValidToken(p.shopeeAccountId);
+        await updateItemFields(accessToken, shopId, p.itemId, { description: result.optimizedDescription });
+        await db.update(shopeeProducts).set({ description: result.optimizedDescription }).where(eq(shopeeProducts.id, p.id));
         return { productId: p.id, itemName: p.itemName || "", result };
       })
     );

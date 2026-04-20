@@ -16,6 +16,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Plus,
   Trash2,
   RefreshCw,
@@ -43,15 +51,85 @@ export default function ShopeeAccounts() {
   const [deleteAccountId, setDeleteAccountId] = useState<number | null>(null);
   const [syncingAccountId, setSyncingAccountId] = useState<number | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [syncReport, setSyncReport] = useState<{
+    accountId: number;
+    added: number;
+    updated: number;
+    removed: number;
+    total: number;
+    errors: Array<{ itemId: number; error: string }>;
+  } | null>(null);
+  const [syncJobId, setSyncJobId] = useState<number | null>(null);
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; page: number } | null>(null);
+  // Phase 1: counting products on Shopee before starting the job
+  const [countPhase, setCountPhase] = useState<{
+    counting: boolean;
+    total: number | null;
+    byStatus: Record<string, number> | null;
+  }>({ counting: false, total: null, byStatus: null });
+  const [showErrorLog, setShowErrorLog] = useState(false);
+  // Resume modal state
+  const [resumeModal, setResumeModal] = useState<{
+    accountId: number;
+    accountName: string;
+    jobId: number;
+    processedItems: number;
+    totalItems: number;
+    byStatus: Record<string, number>;
+  } | null>(null);
+  const [resumeModalLoading, setResumeModalLoading] = useState(false);
 
   const { data: accounts, isLoading, refetch } = trpc.shopee.getAccounts.useQuery();
-  // Use production domain for OAuth redirect (Shopee requires matching domain registered in console)
-  const productionDomain = "https://blmarketexp-nqnujejx.manus.space";
   const { data: authUrlData } = trpc.shopee.getAuthUrl.useQuery({
-    redirectUrl: `${productionDomain}/api/shopee/callback`,
+    redirectUrl: `${window.location.origin}/api/shopee/callback`,
   });
   const deactivateMutation = trpc.shopee.deactivateAccount.useMutation();
-  const syncMutation = trpc.shopee.syncProducts.useMutation();
+  const countItemsMutation = trpc.shopee.countItems.useMutation();
+  const getResumableSyncJobMutation = trpc.shopee.getResumableSyncJob.useMutation();
+  const resumeSyncJobMutation = trpc.shopee.resumeSyncJob.useMutation();
+  const startSyncJobMutation = trpc.shopee.startSyncJob.useMutation();
+
+  const { data: jobStatus } = trpc.shopee.getJobStatus.useQuery(
+    { jobId: syncJobId! },
+    { enabled: !!syncJobId, refetchInterval: syncJobId ? 2000 : false }
+  );
+
+  useEffect(() => {
+    if (!jobStatus) return;
+    if (jobStatus.status === "completed") {
+      const log = jobStatus.resultLog as any;
+      const total = log?.total ?? jobStatus.processedItems;
+      const errors: Array<{ itemId: number; error: string }> = log?.errors ?? [];
+      setSyncReport({
+        accountId: syncingAccountId!,
+        added: log?.added ?? 0,
+        updated: log?.updated ?? 0,
+        removed: log?.removed ?? 0,
+        total,
+        errors,
+      });
+      setSyncJobId(null);
+      setSyncingAccountId(null);
+      setSyncProgress(null);
+      setShowErrorLog(false);
+      refetch();
+      if (errors.length > 0) {
+        toast.warning(`✅ ${total} produtos importados com ${errors.length} erro(s).`);
+      } else {
+        toast.success(`✅ ${total.toLocaleString("pt-BR")} produtos importados com sucesso!`);
+      }
+    } else if (jobStatus.status === "failed") {
+      toast.error(`Erro na importação: ${jobStatus.lastError}`);
+      setSyncJobId(null);
+      setSyncingAccountId(null);
+      setSyncProgress(null);
+    } else if (jobStatus.status === "processing" || jobStatus.status === "queued") {
+      if (jobStatus.totalItems > 0 || jobStatus.processedItems > 0) {
+        const page = jobStatus.processedItems > 0 ? Math.ceil(jobStatus.processedItems / 50) : 0;
+        setSyncProgress({ current: jobStatus.processedItems, total: jobStatus.totalItems, page });
+      }
+    }
+  }, [jobStatus]);
   const { data: qualityStats } = trpc.shopee.getQualityStats.useQuery(
     { accountId: selectedAccountId! },
     { enabled: !!selectedAccountId }
@@ -101,17 +179,74 @@ export default function ShopeeAccounts() {
     }
   };
 
-  const handleSync = async (accountId: number) => {
+  // Called when user actually starts a fresh sync (after modal decision or no resume found)
+  const startFreshSync = async (accountId: number, accountName: string) => {
     setSyncingAccountId(accountId);
+    setSyncReport(null);
+    setSyncProgress(null);
+    setShowErrorLog(false);
+    setCountPhase({ counting: true, total: null, byStatus: null });
+
     try {
-      const result = await syncMutation.mutateAsync({ accountId });
-      toast.success(`Sincronização concluída: ${result.synced} de ${result.total} produtos`);
-      refetch();
+      // Phase 1: count all item IDs on Shopee (fast, IDs only)
+      const countResult = await countItemsMutation.mutateAsync({ accountId });
+      setCountPhase({ counting: false, total: countResult.total, byStatus: countResult.byStatus });
+
+      // Phase 2: start fresh background import job (cancels any incomplete jobs)
+      const { jobId } = await startSyncJobMutation.mutateAsync({
+        accountId,
+        accountName,
+        knownTotal: countResult.total,
+        fresh: true,
+      });
+      setSyncJobId(jobId);
     } catch (error: any) {
-      toast.error(`Erro na sincronização: ${error.message}`);
-    } finally {
+      toast.error(`Erro ao iniciar importação: ${error.message}`);
       setSyncingAccountId(null);
+      setCountPhase({ counting: false, total: null, byStatus: null });
     }
+  };
+
+  // Called when user chooses to resume a previous job
+  const handleResume = async (jobId: number, accountId: number, processedItems: number, totalItems: number) => {
+    setResumeModalLoading(true);
+    try {
+      await resumeSyncJobMutation.mutateAsync({ jobId });
+      setResumeModal(null);
+      setSyncingAccountId(accountId);
+      setSyncReport(null);
+      setShowErrorLog(false);
+      // Seed the progress bar immediately from the checkpoint data
+      setCountPhase({ counting: false, total: totalItems, byStatus: resumeModal?.byStatus ?? null });
+      setSyncProgress({ current: processedItems, total: totalItems, page: Math.ceil(processedItems / 50) });
+      setSyncJobId(jobId);
+    } catch (error: any) {
+      toast.error(`Erro ao retomar: ${error.message}`);
+    } finally {
+      setResumeModalLoading(false);
+    }
+  };
+
+  const handleSync = async (accountId: number, accountName: string) => {
+    // Check for a resumable job before starting
+    try {
+      const resumable = await getResumableSyncJobMutation.mutateAsync({ accountId });
+      if (resumable && resumable.processedItems > 0 && resumable.processedItems < resumable.totalItems) {
+        setResumeModal({
+          accountId,
+          accountName,
+          jobId: resumable.jobId,
+          processedItems: resumable.processedItems,
+          totalItems: resumable.totalItems,
+          byStatus: resumable.byStatus,
+        });
+        return; // wait for modal decision
+      }
+    } catch {
+      // If check fails, just proceed with fresh sync
+    }
+
+    await startFreshSync(accountId, accountName);
   };
 
   const formatDate = (date: string | Date | null) => {
@@ -226,20 +361,21 @@ export default function ShopeeAccounts() {
                     {account.isActive && (
                       <>
                         <Button
-                          variant="outline"
+                          variant="default"
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleSync(account.id);
+                            handleSync(account.id, account.shopName || "");
                           }}
                           disabled={syncingAccountId === account.id}
+                          className="gap-2"
                         >
                           {syncingAccountId === account.id ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
-                            <Download className="h-4 w-4 mr-2" />
+                            <RefreshCw className="h-4 w-4" />
                           )}
-                          Sincronizar
+                          {syncingAccountId === account.id ? "Sincronizando..." : "🔄 Sincronizar com Shopee"}
                         </Button>
                         <Button
                           variant="outline"
@@ -287,6 +423,127 @@ export default function ShopeeAccounts() {
                     <p className="font-medium">{formatDate(account.createdAt)}</p>
                   </div>
                 </div>
+
+                {/* ── Sync completed report ── */}
+                {syncReport !== null && syncReport.accountId === account.id && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+                      <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+                      <div className="flex-1 text-sm">
+                        <p className="font-semibold text-green-800 mb-1">
+                          ✅ {syncReport.total.toLocaleString("pt-BR")} produtos importados!
+                        </p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-green-700">
+                          <span><strong>{syncReport.added.toLocaleString("pt-BR")}</strong> adicionados</span>
+                          <span><strong>{syncReport.updated.toLocaleString("pt-BR")}</strong> atualizados</span>
+                          <span><strong>{syncReport.removed.toLocaleString("pt-BR")}</strong> removidos</span>
+                          {syncReport.errors.length > 0 && (
+                            <span className="text-amber-700">
+                              <strong>{syncReport.errors.length}</strong> com erro
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        className="text-green-500 hover:text-green-700 text-lg leading-none shrink-0"
+                        onClick={() => setSyncReport(null)}
+                      >×</button>
+                    </div>
+
+                    {/* Error log toggle */}
+                    {syncReport.errors.length > 0 && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                        <button
+                          className="flex items-center gap-2 text-sm font-medium text-amber-800 w-full text-left"
+                          onClick={() => setShowErrorLog((v) => !v)}
+                        >
+                          <XCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                          {showErrorLog ? "Ocultar" : "Ver"} log de erros ({syncReport.errors.length})
+                          <span className="ml-auto text-amber-500">{showErrorLog ? "▲" : "▼"}</span>
+                        </button>
+                        {showErrorLog && (
+                          <div className="mt-3 max-h-48 overflow-y-auto space-y-1">
+                            {syncReport.errors.map((err) => (
+                              <div key={err.itemId} className="text-xs text-amber-900 font-mono bg-amber-100 rounded px-2 py-1">
+                                <span className="font-semibold">ID {err.itemId}:</span> {err.error}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── In-progress sync indicator ── */}
+                {syncingAccountId === account.id && (
+                  <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 space-y-3">
+                    {/* Phase 1: counting */}
+                    {countPhase.counting && (
+                      <div className="flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 text-orange-500 animate-spin shrink-0" />
+                        <p className="text-sm text-orange-800 font-medium">
+                          Contando produtos na Shopee...
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Phase 1 done: show count, waiting for worker */}
+                    {!countPhase.counting && countPhase.total !== null && !syncProgress && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                          <p className="text-sm text-orange-800 font-medium">
+                            Total encontrado na Shopee:{" "}
+                            <strong>{countPhase.total.toLocaleString("pt-BR")} produtos</strong>
+                          </p>
+                        </div>
+                        {countPhase.byStatus && (
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-orange-700 pl-8">
+                            {Object.entries(countPhase.byStatus).map(([status, count]) => (
+                              <span key={status}>
+                                <strong>{count.toLocaleString("pt-BR")}</strong> {status}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-3 pl-0">
+                          <Loader2 className="h-4 w-4 text-orange-400 animate-spin shrink-0" />
+                          <p className="text-xs text-orange-600">Aguardando worker iniciar importação...</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Phase 2: active import with progress */}
+                    {syncProgress && syncProgress.total > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Loader2 className="h-5 w-5 text-orange-500 animate-spin shrink-0" />
+                            <p className="text-sm text-orange-800 font-medium">
+                              Importando...{" "}
+                              <strong>
+                                {syncProgress.current.toLocaleString("pt-BR")}/
+                                {syncProgress.total.toLocaleString("pt-BR")}
+                              </strong>{" "}
+                              produtos
+                            </p>
+                          </div>
+                          <span className="text-sm font-bold text-orange-700">
+                            {Math.round((syncProgress.current / syncProgress.total) * 100)}%
+                          </span>
+                        </div>
+                        <Progress
+                          value={(syncProgress.current / syncProgress.total) * 100}
+                          className="h-3"
+                        />
+                        <p className="text-xs text-orange-600 text-right">
+                          Lote {syncProgress.page} · {syncProgress.current.toLocaleString("pt-BR")} processados
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}
@@ -438,6 +695,93 @@ export default function ShopeeAccounts() {
           </div>
         </div>
       )}
+
+      {/* ── Resume / Fresh-Start modal ── */}
+      <Dialog open={!!resumeModal} onOpenChange={(open) => { if (!open) setResumeModal(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Importação incompleta encontrada</DialogTitle>
+            <DialogDescription>
+              Uma importação anterior foi interrompida. Deseja continuar de onde parou ou começar do zero?
+            </DialogDescription>
+          </DialogHeader>
+
+          {resumeModal && (
+            <div className="space-y-3 py-2">
+              {/* Progress snapshot */}
+              <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 space-y-2">
+                <div className="flex justify-between text-sm font-medium text-orange-800">
+                  <span>Progresso salvo</span>
+                  <span>
+                    {resumeModal.processedItems.toLocaleString("pt-BR")}/
+                    {resumeModal.totalItems.toLocaleString("pt-BR")} produtos
+                  </span>
+                </div>
+                <Progress
+                  value={(resumeModal.processedItems / resumeModal.totalItems) * 100}
+                  className="h-2"
+                />
+                <p className="text-xs text-orange-600 text-right">
+                  {Math.round((resumeModal.processedItems / resumeModal.totalItems) * 100)}% concluído
+                </p>
+                {Object.keys(resumeModal.byStatus).length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-orange-700">
+                    {Object.entries(resumeModal.byStatus).map(([status, count]) => (
+                      <span key={status}>
+                        <strong>{(count as number).toLocaleString("pt-BR")}</strong> {status}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Remaining count hint */}
+              <p className="text-xs text-muted-foreground text-center">
+                Faltam{" "}
+                <strong>
+                  {(resumeModal.totalItems - resumeModal.processedItems).toLocaleString("pt-BR")}
+                </strong>{" "}
+                produtos para completar.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              className="flex-1 gap-2"
+              disabled={resumeModalLoading}
+              onClick={() => {
+                setResumeModal(null);
+                if (resumeModal) startFreshSync(resumeModal.accountId, resumeModal.accountName);
+              }}
+            >
+              🔄 Começar do zero
+            </Button>
+            <Button
+              className="flex-1 gap-2"
+              disabled={resumeModalLoading}
+              onClick={() => {
+                if (resumeModal) {
+                  handleResume(
+                    resumeModal.jobId,
+                    resumeModal.accountId,
+                    resumeModal.processedItems,
+                    resumeModal.totalItems
+                  );
+                }
+              }}
+            >
+              {resumeModalLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "▶️"
+              )}{" "}
+              Continuar de onde parou
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteAccountId !== null} onOpenChange={() => setDeleteAccountId(null)}>

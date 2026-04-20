@@ -1,3 +1,5 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
 import { ENV } from "./env";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
@@ -110,6 +112,84 @@ export type ResponseFormat =
   | { type: "json_object" }
   | { type: "json_schema"; json_schema: JsonSchema };
 
+// ============ HELPERS ============
+
+const extractMessageText = (content: MessageContent | MessageContent[]): string => {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => (typeof p === "string" ? p : p.type === "text" ? p.text : ""))
+      .join("\n");
+  }
+  if (content.type === "text") return content.text;
+  return "";
+};
+
+// ============ GEMINI ============
+
+const GEMINI_MODEL = "gemini-2.0-flash-lite";
+
+const invokeGeminiWithKey = async (apiKey: string, params: InvokeParams): Promise<InvokeResult> => {
+  const { messages, maxTokens, max_tokens, responseFormat, response_format } = params;
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+
+  const systemInstruction = messages
+    .filter((m) => m.role === "system")
+    .map((m) => extractMessageText(m.content))
+    .join("\n") || undefined;
+
+  const isJsonMode =
+    responseFormat?.type === "json_schema" ||
+    responseFormat?.type === "json_object" ||
+    response_format?.type === "json_schema" ||
+    response_format?.type === "json_object";
+
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_MODEL,
+    ...(systemInstruction ? { systemInstruction } : {}),
+    generationConfig: {
+      maxOutputTokens: maxTokens || max_tokens || 8192,
+      ...(isJsonMode ? { responseMimeType: "application/json" } : {}),
+    },
+  });
+
+  const nonSystemMessages = messages.filter((m) => m.role !== "system");
+  const history = nonSystemMessages.slice(0, -1).map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: extractMessageText(m.content) }],
+  }));
+
+  const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
+  const lastText = lastMessage ? extractMessageText(lastMessage.content) : "";
+
+  const chat = model.startChat({ history });
+  const result = await chat.sendMessage(lastText);
+  const text = result.response.text();
+
+  return {
+    id: `gemini-${Date.now()}`,
+    created: Math.floor(Date.now() / 1000),
+    model: GEMINI_MODEL,
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content: text },
+        finish_reason: result.response.candidates?.[0]?.finishReason ?? "stop",
+      },
+    ],
+    usage: result.response.usageMetadata
+      ? {
+          prompt_tokens: result.response.usageMetadata.promptTokenCount ?? 0,
+          completion_tokens: result.response.usageMetadata.candidatesTokenCount ?? 0,
+          total_tokens: result.response.usageMetadata.totalTokenCount ?? 0,
+        }
+      : undefined,
+  };
+};
+
+// ============ FORGE (fallback) ============
+
 const ensureArray = (
   value: MessageContent | MessageContent[]
 ): MessageContent[] => (Array.isArray(value) ? value : [value]);
@@ -117,22 +197,10 @@ const ensureArray = (
 const normalizeContentPart = (
   part: MessageContent
 ): TextContent | ImageContent | FileContent => {
-  if (typeof part === "string") {
-    return { type: "text", text: part };
-  }
-
-  if (part.type === "text") {
-    return part;
-  }
-
-  if (part.type === "image_url") {
-    return part;
-  }
-
-  if (part.type === "file_url") {
-    return part;
-  }
-
+  if (typeof part === "string") return { type: "text", text: part };
+  if (part.type === "text") return part;
+  if (part.type === "image_url") return part;
+  if (part.type === "file_url") return part;
   throw new Error("Unsupported message content part");
 };
 
@@ -143,31 +211,16 @@ const normalizeMessage = (message: Message) => {
     const content = ensureArray(message.content)
       .map(part => (typeof part === "string" ? part : JSON.stringify(part)))
       .join("\n");
-
-    return {
-      role,
-      name,
-      tool_call_id,
-      content,
-    };
+    return { role, name, tool_call_id, content };
   }
 
   const contentParts = ensureArray(message.content).map(normalizeContentPart);
 
-  // If there's only text content, collapse to a single string for compatibility
   if (contentParts.length === 1 && contentParts[0].type === "text") {
-    return {
-      role,
-      name,
-      content: contentParts[0].text,
-    };
+    return { role, name, content: contentParts[0].text };
   }
 
-  return {
-    role,
-    name,
-    content: contentParts,
-  };
+  return { role, name, content: contentParts };
 };
 
 const normalizeToolChoice = (
@@ -175,37 +228,13 @@ const normalizeToolChoice = (
   tools: Tool[] | undefined
 ): "none" | "auto" | ToolChoiceExplicit | undefined => {
   if (!toolChoice) return undefined;
-
-  if (toolChoice === "none" || toolChoice === "auto") {
-    return toolChoice;
-  }
-
+  if (toolChoice === "none" || toolChoice === "auto") return toolChoice;
   if (toolChoice === "required") {
-    if (!tools || tools.length === 0) {
-      throw new Error(
-        "tool_choice 'required' was provided but no tools were configured"
-      );
-    }
-
-    if (tools.length > 1) {
-      throw new Error(
-        "tool_choice 'required' needs a single tool or specify the tool name explicitly"
-      );
-    }
-
-    return {
-      type: "function",
-      function: { name: tools[0].function.name },
-    };
+    if (!tools || tools.length === 0) throw new Error("tool_choice 'required' was provided but no tools were configured");
+    if (tools.length > 1) throw new Error("tool_choice 'required' needs a single tool or specify the tool name explicitly");
+    return { type: "function", function: { name: tools[0].function.name } };
   }
-
-  if ("name" in toolChoice) {
-    return {
-      type: "function",
-      function: { name: toolChoice.name },
-    };
-  }
-
+  if ("name" in toolChoice) return { type: "function", function: { name: toolChoice.name } };
   return toolChoice;
 };
 
@@ -214,102 +243,26 @@ const resolveApiUrl = () =>
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
     : "https://forge.manus.im/v1/chat/completions";
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
-};
-
-const normalizeResponseFormat = ({
-  responseFormat,
-  response_format,
-  outputSchema,
-  output_schema,
-}: {
-  responseFormat?: ResponseFormat;
-  response_format?: ResponseFormat;
-  outputSchema?: OutputSchema;
-  output_schema?: OutputSchema;
-}):
-  | { type: "json_schema"; json_schema: JsonSchema }
-  | { type: "text" }
-  | { type: "json_object" }
-  | undefined => {
-  const explicitFormat = responseFormat || response_format;
-  if (explicitFormat) {
-    if (
-      explicitFormat.type === "json_schema" &&
-      !explicitFormat.json_schema?.schema
-    ) {
-      throw new Error(
-        "responseFormat json_schema requires a defined schema object"
-      );
-    }
-    return explicitFormat;
-  }
-
-  const schema = outputSchema || output_schema;
-  if (!schema) return undefined;
-
-  if (!schema.name || !schema.schema) {
-    throw new Error("outputSchema requires both name and schema");
-  }
-
-  return {
-    type: "json_schema",
-    json_schema: {
-      name: schema.name,
-      schema: schema.schema,
-      ...(typeof schema.strict === "boolean" ? { strict: schema.strict } : {}),
-    },
-  };
-};
-
-export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
-
-  const {
-    messages,
-    tools,
-    toolChoice,
-    tool_choice,
-    outputSchema,
-    output_schema,
-    responseFormat,
-    response_format,
-  } = params;
+const invokeForge = async (params: InvokeParams): Promise<InvokeResult> => {
+  const { messages, tools, toolChoice, tool_choice, outputSchema, output_schema, responseFormat, response_format } = params;
 
   const payload: Record<string, unknown> = {
     model: "gemini-2.5-flash",
     messages: messages.map(normalizeMessage),
+    max_tokens: 8192,
   };
 
-  if (tools && tools.length > 0) {
-    payload.tools = tools;
-  }
+  if (tools && tools.length > 0) payload.tools = tools;
 
-  const normalizedToolChoice = normalizeToolChoice(
-    toolChoice || tool_choice,
-    tools
-  );
-  if (normalizedToolChoice) {
-    payload.tool_choice = normalizedToolChoice;
-  }
+  const normalizedToolChoice = normalizeToolChoice(toolChoice || tool_choice, tools);
+  if (normalizedToolChoice) payload.tool_choice = normalizedToolChoice;
 
-  payload.max_tokens = 32768
-  payload.thinking = {
-    "budget_tokens": 128
-  }
-
-  const normalizedResponseFormat = normalizeResponseFormat({
-    responseFormat,
-    response_format,
-    outputSchema,
-    output_schema,
-  });
-
-  if (normalizedResponseFormat) {
-    payload.response_format = normalizedResponseFormat;
+  const explicitFormat = responseFormat || response_format;
+  const schema = outputSchema || output_schema;
+  if (explicitFormat) {
+    payload.response_format = explicitFormat;
+  } else if (schema) {
+    payload.response_format = { type: "json_schema", json_schema: schema };
   }
 
   const response = await fetch(resolveApiUrl(), {
@@ -323,10 +276,89 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
-    );
+    throw new Error(`LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
   }
 
   return (await response.json()) as InvokeResult;
+};
+
+// ============ GROQ ============
+
+const invokeGroq = async (params: InvokeParams): Promise<InvokeResult> => {
+  const { messages, tools, toolChoice, tool_choice, outputSchema, output_schema, responseFormat, response_format, maxTokens, max_tokens } = params;
+
+  const client = new OpenAI({
+    apiKey: ENV.groqApiKey,
+    baseURL: "https://api.groq.com/openai/v1",
+  });
+
+  const payload: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+    model: "llama-3.3-70b-versatile",
+    messages: messages.map(normalizeMessage) as OpenAI.Chat.ChatCompletionMessageParam[],
+    max_tokens: 500,
+  };
+
+  if (tools && tools.length > 0) payload.tools = tools as OpenAI.Chat.ChatCompletionTool[];
+
+  const normalizedToolChoice = normalizeToolChoice(toolChoice || tool_choice, tools);
+  if (normalizedToolChoice) payload.tool_choice = normalizedToolChoice as OpenAI.Chat.ChatCompletionToolChoiceOption;
+
+  const explicitFormat = responseFormat || response_format;
+  const schema = outputSchema || output_schema;
+  const wantsJson = schema ||
+    explicitFormat?.type === "json_schema" ||
+    explicitFormat?.type === "json_object";
+
+  if (wantsJson) {
+    payload.response_format = { type: "json_object" } as OpenAI.ResponseFormatJSONObject;
+  }
+
+  const response = await client.chat.completions.create(payload);
+  return response as unknown as InvokeResult;
+};
+
+// ============ PUBLIC API ============
+
+const isQuotaError = (err: unknown): boolean => {
+  const msg = String(err);
+  return msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("RESOURCE_EXHAUSTED");
+};
+
+export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
+  // 1. Groq (principal)
+  if (ENV.groqApiKey) {
+    try {
+      return await invokeGroq(params);
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      console.warn("[LLM] Groq quota exceeded, trying Gemini key 1");
+    }
+  }
+
+  // 2. Gemini chave 1
+  if (ENV.geminiApiKey) {
+    try {
+      return await invokeGeminiWithKey(ENV.geminiApiKey, params);
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      console.warn("[LLM] Gemini key 1 quota exceeded, trying Gemini key 2");
+    }
+  }
+
+  // 3. Gemini chave 2
+  if (ENV.geminiApiKey2) {
+    try {
+      return await invokeGeminiWithKey(ENV.geminiApiKey2, params);
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      console.warn("[LLM] Gemini key 2 quota exceeded, falling back to Forge");
+    }
+  }
+
+  // 4. Forge
+  if (ENV.forgeApiKey) {
+    return invokeForge(params);
+  }
+
+  throw new Error("No LLM provider available. Configure GROQ_API_KEY or GEMINI_API_KEY in .env.");
 }

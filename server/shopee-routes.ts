@@ -91,7 +91,8 @@ export function registerShopeeRoutes(app: Express) {
         tokenData.accessToken,
         tokenData.refreshToken,
         tokenData.expiresIn,
-        shopName
+        shopName,
+        tokenData.refreshTokenExpiresIn
       );
 
       console.log(`[Shopee OAuth] Successfully connected shop ${shopId} (${shopName || "unknown"}) for user ${userId}`);

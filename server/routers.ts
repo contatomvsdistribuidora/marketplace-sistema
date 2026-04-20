@@ -1636,7 +1636,8 @@ export const appRouter = router({
           tokenData.accessToken,
           tokenData.refreshToken,
           tokenData.expiresIn,
-          shopName
+          shopName,
+          tokenData.refreshTokenExpiresIn
         );
         return { success: true, accountId, shopId: tokenData.shopId, shopName };
       }),
@@ -1654,12 +1655,82 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    // Sync products from Shopee shop
+    // Sync products from Shopee shop (blocking, for small shops)
     syncProducts: protectedProcedure
       .input(z.object({ accountId: z.number() }))
       .mutation(async ({ ctx, input }) => {
         const result = await shopee.syncProducts(ctx.user.id, input.accountId);
         return result;
+      }),
+
+    // Count all item IDs across NORMAL/UNLIST/BANNED (fast, no product details)
+    countItems: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const accounts = await shopee.getAccounts(ctx.user.id);
+        const account = (accounts as any[]).find((a) => a.id === input.accountId);
+        if (!account) throw new Error("Conta não encontrada");
+        return shopee.countShopeeItems(input.accountId);
+      }),
+
+    // Check if there is a resumable (failed/stale) shopee_sync job for this account
+    getResumableSyncJob: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        return bgWorker.getResumableShopeeJob(input.accountId, ctx.user.id);
+      }),
+
+    // Re-queue a stale/failed job so the worker picks it up again
+    resumeSyncJob: protectedProcedure
+      .input(z.object({ jobId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const job = await bgWorker.getBackgroundJob(input.jobId);
+        if (!job || job.userId !== ctx.user.id) throw new Error("Job não encontrado");
+        await bgWorker.resumeSyncJob(input.jobId);
+        return { jobId: input.jobId };
+      }),
+
+    // Start background sync job (non-blocking)
+    // fresh: true → cancels any incomplete job for this account before creating a new one
+    startSyncJob: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        accountName: z.string().optional(),
+        knownTotal: z.number().optional(),
+        fresh: z.boolean().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (input.fresh) {
+          await bgWorker.cancelIncompleteShopeeJobs(input.accountId, ctx.user.id);
+        }
+        const jobId = await bgWorker.createBackgroundJob({
+          userId: ctx.user.id,
+          type: "shopee_sync",
+          accountId: input.accountId,
+          accountName: input.accountName,
+          totalItems: input.knownTotal ?? 0,
+        });
+        return { jobId };
+      }),
+
+    // Get background job status/progress
+    getJobStatus: protectedProcedure
+      .input(z.object({ jobId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const job = await bgWorker.getBackgroundJob(input.jobId);
+        if (!job || job.userId !== ctx.user.id) throw new Error("Job não encontrado");
+        return {
+          id: job.id,
+          status: job.status,
+          processedItems: job.processedItems,
+          totalItems: job.totalItems,
+          successCount: job.successCount,
+          errorCount: job.errorCount,
+          resultLog: job.resultLog,
+          lastError: job.lastError,
+          startedAt: job.startedAt,
+          completedAt: job.completedAt,
+        };
       }),
 
     // Get synced products from local DB
@@ -1905,6 +1976,7 @@ export const appRouter = router({
     optimizeTitle: protectedProcedure
       .input(z.object({
         productId: z.number(),
+        productDescription: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
@@ -1914,9 +1986,28 @@ export const appRouter = router({
         if (!product) throw new Error("Produto não encontrado");
         return shopeeOptimizer.optimizeTitle(
           product.itemName || "",
-          product.description || "",
+          input.productDescription || product.description || "",
           product.categoryName || undefined
         );
+      }),
+
+    // Apply optimized title directly to Shopee
+    applyTitle: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+        newTitle: z.string().min(1).max(140),
+      }))
+      .mutation(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const shopee = await import("./shopee");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        const { accessToken, shopId } = await shopee.getValidToken(product.shopeeAccountId);
+        await shopee.updateItemName(accessToken, shopId, product.itemId, input.newTitle);
+        await db.update(shopeeProducts).set({ itemName: input.newTitle }).where(eq(shopeeProducts.id, input.productId));
+        return { success: true };
       }),
 
     // AI optimize description
@@ -1935,6 +2026,148 @@ export const appRouter = router({
           product.description || "",
           product.categoryName || undefined
         );
+      }),
+
+    // Apply optimized description directly to Shopee
+    applyDescription: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+        newDescription: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const shopee = await import("./shopee");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        const { accessToken, shopId } = await shopee.getValidToken(product.shopeeAccountId);
+        await shopee.updateItemFields(accessToken, shopId, product.itemId, { description: input.newDescription });
+        await db.update(shopeeProducts).set({ description: input.newDescription }).where(eq(shopeeProducts.id, input.productId));
+        return { success: true };
+      }),
+
+    // Force-push current DB title+description to Shopee API
+    pushToShopee: protectedProcedure
+      .input(z.object({ productId: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const shopee = await import("./shopee");
+        const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+        const { accessToken, shopId } = await shopee.getValidToken(product.shopeeAccountId);
+        await shopee.updateItemFields(accessToken, shopId, product.itemId, {
+          name: product.itemName || undefined,
+          description: product.description || undefined,
+        });
+        return { success: true, itemId: product.itemId };
+      }),
+
+    // Compare current-page products against live Shopee API and return sync status per item
+    checkSyncStatus: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        itemIds: z.array(z.number()),
+      }))
+      .query(async ({ input }) => {
+        if (input.itemIds.length === 0) return [];
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { inArray } = await import("drizzle-orm");
+        const shopeeModule = await import("./shopee");
+
+        const { accessToken, shopId } = await shopeeModule.getValidToken(input.accountId);
+
+        // Local products for this page
+        const localList = await db.select().from(shopeeProducts)
+          .where(inArray(shopeeProducts.itemId, input.itemIds));
+        const localMap = new Map(localList.map(p => [Number(p.itemId), p]));
+
+        // Shopee API — max 50 per call
+        const apiItems = await shopeeModule.getItemBaseInfo(accessToken, shopId, input.itemIds.slice(0, 50));
+        const apiMap = new Map(apiItems.map((i: any) => [Number(i.item_id), i]));
+
+        return input.itemIds.map(itemId => {
+          const local = localMap.get(itemId);
+          const api = apiMap.get(itemId);
+
+          if (!api || !local) return { itemId, status: "not_found" as const, changes: [] };
+
+          const a = api as any;
+          const apiPrice = (a.price_info?.[0]?.current_price ?? a.price_info?.[0]?.original_price ?? 0).toString();
+          const apiName  = a.item_name || "";
+          const apiDesc  = (a.description || "").substring(0, 200);
+          const localDesc = (local.description || "").substring(0, 200);
+
+          const changes: string[] = [];
+          if (apiName  !== (local.itemName  || ""))  changes.push("título");
+          if (apiPrice !== (local.price     || "0")) changes.push("preço");
+          if (apiDesc  !== localDesc)                changes.push("descrição");
+
+          return {
+            itemId,
+            status: changes.length > 0 ? "outdated" as const : "synced" as const,
+            changes,
+          };
+        });
+      }),
+
+    // Sync a single product from Shopee API to local DB
+    syncSingleProduct: protectedProcedure
+      .input(z.object({ productId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const shopeeModule = await import("./shopee");
+
+        const [product] = await db.select().from(shopeeProducts)
+          .where(eq(shopeeProducts.id, input.productId)).limit(1);
+        if (!product) throw new Error("Produto não encontrado");
+
+        const { accessToken, shopId } = await shopeeModule.getValidToken(product.shopeeAccountId);
+        const [item] = await shopeeModule.getItemBaseInfo(accessToken, shopId, [product.itemId]);
+        if (!item) throw new Error("Produto não encontrado na Shopee");
+
+        let extraSales = 0;
+        let extraRating = "0";
+        try {
+          const [extra] = await shopeeModule.getItemExtraInfo(accessToken, shopId, [product.itemId]);
+          if (extra) { extraSales = extra.sale || 0; extraRating = extra.rating_star?.toString() || "0"; }
+        } catch {}
+
+        const priceInfo  = item.price_info?.[0] || {};
+        const stockInfo  = item.stock_info_v2?.summary_info || {};
+        const attrs      = item.attribute_list || [];
+        const filledAttrs = attrs.filter((a: any) => a.attribute_value_list?.length > 0).length;
+
+        await db.update(shopeeProducts).set({
+          itemName:        item.item_name || "",
+          itemSku:         item.item_sku  || "",
+          itemStatus:      item.item_status || "NORMAL",
+          categoryId:      item.category_id || null,
+          price:           priceInfo.current_price?.toString() || priceInfo.original_price?.toString() || "0",
+          stock:           stockInfo.total_available_stock || 0,
+          sold:            extraSales,
+          rating:          extraRating,
+          imageUrl:        item.image?.image_url_list?.[0] || "",
+          images:          item.image?.image_url_list || [],
+          hasVideo:        item.video_info?.length > 0 ? 1 : 0,
+          attributes:      attrs,
+          attributesFilled: filledAttrs,
+          attributesTotal:  attrs.length,
+          variations:      item.model_list || null,
+          weight:          item.weight?.toString() || "0",
+          dimensionLength: item.dimension?.package_length?.toString() || "",
+          dimensionWidth:  item.dimension?.package_width?.toString()  || "",
+          dimensionHeight: item.dimension?.package_height?.toString() || "",
+          description:     item.description || "",
+          lastSyncAt:      new Date(),
+        }).where(eq(shopeeProducts.id, input.productId));
+
+        return { success: true };
       }),
 
     // AI get optimization suggestions
@@ -1961,6 +2194,25 @@ export const appRouter = router({
         const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
         if (!product) throw new Error("Produto não encontrado");
         return shopeeOptimizer.generatePerfectChecklist(product);
+      }),
+
+    // Get real product metrics from Shopee API (sales, views, likes, rating)
+    getProductMetrics: protectedProcedure
+      .input(z.object({ accountId: z.number(), itemId: z.number() }))
+      .query(async ({ input }) => {
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+        const extraInfoList = await shopee.getItemExtraInfo(accessToken, shopId, [input.itemId]);
+        const info = extraInfoList[0] ?? null;
+        const sold = info?.sale_count ?? 0;
+        const views = info?.view_count ?? 0;
+        return {
+          sold,
+          views,
+          likes: info?.like_count ?? 0,
+          rating: info?.rating_star ?? 0,
+          ratingCount: info?.rating_count ?? 0,
+          conversionRate: views > 0 ? parseFloat(((sold / views) * 100).toFixed(2)) : null,
+        };
       }),
 
     // Get Shopee product URLs

@@ -80,6 +80,157 @@ function progressColor(score: number, max: number) {
   return "bg-red-500";
 }
 
+function CharCounter({ text }: { text: string }) {
+  const n = text.length;
+  const ok = n >= 70 && n <= 100;
+  return (
+    <span className={`text-xs font-medium ${ok ? "text-green-600" : "text-orange-500"}`}>
+      {n} chars {ok ? "✓ ideal" : n < 70 ? "— muito curto" : "— muito longo"} (70-100)
+    </span>
+  );
+}
+
+function TitleDialog({
+  open, onOpenChange, optimizedTitle, titleDescription, onTitleDescriptionChange,
+  onOptimize, onApply, onCopy, isOptimizing, isApplying,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  optimizedTitle: any;
+  titleDescription: string;
+  onTitleDescriptionChange: (v: string) => void;
+  onOptimize: () => void;
+  onApply: (selectedTitle: string) => void;
+  onCopy: (text: string) => void;
+  isOptimizing: boolean;
+  isApplying: boolean;
+}) {
+  const [selectedTitle, setSelectedTitle] = useState<string>("");
+
+  // Reset selection when new result arrives
+  const prevMain = optimizedTitle?.optimizedTitle;
+  if (prevMain && selectedTitle === "" ) {
+    setSelectedTitle(prevMain);
+  }
+  // When optimizedTitle changes (new generation), reset to the new main title
+  const [lastMain, setLastMain] = useState<string>("");
+  if (prevMain && prevMain !== lastMain) {
+    setLastMain(prevMain);
+    setSelectedTitle(prevMain);
+  }
+
+  const allTitles: string[] = optimizedTitle
+    ? [optimizedTitle.optimizedTitle, ...(optimizedTitle.alternatives || [])]
+    : [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Wand2 className="h-5 w-5 text-orange-500" />
+            Otimizar Título com IA
+          </DialogTitle>
+          <DialogDescription>
+            Descreva o produto para gerar títulos otimizados para alta conversão na Shopee.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-1 block">Descreva o produto (opcional)</label>
+            <Textarea
+              placeholder="Ex: Tênis esportivo masculino de corrida, solado emborrachado, respirável, tamanhos 38-44..."
+              value={titleDescription}
+              onChange={(e) => onTitleDescriptionChange(e.target.value)}
+              className="min-h-[72px] text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Se vazio, usa o título atual do anúncio como base.
+            </p>
+          </div>
+
+          <Button onClick={onOptimize} disabled={isOptimizing} className="w-full gap-2">
+            {isOptimizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {isOptimizing ? "Gerando títulos..." : optimizedTitle ? "Gerar Novamente" : "Gerar Títulos"}
+          </Button>
+
+          {optimizedTitle && (
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-medium block">
+                  Selecione o título — <span className="text-muted-foreground font-normal">clique para escolher</span>
+                </label>
+                {allTitles.map((title, i) => {
+                  const isSelected = title === selectedTitle;
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => setSelectedTitle(title)}
+                      className={`cursor-pointer rounded-lg border-2 p-3 transition-all ${
+                        isSelected
+                          ? "border-orange-400 bg-orange-50"
+                          : "border-border hover:border-orange-200 hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            {i === 0 && <Badge className="bg-orange-100 text-orange-800 text-xs">Recomendado</Badge>}
+                            {i > 0 && <Badge variant="outline" className="text-xs">Alternativa {i}</Badge>}
+                            {isSelected && <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />}
+                          </div>
+                          <p className="text-sm leading-snug">{title}</p>
+                          <div className="mt-1">
+                            <CharCounter text={title} />
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="shrink-0 h-7 w-7 p-0"
+                          onClick={(e) => { e.stopPropagation(); onCopy(title); }}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {optimizedTitle.keywords?.length > 0 && (
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Palavras-chave identificadas</label>
+                  <div className="flex flex-wrap gap-1">
+                    {optimizedTitle.keywords.map((kw: string, i: number) => (
+                      <Badge key={i} variant="secondary">{kw}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {optimizedTitle.explanation && (
+                <p className="text-xs text-muted-foreground border-l-2 border-orange-200 pl-3">
+                  {optimizedTitle.explanation}
+                </p>
+              )}
+
+              <Button
+                onClick={() => onApply(selectedTitle)}
+                disabled={isApplying || !selectedTitle}
+                className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+              >
+                {isApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                {isApplying ? "Aplicando..." : "Aplicar Título Selecionado no Anúncio"}
+              </Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ShopeeOptimizer() {
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
@@ -88,6 +239,11 @@ export default function ShopeeOptimizer() {
   const [searchQuery, setSearchQuery] = useState("");
   const [optimizedTitle, setOptimizedTitle] = useState<any>(null);
   const [optimizedDesc, setOptimizedDesc] = useState<any>(null);
+  const [titleProductId, setTitleProductId] = useState<number | null>(null);
+  const [titleDescription, setTitleDescription] = useState("");
+  const [applyingTitle, setApplyingTitle] = useState(false);
+  const [applyingDesc, setApplyingDesc] = useState(false);
+  const [descProductId, setDescProductId] = useState<number | null>(null);
   const [showTitleDialog, setShowTitleDialog] = useState(false);
   const [showDescDialog, setShowDescDialog] = useState(false);
   const [showSuggestionsDialog, setShowSuggestionsDialog] = useState(false);
@@ -111,11 +267,18 @@ export default function ShopeeOptimizer() {
   );
 
   const optimizeTitleMutation = trpc.shopee.optimizeTitle.useMutation();
+  const applyTitleMutation = trpc.shopee.applyTitle.useMutation();
+  const pushToShopeeMutation = trpc.shopee.pushToShopee.useMutation();
   const optimizeDescMutation = trpc.shopee.optimizeDescription.useMutation();
+  const applyDescMutation = trpc.shopee.applyDescription.useMutation();
   const getSuggestionsMutation = trpc.shopee.getOptimizationSuggestions.useMutation();
   const getChecklistQuery = trpc.shopee.getProductChecklist.useQuery(
     { productId: selectedProductId! },
     { enabled: !!selectedProductId }
+  );
+  const getMetricsQuery = trpc.shopee.getProductMetrics.useQuery(
+    { accountId: selectedAccountId!, itemId: productDetail?.product?.itemId ?? 0 },
+    { enabled: !!selectedAccountId && !!productDetail?.product?.itemId }
   );
   const getUrlsQuery = trpc.shopee.getProductUrls.useQuery(
     { accountId: selectedAccountId!, productId: selectedProductId! },
@@ -162,7 +325,11 @@ export default function ShopeeOptimizer() {
 
   const handleOptimizeTitle = async (productId: number) => {
     try {
-      const result = await optimizeTitleMutation.mutateAsync({ productId });
+      setTitleProductId(productId);
+      const result = await optimizeTitleMutation.mutateAsync({
+        productId,
+        productDescription: titleDescription.trim() || undefined,
+      });
       setOptimizedTitle(result);
       setShowTitleDialog(true);
     } catch (error: any) {
@@ -170,13 +337,44 @@ export default function ShopeeOptimizer() {
     }
   };
 
+  const handleApplyTitle = async (selectedTitle: string) => {
+    if (!titleProductId || !selectedTitle) return;
+    try {
+      setApplyingTitle(true);
+      await applyTitleMutation.mutateAsync({ productId: titleProductId, newTitle: selectedTitle });
+      toast.success("Título aplicado no anúncio com sucesso!");
+      setShowTitleDialog(false);
+      refetchDiag();
+    } catch (error: any) {
+      toast.error(`Erro ao aplicar título: ${error.message}`);
+    } finally {
+      setApplyingTitle(false);
+    }
+  };
+
   const handleOptimizeDesc = async (productId: number) => {
     try {
+      setDescProductId(productId);
       const result = await optimizeDescMutation.mutateAsync({ productId });
       setOptimizedDesc(result);
       setShowDescDialog(true);
     } catch (error: any) {
       toast.error(`Erro ao otimizar descrição: ${error.message}`);
+    }
+  };
+
+  const handleApplyDesc = async () => {
+    if (!descProductId || !optimizedDesc) return;
+    try {
+      setApplyingDesc(true);
+      await applyDescMutation.mutateAsync({ productId: descProductId, newDescription: optimizedDesc.optimizedDescription });
+      toast.success("Descrição aplicada no anúncio com sucesso!");
+      setShowDescDialog(false);
+      refetchDiag();
+    } catch (error: any) {
+      toast.error(`Erro ao aplicar descrição: ${error.message}`);
+    } finally {
+      setApplyingDesc(false);
     }
   };
 
@@ -289,7 +487,50 @@ export default function ShopeeOptimizer() {
               <ExternalLink className="h-4 w-4" />
               Editar no Seller Center
             </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await pushToShopeeMutation.mutateAsync({ productId: product.id });
+                  toast.success("✅ Título e descrição enviados para a Shopee com sucesso!");
+                } catch (err: any) {
+                  toast.error(`❌ Erro ao enviar para a Shopee: ${err.message}`);
+                }
+              }}
+              disabled={pushToShopeeMutation.isPending}
+              className="gap-2"
+              variant="default"
+            >
+              {pushToShopeeMutation.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <span>📤</span>}
+              {pushToShopeeMutation.isPending ? "Enviando..." : "Enviar para Shopee"}
+            </Button>
           </div>
+        </div>
+
+        {/* Real Shopee Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { label: "Vendas", value: getMetricsQuery.data?.sold ?? product.sold ?? "—", icon: BarChart3, color: "text-green-600 bg-green-100" },
+            { label: "Visualizações", value: getMetricsQuery.data?.views ?? "—", icon: Search, color: "text-blue-600 bg-blue-100" },
+            { label: "Conversão", value: getMetricsQuery.data?.conversionRate != null ? `${getMetricsQuery.data.conversionRate}%` : "—", icon: TrendingUp, color: "text-orange-600 bg-orange-100" },
+            { label: "Curtidas", value: getMetricsQuery.data?.likes ?? "—", icon: Star, color: "text-pink-600 bg-pink-100" },
+            { label: "Avaliação", value: getMetricsQuery.data?.rating ? `${getMetricsQuery.data.rating.toFixed(1)} ⭐` : "—", icon: Star, color: "text-yellow-600 bg-yellow-100" },
+            { label: "CTR", value: "Via Analytics", icon: Target, color: "text-gray-500 bg-gray-100" },
+          ].map(({ label, value, icon: Icon, color }) => (
+            <Card key={label}>
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${color}`}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </div>
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                  {getMetricsQuery.isLoading && label !== "CTR" && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground ml-auto" />}
+                </div>
+                <p className="text-lg font-bold">{value}</p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         {/* Tabs for Diagnostics and Checklist */}
@@ -339,10 +580,9 @@ export default function ShopeeOptimizer() {
                     variant="outline"
                     size="sm"
                     className="w-full mt-3 gap-2"
-                    onClick={() => handleOptimizeTitle(product.id)}
-                    disabled={optimizeTitleMutation.isPending}
+                    onClick={() => { setTitleProductId(product.id); setShowTitleDialog(true); }}
                   >
-                    {optimizeTitleMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                    <Wand2 className="h-3 w-3" />
                     Otimizar com IA
                   </Button>
                 </CardContent>
@@ -610,6 +850,110 @@ export default function ShopeeOptimizer() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* Dialogs — rendered here so they work in detail view */}
+        <TitleDialog
+          open={showTitleDialog}
+          onOpenChange={setShowTitleDialog}
+          optimizedTitle={optimizedTitle}
+          titleDescription={titleDescription}
+          onTitleDescriptionChange={setTitleDescription}
+          onOptimize={() => titleProductId && handleOptimizeTitle(titleProductId)}
+          onApply={handleApplyTitle}
+          onCopy={copyToClipboard}
+          isOptimizing={optimizeTitleMutation.isPending}
+          isApplying={applyingTitle}
+        />
+
+        <Dialog open={showDescDialog} onOpenChange={setShowDescDialog}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Wand2 className="h-5 w-5 text-purple-500" />
+                Descrição Otimizada por IA
+              </DialogTitle>
+              <DialogDescription>Revise a descrição gerada e aplique diretamente no anúncio da Shopee.</DialogDescription>
+            </DialogHeader>
+            {optimizedDesc && (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm font-medium">Descrição Otimizada</label>
+                    <Button variant="outline" size="sm" onClick={() => copyToClipboard(optimizedDesc.optimizedDescription)} className="gap-1">
+                      <Copy className="h-3 w-3" />Copiar
+                    </Button>
+                  </div>
+                  <Textarea value={optimizedDesc.optimizedDescription} readOnly className="min-h-[300px] text-sm" />
+                  <p className="text-xs text-muted-foreground mt-1">{optimizedDesc.wordCount} palavras</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Explicação</label>
+                  <p className="text-sm text-muted-foreground">{optimizedDesc.explanation}</p>
+                </div>
+                <Button onClick={handleApplyDesc} disabled={applyingDesc} className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white">
+                  {applyingDesc ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  {applyingDesc ? "Aplicando..." : "Aplicar Descrição no Anúncio"}
+                </Button>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showSuggestionsDialog} onOpenChange={setShowSuggestionsDialog}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-orange-500" />
+                Sugestões de Otimização
+              </DialogTitle>
+              <DialogDescription>Recomendações priorizadas para melhorar o ranking deste produto.</DialogDescription>
+            </DialogHeader>
+            {suggestions && (
+              <div className="space-y-6">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Prioridade:</span>
+                  <Badge className={suggestions.priority === "alta" ? "bg-red-100 text-red-800" : suggestions.priority === "média" ? "bg-yellow-100 text-yellow-800" : "bg-green-100 text-green-800"}>
+                    {suggestions.priority.charAt(0).toUpperCase() + suggestions.priority.slice(1)}
+                  </Badge>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-yellow-500" />Vitórias Rápidas
+                  </h3>
+                  <div className="space-y-2">
+                    {suggestions.quickWins.map((win: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2 p-2 bg-yellow-50 rounded-lg">
+                        <CheckCircle2 className="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
+                        <p className="text-sm">{win}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                    <Target className="h-4 w-4 text-blue-500" />Recomendações Detalhadas
+                  </h3>
+                  <div className="space-y-3">
+                    {suggestions.detailedSuggestions.map((sug: any, i: number) => (
+                      <Card key={i}>
+                        <CardContent className="py-3">
+                          <div className="flex items-start justify-between mb-1">
+                            <Badge variant="outline">{sug.area}</Badge>
+                            <Badge className={sug.impact === "alto" ? "bg-red-100 text-red-800" : sug.impact === "médio" ? "bg-yellow-100 text-yellow-800" : "bg-blue-100 text-blue-800"}>
+                              Impacto {sug.impact}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">Atual: {sug.currentStatus}</p>
+                          <p className="text-sm mt-1 font-medium">{sug.recommendation}</p>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -920,56 +1264,18 @@ export default function ShopeeOptimizer() {
       {/* ========== DIALOGS ========== */}
 
       {/* Optimized Title Dialog */}
-      <Dialog open={showTitleDialog} onOpenChange={setShowTitleDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Wand2 className="h-5 w-5 text-orange-500" />
-              Título Otimizado por IA
-            </DialogTitle>
-            <DialogDescription>
-              Copie o título otimizado e atualize no Seller Center da Shopee.
-            </DialogDescription>
-          </DialogHeader>
-          {optimizedTitle && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">Título Otimizado</label>
-                <div className="relative">
-                  <Textarea
-                    value={optimizedTitle.optimizedTitle}
-                    readOnly
-                    className="pr-10 min-h-[80px]"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="absolute top-2 right-2"
-                    onClick={() => copyToClipboard(optimizedTitle.optimizedTitle)}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {optimizedTitle.optimizedTitle.length} caracteres
-                </p>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">Palavras-chave</label>
-                <div className="flex flex-wrap gap-1">
-                  {optimizedTitle.keywords.map((kw: string, i: number) => (
-                    <Badge key={i} variant="secondary">{kw}</Badge>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">Explicação</label>
-                <p className="text-sm text-muted-foreground">{optimizedTitle.explanation}</p>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <TitleDialog
+        open={showTitleDialog}
+        onOpenChange={setShowTitleDialog}
+        optimizedTitle={optimizedTitle}
+        titleDescription={titleDescription}
+        onTitleDescriptionChange={setTitleDescription}
+        onOptimize={() => titleProductId && handleOptimizeTitle(titleProductId)}
+        onApply={handleApplyTitle}
+        onCopy={copyToClipboard}
+        isOptimizing={optimizeTitleMutation.isPending}
+        isApplying={applyingTitle}
+      />
 
       {/* Optimized Description Dialog */}
       <Dialog open={showDescDialog} onOpenChange={setShowDescDialog}>
@@ -980,7 +1286,7 @@ export default function ShopeeOptimizer() {
               Descrição Otimizada por IA
             </DialogTitle>
             <DialogDescription>
-              Copie a descrição otimizada e atualize no Seller Center da Shopee.
+              Revise a descrição gerada e aplique diretamente no anúncio da Shopee.
             </DialogDescription>
           </DialogHeader>
           {optimizedDesc && (
@@ -1011,6 +1317,10 @@ export default function ShopeeOptimizer() {
                 <label className="text-sm font-medium mb-1 block">Explicação</label>
                 <p className="text-sm text-muted-foreground">{optimizedDesc.explanation}</p>
               </div>
+              <Button onClick={handleApplyDesc} disabled={applyingDesc} className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white">
+                {applyingDesc ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                {applyingDesc ? "Aplicando..." : "Aplicar Descrição no Anúncio"}
+              </Button>
             </div>
           )}
         </DialogContent>

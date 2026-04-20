@@ -316,7 +316,7 @@ export type InsertMlCategory = typeof mlCategories.$inferInsert;
 export const backgroundJobs = mysqlTable("background_jobs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
-  type: mysqlEnum("bg_job_type", ["export_ml", "generate_titles", "generate_descriptions", "generate_images"]).notNull(),
+  type: mysqlEnum("bg_job_type", ["export_ml", "generate_titles", "generate_descriptions", "generate_images", "shopee_sync"]).notNull(),
   status: mysqlEnum("bg_job_status", ["scheduled", "queued", "processing", "completed", "failed", "cancelled"]).default("queued").notNull(),
   // Job configuration
   marketplaceId: int("marketplaceId"),
@@ -410,6 +410,8 @@ export const shopeeAccounts = mysqlTable("shopee_accounts", {
   accessToken: text("accessToken").notNull(),
   refreshToken: text("refreshToken").notNull(),
   tokenExpiresAt: timestamp("tokenExpiresAt").notNull(),
+  refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt"),
+  tokenStatus: varchar("tokenStatus", { length: 32 }).default("active").notNull(),
   shopStatus: varchar("shopStatus", { length: 64 }),
   totalProducts: int("totalProducts").default(0),
   isActive: int("isActive").default(1).notNull(),

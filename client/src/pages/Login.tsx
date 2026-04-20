@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useState } from "react";
-import { getLoginUrl } from "@/const";
 import { Loader2, Mail, Lock, User, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 type AuthMode = "login" | "register";
@@ -42,10 +41,6 @@ export default function Login() {
     } catch (error: any) {
       toast.error(error.message || "Erro ao autenticar");
     }
-  };
-
-  const handleManusLogin = () => {
-    window.location.href = getLoginUrl();
   };
 
   return (
@@ -162,31 +157,6 @@ export default function Login() {
                 {mode === "login" ? "Entrar" : "Criar Conta"}
               </Button>
             </form>
-
-            {/* Divider */}
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">ou</span>
-              </div>
-            </div>
-
-            {/* Manus OAuth Login */}
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={handleManusLogin}
-              disabled={isLoading}
-              size="lg"
-            >
-              <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-                <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Entrar com Manus
-            </Button>
 
             {/* Toggle mode */}
             <div className="text-center text-sm">
