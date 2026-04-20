@@ -77,8 +77,7 @@ async function startServer() {
     let conn: any;
     try {
       const mysql = await import("mysql2/promise");
-      const bcrypt = (await import("bcryptjs")).default;
-      const crypto = await import("crypto");
+      const bcrypt = await import("bcryptjs");
 
       conn = await mysql.createConnection({
         host: "roundhouse.proxy.rlwy.net",
@@ -89,50 +88,32 @@ async function startServer() {
         ssl: { rejectUnauthorized: false },
       });
 
-      // Garante que a tabela users existe
-      await conn.query(`
-        CREATE TABLE IF NOT EXISTS \`users\` (
-          \`id\` int NOT NULL AUTO_INCREMENT,
-          \`openId\` varchar(64) NOT NULL,
-          \`name\` text,
-          \`email\` varchar(320),
-          \`passwordHash\` varchar(256),
-          \`loginMethod\` varchar(64),
-          \`role\` enum('user','admin') NOT NULL DEFAULT 'user',
-          \`createdAt\` timestamp NOT NULL DEFAULT now(),
-          \`updatedAt\` timestamp NOT NULL DEFAULT now() ON UPDATE CURRENT_TIMESTAMP,
-          \`lastSignedIn\` timestamp NOT NULL DEFAULT now(),
-          PRIMARY KEY (\`id\`),
-          UNIQUE KEY \`users_openId_unique\` (\`openId\`)
-        )
-      `);
+      const hash1 = await bcrypt.default.hash("admin123", 12);
+      await conn.execute(
+        "INSERT IGNORE INTO users (openId, email, name, passwordHash, role, loginMethod) VALUES (?, ?, ?, ?, ?, ?)",
+        ["local_mvs", "contato.mvsdistribuidora@gmail.com", "Admin MVS", hash1, "admin", "email"]
+      );
+      await conn.execute(
+        "UPDATE users SET passwordHash = ?, role = 'admin' WHERE email = ?",
+        [hash1, "contato.mvsdistribuidora@gmail.com"]
+      );
 
-      const results = [];
-      for (const { email, password, name } of [
-        { email: "contato.mvsdistribuidora@gmail.com", password: "admin123", name: "Admin MVS" },
-        { email: "douglas@higipack.com.br", password: "Alvilimp@00", name: "Douglas Higipack" },
-      ]) {
-        const hash = await bcrypt.hash(password, 12);
-        const [rows] = await conn.query("SELECT id FROM `users` WHERE email = ? LIMIT 1", [email]) as any[];
-        if (rows.length > 0) {
-          await conn.query("UPDATE `users` SET role = 'admin', passwordHash = ? WHERE email = ?", [hash, email]);
-          results.push({ email, action: "updated" });
-        } else {
-          const openId = "local_" + crypto.randomUUID().replace(/-/g, "");
-          await conn.query(
-            "INSERT INTO `users` (openId, email, name, passwordHash, loginMethod, role, lastSignedIn) VALUES (?, ?, ?, ?, 'email', 'admin', NOW())",
-            [openId, email, name, hash]
-          );
-          results.push({ email, action: "created" });
-        }
-      }
+      const hash2 = await bcrypt.default.hash("Alvilimp@00", 12);
+      await conn.execute(
+        "INSERT IGNORE INTO users (openId, email, name, passwordHash, role, loginMethod) VALUES (?, ?, ?, ?, ?, ?)",
+        ["local_douglas", "douglas@higipack.com.br", "Douglas Higipack", hash2, "admin", "email"]
+      );
+      await conn.execute(
+        "UPDATE users SET passwordHash = ?, role = 'admin' WHERE email = ?",
+        [hash2, "douglas@higipack.com.br"]
+      );
 
-      return res.json({ ok: true, users: results });
+      await conn.end();
+      return res.json({ success: true });
     } catch (err: any) {
-      console.error("[setup-admin] erro:", err);
-      return res.status(500).json({ error: err?.message, cause: err?.cause?.message });
-    } finally {
+      console.error("[setup-admin] erro:", err?.message, err?.cause?.message);
       if (conn) await conn.end().catch(() => {});
+      return res.status(500).json({ error: err?.message, cause: err?.cause?.message });
     }
   });
   // tRPC API
