@@ -7,15 +7,27 @@
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 import { users } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import crypto from "crypto";
 
 const SALT_ROUNDS = 12;
 
+let _pool: mysql.Pool | null = null;
+
 function getDb() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
-  return drizzle(process.env.DATABASE_URL);
+  if (!_pool) {
+    _pool = mysql.createPool({
+      uri: process.env.DATABASE_URL,
+      waitForConnections: true,
+      connectionLimit: 10,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000,
+    });
+  }
+  return drizzle(_pool);
 }
 
 /**
