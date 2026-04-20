@@ -25,18 +25,14 @@ export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
       const pool = mysql.createPool({
-        host: process.env.MYSQLHOST,
-        port: Number(process.env.MYSQLPORT) || 3306,
-        user: process.env.MYSQLUSER,
-        password: process.env.MYSQLPASSWORD,
-        database: process.env.MYSQLDATABASE,
+        uri: process.env.DATABASE_URL,
         waitForConnections: true,
         connectionLimit: 10,
         enableKeepAlive: true,
-        keepAliveInitialDelay: 10000,
+        keepAliveInitialDelay: 0,
         ssl: false,
       });
-      _db = drizzle({ client: pool });
+      _db = drizzle(pool);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;

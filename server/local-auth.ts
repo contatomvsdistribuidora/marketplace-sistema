@@ -20,19 +20,15 @@ function getDb() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
   if (!_pool) {
     _pool = mysql.createPool({
-      host: process.env.MYSQLHOST,
-      port: Number(process.env.MYSQLPORT) || 3306,
-      user: process.env.MYSQLUSER,
-      password: process.env.MYSQLPASSWORD,
-      database: process.env.MYSQLDATABASE,
+      uri: process.env.DATABASE_URL,
       waitForConnections: true,
       connectionLimit: 10,
       enableKeepAlive: true,
-      keepAliveInitialDelay: 10000,
+      keepAliveInitialDelay: 0,
       ssl: false,
     });
   }
-  return drizzle({ client: _pool });
+  return drizzle(_pool);
 }
 
 /**
