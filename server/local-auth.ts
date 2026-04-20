@@ -20,7 +20,11 @@ function getDb() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
   if (!_pool) {
     _pool = mysql.createPool({
-      uri: process.env.DATABASE_URL,
+      host: process.env.MYSQLHOST,
+      port: Number(process.env.MYSQLPORT) || 3306,
+      user: process.env.MYSQLUSER,
+      password: process.env.MYSQLPASSWORD,
+      database: process.env.MYSQLDATABASE,
       waitForConnections: true,
       connectionLimit: 10,
       enableKeepAlive: true,
