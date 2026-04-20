@@ -87,17 +87,20 @@ export async function loginUser(email: string, password: string) {
   const db = getDb();
 
   // Find user by email
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1);
+  let user: typeof users.$inferSelect | undefined;
+  try {
+    const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    user = result[0];
+  } catch (err: any) {
+    console.error("[loginUser] DB query failed:", err?.message, "cause:", err?.cause?.message ?? err?.cause);
+    throw new Error("Erro ao conectar ao banco de dados. Tente novamente.");
+  }
 
   if (!user) {
     throw new Error("Email ou senha incorretos.");
   }
 
-  if (!user.passwordHash) {
+  if (!user!.passwordHash) {
     throw new Error("Esta conta usa login via Manus. Use o botão 'Entrar com Manus' para acessar.");
   }
 
