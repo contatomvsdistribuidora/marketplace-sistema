@@ -30,6 +30,7 @@ export async function getDb() {
         connectionLimit: 10,
         enableKeepAlive: true,
         keepAliveInitialDelay: 10000,
+        ssl: false,
       });
       _db = drizzle({ client: pool });
     } catch (error) {

@@ -25,6 +25,7 @@ function getDb() {
       connectionLimit: 10,
       enableKeepAlive: true,
       keepAliveInitialDelay: 10000,
+      ssl: false,
     });
   }
   return drizzle({ client: _pool });
