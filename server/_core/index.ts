@@ -47,47 +47,14 @@ async function startServer() {
   registerShopeeRoutes(app);
   // One-time admin setup endpoint
   app.get("/api/setup-admin", async (req, res) => {
-    let conn: any;
-    try {
-      const mysql = await import("mysql2/promise");
-      const bcrypt = await import("bcryptjs");
-
-      conn = await mysql.createConnection({
-        host: "roundhouse.proxy.rlwy.net",
-        port: 40808,
-        user: "root",
-        password: "VkPFmabcLBBOknQqU/VqNXDB2BkWAP",
-        database: "railway",
-        ssl: { rejectUnauthorized: false },
-      });
-
-      const hash1 = await bcrypt.default.hash("admin123", 12);
-      await conn.execute(
-        "INSERT IGNORE INTO users (openId, email, name, passwordHash, role, loginMethod) VALUES (?, ?, ?, ?, ?, ?)",
-        ["local_mvs", "contato.mvsdistribuidora@gmail.com", "Admin MVS", hash1, "admin", "email"]
-      );
-      await conn.execute(
-        "UPDATE users SET passwordHash = ?, role = 'admin' WHERE email = ?",
-        [hash1, "contato.mvsdistribuidora@gmail.com"]
-      );
-
-      const hash2 = await bcrypt.default.hash("Alvilimp@00", 12);
-      await conn.execute(
-        "INSERT IGNORE INTO users (openId, email, name, passwordHash, role, loginMethod) VALUES (?, ?, ?, ?, ?, ?)",
-        ["local_douglas", "douglas@higipack.com.br", "Douglas Higipack", hash2, "admin", "email"]
-      );
-      await conn.execute(
-        "UPDATE users SET passwordHash = ?, role = 'admin' WHERE email = ?",
-        [hash2, "douglas@higipack.com.br"]
-      );
-
-      await conn.end();
-      return res.json({ success: true });
-    } catch (err: any) {
-      console.error("[setup-admin] erro:", err?.message, err?.cause?.message);
-      if (conn) await conn.end().catch(() => {});
-      return res.status(500).json({ error: err?.message, cause: err?.cause?.message });
-    }
+    return res.json({
+      MYSQLHOST: process.env.MYSQLHOST || "NÃO DEFINIDO",
+      MYSQLPORT: process.env.MYSQLPORT || "NÃO DEFINIDO",
+      MYSQLUSER: process.env.MYSQLUSER || "NÃO DEFINIDO",
+      MYSQLDATABASE: process.env.MYSQLDATABASE || "NÃO DEFINIDO",
+      MYSQLPASSWORD: process.env.MYSQLPASSWORD ? "DEFINIDO" : "NÃO DEFINIDO",
+      DATABASE_URL: process.env.DATABASE_URL || "NÃO DEFINIDO",
+    });
   });
   // tRPC API
   app.use(
