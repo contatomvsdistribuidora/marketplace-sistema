@@ -27,7 +27,7 @@ function getDb() {
       keepAliveInitialDelay: 10000,
     });
   }
-  return drizzle(_pool);
+  return drizzle({ client: _pool });
 }
 
 /**

@@ -11,32 +11,6 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startBackgroundWorker } from "../background-worker";
-import { drizzle } from "drizzle-orm/mysql2";
-import { migrate } from "drizzle-orm/mysql2/migrator";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-async function runMigrations() {
-  if (!process.env.DATABASE_URL) {
-    console.warn("[migrations] DATABASE_URL não configurada, pulando migrations");
-    return;
-  }
-  try {
-    const db = drizzle(process.env.DATABASE_URL);
-    const migrationsFolder = path.resolve(__dirname, "../../drizzle");
-    await migrate(db, { migrationsFolder });
-    console.log("[migrations] ✅ Migrations aplicadas com sucesso");
-  } catch (err: any) {
-    // Ignora erros de coluna/tabela já existente (migrations parcialmente aplicadas)
-    if (err?.cause?.code === "ER_DUP_FIELDNAME" || err?.cause?.code === "ER_TABLE_EXISTS_ERROR") {
-      console.warn("[migrations] Aviso (ignorado):", err?.cause?.message);
-    } else {
-      console.error("[migrations] Erro ao rodar migrations:", err?.message, err?.cause?.message);
-    }
-  }
-}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -58,7 +32,6 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  await runMigrations();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
