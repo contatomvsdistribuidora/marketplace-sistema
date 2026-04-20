@@ -85,16 +85,25 @@ async function startServer() {
       const { users } = await import("../../drizzle/schema.js");
       const crypto = await import("crypto");
       const db = drizzle(process.env.DATABASE_URL);
-      const email = "contato.mvsdistribuidora@gmail.com";
-      const passwordHash = await bcrypt.hash("admin123", 12);
-      const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-      if (existing.length > 0) {
-        await db.update(users).set({ role: "admin", passwordHash }).where(eq(users.email, email));
-        return res.json({ ok: true, action: "updated", email, password: "admin123" });
+
+      async function upsertAdmin(email: string, password: string, name: string) {
+        const hash = await bcrypt.hash(password, 12);
+        const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+        if (existing.length > 0) {
+          await db.update(users).set({ role: "admin", passwordHash: hash }).where(eq(users.email, email));
+          return "updated";
+        }
+        const openId = "local_" + (crypto as any).randomUUID().replace(/-/g, "");
+        await db.insert(users).values({ openId, email, name, passwordHash: hash, loginMethod: "email", role: "admin", lastSignedIn: new Date() });
+        return "created";
       }
-      const openId = "local_" + crypto.randomUUID().replace(/-/g, "");
-      await db.insert(users).values({ openId, email, name: "Admin", passwordHash, loginMethod: "email", role: "admin", lastSignedIn: new Date() });
-      return res.json({ ok: true, action: "created", email, password: "admin123" });
+
+      const results = await Promise.all([
+        upsertAdmin("contato.mvsdistribuidora@gmail.com", "admin123", "Admin MVS").then(a => ({ email: "contato.mvsdistribuidora@gmail.com", action: a })),
+        upsertAdmin("douglas@higipack.com.br", "Alvilimp@00", "Douglas Higipack").then(a => ({ email: "douglas@higipack.com.br", action: a })),
+      ]);
+
+      return res.json({ ok: true, users: results });
     } catch (err: any) {
       console.error("[setup-admin] erro:", err);
       return res.status(500).json({ error: err?.message, cause: err?.cause?.message });
