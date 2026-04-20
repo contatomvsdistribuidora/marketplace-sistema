@@ -74,39 +74,65 @@ async function startServer() {
   registerShopeeRoutes(app);
   // One-time admin setup endpoint
   app.get("/api/setup-admin", async (req, res) => {
+    let conn: any;
     try {
-      if (!process.env.DATABASE_URL) {
-        return res.status(500).json({ error: "DATABASE_URL não configurada" });
-      }
-      // Roda migrations primeiro para garantir que as tabelas existam
-      await runMigrations();
+      const mysql = await import("mysql2/promise");
       const bcrypt = (await import("bcryptjs")).default;
-      const { eq } = await import("drizzle-orm");
-      const { users } = await import("../../drizzle/schema.js");
       const crypto = await import("crypto");
-      const db = drizzle(process.env.DATABASE_URL);
 
-      async function upsertAdmin(email: string, password: string, name: string) {
+      conn = await mysql.createConnection({
+        host: "roundhouse.proxy.rlwy.net",
+        port: 40808,
+        user: "root",
+        password: "VkPFmabcLBBOknQqU/VqNXDB2BkWAP",
+        database: "railway",
+        ssl: { rejectUnauthorized: false },
+      });
+
+      // Garante que a tabela users existe
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS \`users\` (
+          \`id\` int NOT NULL AUTO_INCREMENT,
+          \`openId\` varchar(64) NOT NULL,
+          \`name\` text,
+          \`email\` varchar(320),
+          \`passwordHash\` varchar(256),
+          \`loginMethod\` varchar(64),
+          \`role\` enum('user','admin') NOT NULL DEFAULT 'user',
+          \`createdAt\` timestamp NOT NULL DEFAULT now(),
+          \`updatedAt\` timestamp NOT NULL DEFAULT now() ON UPDATE CURRENT_TIMESTAMP,
+          \`lastSignedIn\` timestamp NOT NULL DEFAULT now(),
+          PRIMARY KEY (\`id\`),
+          UNIQUE KEY \`users_openId_unique\` (\`openId\`)
+        )
+      `);
+
+      const results = [];
+      for (const { email, password, name } of [
+        { email: "contato.mvsdistribuidora@gmail.com", password: "admin123", name: "Admin MVS" },
+        { email: "douglas@higipack.com.br", password: "Alvilimp@00", name: "Douglas Higipack" },
+      ]) {
         const hash = await bcrypt.hash(password, 12);
-        const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-        if (existing.length > 0) {
-          await db.update(users).set({ role: "admin", passwordHash: hash }).where(eq(users.email, email));
-          return "updated";
+        const [rows] = await conn.query("SELECT id FROM `users` WHERE email = ? LIMIT 1", [email]) as any[];
+        if (rows.length > 0) {
+          await conn.query("UPDATE `users` SET role = 'admin', passwordHash = ? WHERE email = ?", [hash, email]);
+          results.push({ email, action: "updated" });
+        } else {
+          const openId = "local_" + crypto.randomUUID().replace(/-/g, "");
+          await conn.query(
+            "INSERT INTO `users` (openId, email, name, passwordHash, loginMethod, role, lastSignedIn) VALUES (?, ?, ?, ?, 'email', 'admin', NOW())",
+            [openId, email, name, hash]
+          );
+          results.push({ email, action: "created" });
         }
-        const openId = "local_" + (crypto as any).randomUUID().replace(/-/g, "");
-        await db.insert(users).values({ openId, email, name, passwordHash: hash, loginMethod: "email", role: "admin", lastSignedIn: new Date() });
-        return "created";
       }
-
-      const results = await Promise.all([
-        upsertAdmin("contato.mvsdistribuidora@gmail.com", "admin123", "Admin MVS").then(a => ({ email: "contato.mvsdistribuidora@gmail.com", action: a })),
-        upsertAdmin("douglas@higipack.com.br", "Alvilimp@00", "Douglas Higipack").then(a => ({ email: "douglas@higipack.com.br", action: a })),
-      ]);
 
       return res.json({ ok: true, users: results });
     } catch (err: any) {
       console.error("[setup-admin] erro:", err);
       return res.status(500).json({ error: err?.message, cause: err?.cause?.message });
+    } finally {
+      if (conn) await conn.end().catch(() => {});
     }
   });
   // tRPC API
