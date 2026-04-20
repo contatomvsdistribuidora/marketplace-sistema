@@ -8,4 +8,4 @@ cmds = ["npm install -g pnpm@8.4.1", "pnpm install --frozen-lockfile"]
 cmds = ["pnpm run build"]
 
 [start]
-cmd = "pnpm run start"
+cmd = "pnpm run seed && pnpm run start"
