@@ -1740,14 +1740,16 @@ export const appRouter = router({
         accountId: z.number(),
         offset: z.number().optional(),
         limit: z.number().optional(),
+        search: z.string().optional(),
       }))
       .query(async ({ input }) => {
         const products = await shopee.getLocalProducts(
           input.accountId,
           input.offset || 0,
-          input.limit || 50
+          input.limit || 50,
+          input.search || undefined
         );
-        const total = await shopee.getProductCount(input.accountId);
+        const total = await shopee.getProductCount(input.accountId, input.search || undefined);
         return { products, total };
       }),
 

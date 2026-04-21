@@ -8,7 +8,7 @@
  */
 
 import crypto from "crypto";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, like } from "drizzle-orm";
 import { shopeeAccounts, shopeeProducts } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { db } from "./db";
@@ -766,12 +766,17 @@ export async function syncProducts(
 export async function getLocalProducts(
   accountId: number,
   offset: number = 0,
-  limit: number = 50
+  limit: number = 50,
+  search?: string
 ) {
+  const where = search
+    ? and(eq(shopeeProducts.shopeeAccountId, accountId), like(shopeeProducts.itemName, `%${search}%`))
+    : eq(shopeeProducts.shopeeAccountId, accountId);
+
   const products = await db
     .select()
     .from(shopeeProducts)
-    .where(eq(shopeeProducts.shopeeAccountId, accountId))
+    .where(where)
     .orderBy(desc(shopeeProducts.sold))
     .limit(limit)
     .offset(offset);
@@ -782,11 +787,15 @@ export async function getLocalProducts(
 /**
  * Get product count for an account.
  */
-export async function getProductCount(accountId: number) {
+export async function getProductCount(accountId: number, search?: string) {
+  const where = search
+    ? and(eq(shopeeProducts.shopeeAccountId, accountId), like(shopeeProducts.itemName, `%${search}%`))
+    : eq(shopeeProducts.shopeeAccountId, accountId);
+
   const result = await db
     .select({ id: shopeeProducts.id })
     .from(shopeeProducts)
-    .where(eq(shopeeProducts.shopeeAccountId, accountId));
+    .where(where);
   return result.length;
 }
 
