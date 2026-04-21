@@ -305,14 +305,20 @@ function ProductDetail({ product, onBack }: { product: any; onBack: () => void }
 
 // ─── Tela 3 – Wizard ─────────────────────────────────────────────────────────
 
+type PricingMode = "multiplier" | "margin" | "profit";
+
 interface PricingGlobals {
   unitCost: string;
-  marginMultiplier: string;
-  defaultDiscount: string;
-  shopeeCommission: string;
-  transactionFee: string;
   packagingCost: string;
   shippingCost: string;
+  transactionFee: string;
+  // mode 1
+  marginMultiplier: string;
+  defaultDiscount: string;
+  // mode 2
+  desiredMargin: string;
+  // mode 3
+  minProfit: string;
 }
 
 interface ComputedPricing {
@@ -320,6 +326,7 @@ interface ComputedPricing {
   price: number;
   totalProductCost: number;
   platformCost: number;
+  commissionRate: number;
   marginContribution: number;
   profitPct: number;
   weight: number;
@@ -334,6 +341,62 @@ function extractQty(label: string): number {
   return m ? parseFloat(m[0]) : 1;
 }
 
+// Shopee Brazil 2026 commission tiers
+function shopeeCommissionRate(price: number): number {
+  if (price <  50) return 0.18;
+  if (price < 100) return 0.16;
+  if (price < 500) return 0.14;
+  return 0.12;
+}
+
+function shopeeCommissionLabel(price: number): string {
+  if (price <  50) return "18% (até R$49)";
+  if (price < 100) return "16% (R$50–99)";
+  if (price < 500) return "14% (R$100–499)";
+  return "12% (acima R$500)";
+}
+
+// Mode 2: iterate until price converges to hit desired margin %
+function solvePriceByMargin(
+  totalCost: number, packaging: number, shipping: number,
+  txFee: number, desiredMarginPct: number
+): number {
+  if (totalCost <= 0 || desiredMarginPct >= 100) return 0;
+  const margin = desiredMarginPct / 100;
+  const tx = txFee / 100;
+  let price = totalCost * 3;
+  for (let i = 0; i < 80; i++) {
+    const commission = shopeeCommissionRate(price);
+    const denom = 1 - commission - tx - margin;
+    if (denom <= 0) return 0;
+    const next = (totalCost + packaging + shipping) / denom;
+    if (Math.abs(next - price) < 0.001) return Math.max(next, 0);
+    price = next;
+    if (!isFinite(price)) return 0;
+  }
+  return Math.max(price, 0);
+}
+
+// Mode 3: iterate until price converges to guarantee minProfit R$
+function solvePriceByMinProfit(
+  totalCost: number, packaging: number, shipping: number,
+  txFee: number, minProfit: number
+): number {
+  if (totalCost <= 0) return 0;
+  const tx = txFee / 100;
+  let price = totalCost + minProfit + packaging + shipping;
+  for (let i = 0; i < 80; i++) {
+    const commission = shopeeCommissionRate(price);
+    const denom = 1 - commission - tx;
+    if (denom <= 0) return 0;
+    const next = (totalCost + packaging + shipping + minProfit) / denom;
+    if (Math.abs(next - price) < 0.001) return Math.max(next, 0);
+    price = next;
+    if (!isFinite(price)) return 0;
+  }
+  return Math.max(price, 0);
+}
+
 function VariationWizard({
   product,
   onSave,
@@ -343,20 +406,26 @@ function VariationWizard({
   onSave: (group: VariationGroup) => void;
   onClose: () => void;
 }) {
-  const [step, setStep] = useState<WizardStep>("A");
-  const [selectedType, setSelectedType] = useState<VariationType | null>(null);
-  const [optionLabels, setOptionLabels] = useState<string[]>([""]);
+  const [step, setStep]                   = useState<WizardStep>("A");
+  const [selectedType, setSelectedType]   = useState<VariationType | null>(null);
+  const [optionLabels, setOptionLabels]   = useState<string[]>([""]);
   const [optionDetails, setOptionDetails] = useState<VariationOption[]>([]);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
-  const [qtyFactors, setQtyFactors] = useState<string[]>([]);
+  const [qtyFactors, setQtyFactors]       = useState<string[]>([]);
+  const [pricingMode, setPricingMode]     = useState<PricingMode>("multiplier");
+  // Per-variation parameter overrides (multiplier / margin% / profit R$)
+  const [perVarParam, setPerVarParam]     = useState<string[]>([]);
+  const [perVarEnabled, setPerVarEnabled] = useState<boolean[]>([]);
+
   const [pricing, setPricing] = useState<PricingGlobals>({
     unitCost: "",
-    marginMultiplier: "2.5",
-    defaultDiscount: "1",
-    shopeeCommission: "14",
-    transactionFee: "2",
     packagingCost: "",
     shippingCost: "",
+    transactionFee: "2",
+    marginMultiplier: "2.5",
+    defaultDiscount: "1",
+    desiredMargin: "30",
+    minProfit: "20",
   });
 
   const optimizeMutation = trpc.shopee.optimizeTitle.useMutation();
@@ -371,81 +440,91 @@ function VariationWizard({
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
   const typeName = VARIATION_TYPES.find(t => t.type === selectedType)?.label ?? "";
 
-  // ── Precificação ──────────────────────────────────────────────────────────
+  // ── Motor de precificação ──────────────────────────────────────────────────
 
   function computePricing(opt: VariationOption, idx: number): ComputedPricing {
-    const isQty = selectedType === "quantidade";
-    const qty = isQty ? extractQty(opt.label) : 1;
-
-    const unitCost     = parseFloat(pricing.unitCost)        || 0;
-    const multiplier   = parseFloat(pricing.marginMultiplier)|| 1;
-    const discountPct  = parseFloat(qtyFactors[idx] ?? pricing.defaultDiscount) || 0;
-    const commission   = parseFloat(pricing.shopeeCommission) || 0;
-    const txFee        = parseFloat(pricing.transactionFee)   || 0;
-    const packaging    = parseFloat(pricing.packagingCost)    || 0;
-    const shipping     = parseFloat(pricing.shippingCost)     || 0;
-
-    // Factor: 1.00 for idx=0, cumulative -discount% per extra position
-    const factor = Math.max(1 - (discountPct / 100) * idx, 0.01);
-
-    const price            = unitCost * qty * multiplier * factor;
-    const platformCost     = price * (commission + txFee) / 100 + packaging + shipping;
+    const isQty          = selectedType === "quantidade";
+    const qty            = isQty ? extractQty(opt.label) : 1;
+    const unitCost       = parseFloat(pricing.unitCost)       || 0;
+    const packaging      = parseFloat(pricing.packagingCost)  || 0;
+    const shipping       = parseFloat(pricing.shippingCost)   || 0;
+    const txFee          = parseFloat(pricing.transactionFee) || 0;
+    const discountPct    = parseFloat(qtyFactors[idx] ?? (idx === 0 ? "0" : pricing.defaultDiscount)) || 0;
+    const factor         = pricingMode === "multiplier" ? Math.max(1 - (discountPct / 100) * idx, 0.01) : 1;
     const totalProductCost = unitCost * qty;
+
+    // Effective per-variation param (override or global)
+    const useOverride = perVarEnabled[idx] ?? false;
+    const paramOverride = useOverride ? (perVarParam[idx] ?? "") : "";
+
+    let price = 0;
+    if (pricingMode === "multiplier") {
+      const multiplier = parseFloat(paramOverride || pricing.marginMultiplier) || 1;
+      price = totalProductCost * multiplier * factor;
+    } else if (pricingMode === "margin") {
+      const desiredMarginPct = parseFloat(paramOverride || pricing.desiredMargin) || 0;
+      price = solvePriceByMargin(totalProductCost, packaging, shipping, txFee, desiredMarginPct);
+    } else {
+      const minProfit = parseFloat(paramOverride || pricing.minProfit) || 0;
+      price = solvePriceByMinProfit(totalProductCost, packaging, shipping, txFee, minProfit);
+    }
+
+    const commissionRate  = shopeeCommissionRate(price);
+    const platformCost    = price * (commissionRate + txFee / 100) + packaging + shipping;
     const marginContribution = price - totalProductCost - platformCost;
-    const profitPct        = price > 0 ? (marginContribution / price) * 100 : 0;
+    const profitPct       = price > 0 ? (marginContribution / price) * 100 : 0;
 
     // Dimensions
-    const baseL = parseFloat(product.dimensionLength) || 0;
-    const baseW = parseFloat(product.dimensionWidth)  || 0;
-    const baseH = parseFloat(product.dimensionHeight) || 0;
-    const baseWeight = parseFloat(product.weight)     || 0;
-
+    const baseL      = parseFloat(product.dimensionLength) || 0;
+    const baseW      = parseFloat(product.dimensionWidth)  || 0;
+    const baseH      = parseFloat(product.dimensionHeight) || 0;
+    const baseWeight = parseFloat(product.weight)          || 0;
     let weight = opt.weight ? parseFloat(opt.weight) : (isQty ? baseWeight * qty : baseWeight);
     let length = opt.length ? parseFloat(opt.length) : 0;
     let width  = opt.width  ? parseFloat(opt.width)  : 0;
     let height = opt.height ? parseFloat(opt.height) : 0;
-
     if (isQty && !opt.length && baseL && baseW && baseH) {
-      const volumeBase = baseL * baseW * baseH;
-      const scale = Math.cbrt(volumeBase > 0 ? volumeBase * qty / volumeBase : qty);
+      const scale = Math.cbrt(qty);
       length = parseFloat((baseL * scale).toFixed(1));
       width  = parseFloat((baseW * scale).toFixed(1));
       height = parseFloat((baseH * scale).toFixed(1));
     }
 
-    return { qty, price, totalProductCost, platformCost, marginContribution, profitPct, weight, length, width, height, factor };
+    return { qty, price, totalProductCost, platformCost, commissionRate, marginContribution, profitPct, weight, length, width, height, factor };
   }
 
   function profitBadge(pct: number) {
-    if (pct >= 20) return { bg: "bg-green-100 text-green-700 border-green-300",  dot: "bg-green-500"  };
+    if (pct >= 20) return { bg: "bg-green-100 text-green-700 border-green-300",    dot: "bg-green-500"  };
     if (pct >= 10) return { bg: "bg-yellow-100 text-yellow-700 border-yellow-300", dot: "bg-yellow-500" };
-    return             { bg: "bg-red-100 text-red-700 border-red-300",           dot: "bg-red-500"    };
+    return             { bg: "bg-red-100 text-red-700 border-red-300",             dot: "bg-red-500"    };
   }
 
-  function priceAlertVariation(): string | null {
+  // Bloqueia avanço se alguma variação tiver margem negativa
+  const hasNegativeMargin = pricing.unitCost
+    ? optionDetails.some((o, i) => computePricing(o, i).marginContribution < 0)
+    : false;
+
+  function priceRangeAlert(): string | null {
     if (!pricing.unitCost || optionDetails.length < 2) return null;
     const prices = optionDetails.map((o, i) => computePricing(o, i).price).filter(p => p > 0);
     if (prices.length < 2) return null;
     const min = Math.min(...prices);
     const max = Math.max(...prices);
     if (max > min * 4) {
-      const maxOpt = optionDetails[prices.indexOf(max)];
-      return `Variação "${maxOpt.label}" tem preço ${(max / min).toFixed(1)}× maior que a menor — verifique os multiplicadores.`;
+      const maxIdx = prices.indexOf(max);
+      return `"${optionDetails[maxIdx]?.label}" está ${(max / min).toFixed(1)}× mais caro que a menor variação — revise os parâmetros.`;
     }
     return null;
   }
 
   // ── Etapa A ──
-  function goAtoB() {
-    if (!selectedType) return;
-    setStep("B");
-  }
+  function goAtoB() { if (selectedType) setStep("B"); }
 
   // ── Etapa B ──
   function updateLabel(idx: number, val: string) {
     setOptionLabels(labels => labels.map((l, i) => (i === idx ? val : l)));
   }
-  function addLabel() { setOptionLabels(l => [...l, ""]); }
+  function addLabel()               { setOptionLabels(l => [...l, ""]); }
   function removeLabel(idx: number) { setOptionLabels(l => l.filter((_, i) => i !== idx)); }
 
   async function suggestWithAI() {
@@ -470,6 +549,8 @@ function VariationWizard({
     const opts = filled.map(label => emptyOption(label));
     setOptionDetails(opts);
     setQtyFactors(opts.map((_, i) => i === 0 ? "0" : pricing.defaultDiscount));
+    setPerVarParam(opts.map(() => ""));
+    setPerVarEnabled(opts.map(() => false));
     setStep("C");
   }
 
@@ -508,7 +589,7 @@ function VariationWizard({
         length: o.length || c.length.toFixed(1),
         width:  o.width  || c.width.toFixed(1),
         height: o.height || c.height.toFixed(1),
-        price:  o.price  || c.price.toFixed(2),
+        price:  o.price  || (c.price > 0 ? c.price.toFixed(2) : ""),
       };
     });
     onSave({ id: uid(), type: selectedType!, typeName, options: opts });
@@ -519,7 +600,13 @@ function VariationWizard({
     if (prev) setStep(prev);
   }
 
-  const priceAlert = step === "C" ? priceAlertVariation() : null;
+  const rangeAlert   = step === "C" ? priceRangeAlert() : null;
+  const hasPricing   = parseFloat(pricing.unitCost) > 0;
+
+  // Labels por modo
+  const modeParamLabel = pricingMode === "multiplier" ? "Multiplicador" : pricingMode === "margin" ? "Margem %" : "Lucro mín. R$";
+  const modeGlobalKey  = pricingMode === "multiplier" ? "marginMultiplier" as const : pricingMode === "margin" ? "desiredMargin" as const : "minProfit" as const;
+  const modeGlobalPlaceholder = pricingMode === "multiplier" ? "2.5" : pricingMode === "margin" ? "30" : "20";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
@@ -546,7 +633,7 @@ function VariationWizard({
                 <span className={`text-xs font-medium hidden sm:block ${step === s.key ? "text-orange-600" : "text-gray-400"}`}>{s.label}</span>
               </div>
               {i < STEPS.length - 1 && (
-                <div className={`flex-1 h-0.5 mx-2 rounded-full transition-all ${currentStepIndex > i ? "bg-orange-300" : "bg-gray-200"}`} />
+                <div className={`flex-1 h-0.5 mx-2 rounded-full ${currentStepIndex > i ? "bg-orange-300" : "bg-gray-200"}`} />
               )}
             </div>
           ))}
@@ -555,19 +642,16 @@ function VariationWizard({
         {/* Corpo */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
 
-          {/* ETAPA A – Tipo */}
+          {/* ── ETAPA A – Tipo ── */}
           {step === "A" && (
             <div>
               <p className="text-sm text-gray-600 mb-4">Qual tipo de variação você quer criar?</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {VARIATION_TYPES.map(vt => (
-                  <button
-                    key={vt.type}
-                    onClick={() => setSelectedType(vt.type)}
+                  <button key={vt.type} onClick={() => setSelectedType(vt.type)}
                     className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${
                       selectedType === vt.type ? "border-orange-500 bg-orange-50" : "border-gray-200 hover:border-orange-300 bg-white"
-                    }`}
-                  >
+                    }`}>
                     <span className={`mt-0.5 ${selectedType === vt.type ? "text-orange-500" : "text-gray-400"}`}>{vt.icon}</span>
                     <div className="flex-1">
                       <p className={`text-sm font-semibold ${selectedType === vt.type ? "text-orange-700" : "text-gray-800"}`}>{vt.label}</p>
@@ -580,11 +664,11 @@ function VariationWizard({
             </div>
           )}
 
-          {/* ETAPA B – Opções */}
+          {/* ── ETAPA B – Opções ── */}
           {step === "B" && (
             <div>
               <p className="text-sm text-gray-600 mb-1">
-                Digite cada opção da variação <span className="font-semibold text-gray-800">({typeName})</span>:
+                Digite cada opção <span className="font-semibold text-gray-800">({typeName})</span>:
               </p>
               <p className="text-xs text-gray-400 mb-4">Ex: "100 unidades", "Azul", "Grande"...</p>
               <div className="space-y-2 mb-3">
@@ -627,39 +711,96 @@ function VariationWizard({
             </div>
           )}
 
-          {/* ETAPA C – Detalhes + Precificação */}
+          {/* ── ETAPA C – Detalhes + Precificação ── */}
           {step === "C" && (
             <div className="space-y-5">
 
-              {/* Alerta de faixa de preço */}
-              {priceAlert && (
-                <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-3">
+              {/* Alertas */}
+              {hasNegativeMargin && (
+                <div className="flex items-start gap-3 bg-red-50 border border-red-300 rounded-xl p-3">
                   <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-red-700">{priceAlert}</p>
+                  <p className="text-xs text-red-700 font-medium">Uma ou mais variações com margem negativa — revise os parâmetros antes de avançar.</p>
+                </div>
+              )}
+              {rangeAlert && !hasNegativeMargin && (
+                <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-700">{rangeAlert}</p>
                 </div>
               )}
 
-              {/* ── Campos globais de precificação ── */}
+              {/* ── Seletor de modo ── */}
+              <div className="flex rounded-xl overflow-hidden border border-gray-200">
+                {([
+                  { key: "multiplier" as PricingMode, label: "Multiplicador" },
+                  { key: "margin"     as PricingMode, label: "Margem %"      },
+                  { key: "profit"     as PricingMode, label: "Lucro R$"      },
+                ] as const).map(m => (
+                  <button key={m.key} onClick={() => setPricingMode(m.key)}
+                    className={`flex-1 py-2 text-sm font-semibold transition-all ${
+                      pricingMode === m.key
+                        ? "bg-orange-500 text-white"
+                        : "bg-white text-gray-500 hover:bg-orange-50"
+                    }`}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Descrição do modo */}
+              <div className="text-xs text-gray-500 -mt-2 px-1">
+                {pricingMode === "multiplier" && "Preço = custo × quantidade × multiplicador. Desconto por faixa reduz o multiplicador a cada variação."}
+                {pricingMode === "margin"     && "Preço calculado via iteração para atingir exatamente a margem desejada, considerando a tabela de comissões Shopee 2026."}
+                {pricingMode === "profit"     && "Preço calculado via iteração para garantir o lucro mínimo em R$ por variação, considerando todos os custos da Shopee."}
+              </div>
+
+              {/* ── Campos globais ── */}
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">Parâmetros de precificação</p>
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">Parâmetros globais</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
-                  {([
-                    { key: "unitCost"        as const, label: "Custo unitário (R$)",      placeholder: "10.00", step: "0.01" },
-                    { key: "marginMultiplier"as const, label: "Multiplicador de margem",  placeholder: "2.5",   step: "0.1"  },
-                    { key: "defaultDiscount" as const, label: "Desconto por faixa (%)",   placeholder: "1",     step: "0.1"  },
-                    { key: "shopeeCommission"as const, label: "Comissão Shopee (%)",      placeholder: "14",    step: "0.1"  },
-                    { key: "transactionFee"  as const, label: "Taxa transação (%)",       placeholder: "2",     step: "0.1"  },
-                    { key: "packagingCost"   as const, label: "Custo embalagem (R$)",     placeholder: "2.00",  step: "0.01" },
-                  ]).map(({ key, label, placeholder, step: sv }) => (
-                    <div key={key}>
-                      <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                      <input type="number" min="0" step={sv} placeholder={placeholder} value={pricing[key]}
-                        onChange={e => setPricing(p => ({ ...p, [key]: e.target.value }))}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Custo unitário (R$)</label>
+                    <input type="number" min="0" step="0.001" placeholder="0.50" value={pricing.unitCost}
+                      onChange={e => setPricing(p => ({ ...p, unitCost: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                    <p className="text-xs text-gray-400 mt-0.5">Custo por unidade individual</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Custo embalagem (R$)</label>
+                    <input type="number" min="0" step="0.01" placeholder="2.00" value={pricing.packagingCost}
+                      onChange={e => setPricing(p => ({ ...p, packagingCost: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Taxa transação (%)</label>
+                    <input type="number" min="0" step="0.1" placeholder="2" value={pricing.transactionFee}
+                      onChange={e => setPricing(p => ({ ...p, transactionFee: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                  </div>
+
+                  {/* Parâmetro específico do modo */}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      {modeParamLabel} {pricingMode !== "profit" ? "(global)" : "mín. R$ (global)"}
+                    </label>
+                    <input type="number" min="0" step={pricingMode === "multiplier" ? "0.1" : "1"} placeholder={modeGlobalPlaceholder}
+                      value={pricing[modeGlobalKey]}
+                      onChange={e => setPricing(p => ({ ...p, [modeGlobalKey]: e.target.value }))}
+                      className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 font-medium" />
+                  </div>
+
+                  {/* Desconto por faixa — só modo 1 */}
+                  {pricingMode === "multiplier" && (
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Desconto por faixa (%)</label>
+                      <input type="number" min="0" max="50" step="0.1" placeholder="1" value={pricing.defaultDiscount}
+                        onChange={e => setPricing(p => ({ ...p, defaultDiscount: e.target.value }))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
                     </div>
-                  ))}
+                  )}
                 </div>
-                {/* Frete manual */}
+
+                {/* Frete */}
                 <div className="border-t border-gray-200 pt-3">
                   <label className="block text-xs text-gray-500 mb-1">
                     Custo de envio estimado (R$)
@@ -667,20 +808,31 @@ function VariationWizard({
                   </label>
                   <input type="number" min="0" step="0.01" placeholder="0.00" value={pricing.shippingCost}
                     onChange={e => setPricing(p => ({ ...p, shippingCost: e.target.value }))}
-                    className="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                    className="w-40 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                </div>
+
+                {/* Tabela de comissões (informativo) */}
+                <div className="mt-3 border-t border-gray-200 pt-3">
+                  <p className="text-xs text-gray-400 font-semibold mb-1">Tabela Shopee 2026 (auto aplicada):</p>
+                  <div className="flex flex-wrap gap-2 text-xs text-gray-500">
+                    <span className="bg-white border border-gray-200 rounded px-2 py-0.5">até R$49 → 18%</span>
+                    <span className="bg-white border border-gray-200 rounded px-2 py-0.5">R$50–99 → 16%</span>
+                    <span className="bg-white border border-gray-200 rounded px-2 py-0.5">R$100–499 → 14%</span>
+                    <span className="bg-white border border-gray-200 rounded px-2 py-0.5">R$500+ → 12%</span>
+                  </div>
                 </div>
               </div>
 
               {/* ── Cards por variação ── */}
               {optionDetails.map((opt, idx) => {
-                const c = computePricing(opt, idx);
+                const c     = computePricing(opt, idx);
                 const badge = profitBadge(c.profitPct);
-                const hasPricing = parseFloat(pricing.unitCost) > 0;
+                const isNeg = c.marginContribution < 0;
 
                 return (
-                  <div key={opt.id} className="border border-gray-200 rounded-xl overflow-hidden">
-                    {/* Cabeçalho do card */}
-                    <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                  <div key={opt.id} className={`border rounded-xl overflow-hidden ${isNeg ? "border-red-300" : "border-gray-200"}`}>
+                    {/* Cabeçalho */}
+                    <div className={`flex items-center justify-between px-4 py-3 border-b ${isNeg ? "bg-red-50 border-red-200" : "bg-gray-50 border-gray-200"}`}>
                       <p className="text-sm font-semibold text-gray-800">
                         <span className="text-orange-500">{idx + 1}.</span> {opt.label}
                       </p>
@@ -699,51 +851,79 @@ function VariationWizard({
                     </div>
 
                     <div className="p-4 space-y-4">
-                      {/* Campos manuais */}
+                      {/* Override por variação */}
+                      <div className="flex items-center gap-3 p-3 bg-orange-50 border border-orange-100 rounded-lg">
+                        <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-600 select-none">
+                          <input type="checkbox" checked={perVarEnabled[idx] ?? false}
+                            onChange={e => setPerVarEnabled(arr => { const n = [...arr]; n[idx] = e.target.checked; return n; })}
+                            className="accent-orange-500 w-3.5 h-3.5" />
+                          {modeParamLabel} individual para esta variação
+                        </label>
+                        {(perVarEnabled[idx] ?? false) && (
+                          <input type="number" min="0" step={pricingMode === "multiplier" ? "0.1" : "1"}
+                            placeholder={modeGlobalPlaceholder}
+                            value={perVarParam[idx] ?? ""}
+                            onChange={e => setPerVarParam(arr => { const n = [...arr]; n[idx] = e.target.value; return n; })}
+                            className="w-24 px-2 py-1.5 border border-orange-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white font-medium" />
+                        )}
+                        {!(perVarEnabled[idx] ?? false) && (
+                          <span className="text-xs text-gray-400">usando global: <b className="text-gray-600">{pricing[modeGlobalKey] || modeGlobalPlaceholder}</b></span>
+                        )}
+                      </div>
+
+                      {/* Campos de dimensão + estoque */}
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                         {([
-                          { field: "weight" as const, label: "Peso (kg)",        placeholder: c.weight > 0 ? c.weight.toFixed(2) : "0.50", sv: "0.01" },
-                          { field: "length" as const, label: "Comprimento (cm)", placeholder: c.length > 0 ? c.length.toFixed(1) : "20",   sv: "0.1"  },
-                          { field: "width"  as const, label: "Largura (cm)",     placeholder: c.width  > 0 ? c.width.toFixed(1)  : "15",   sv: "0.1"  },
-                          { field: "height" as const, label: "Altura (cm)",      placeholder: c.height > 0 ? c.height.toFixed(1) : "10",   sv: "0.1"  },
-                          { field: "stock"  as const, label: "Estoque",          placeholder: "0",                                          sv: "1"    },
-                        ]).map(({ field, label, placeholder, sv }) => (
+                          { field: "weight" as const, label: "Peso (kg)",        ph: c.weight > 0 ? c.weight.toFixed(2) : "0.50", sv: "0.01" },
+                          { field: "length" as const, label: "Comprimento (cm)", ph: c.length > 0 ? c.length.toFixed(1) : "20",   sv: "0.1"  },
+                          { field: "width"  as const, label: "Largura (cm)",     ph: c.width  > 0 ? c.width.toFixed(1)  : "15",   sv: "0.1"  },
+                          { field: "height" as const, label: "Altura (cm)",      ph: c.height > 0 ? c.height.toFixed(1) : "10",   sv: "0.1"  },
+                          { field: "stock"  as const, label: "Estoque",          ph: "0",                                          sv: "1"    },
+                        ]).map(({ field, label, ph, sv }) => (
                           <div key={field}>
                             <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                            <input type="number" min="0" step={sv} placeholder={placeholder} value={(opt as any)[field]}
+                            <input type="number" min="0" step={sv} placeholder={ph} value={(opt as any)[field]}
                               onChange={e => updateDetail(opt.id, field, e.target.value)}
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
                           </div>
                         ))}
-                        {/* Fator de desconto editável */}
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Desconto faixa (%)</label>
-                          <input type="number" min="0" max="100" step="0.1"
-                            value={qtyFactors[idx] ?? pricing.defaultDiscount}
-                            onChange={e => setQtyFactors(f => { const n = [...f]; n[idx] = e.target.value; return n; })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-                        </div>
+                        {pricingMode === "multiplier" && (
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Desconto faixa (%)</label>
+                            <input type="number" min="0" max="100" step="0.1"
+                              value={qtyFactors[idx] ?? (idx === 0 ? "0" : pricing.defaultDiscount)}
+                              onChange={e => setQtyFactors(f => { const n = [...f]; n[idx] = e.target.value; return n; })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                          </div>
+                        )}
                       </div>
 
-                      {/* Painel de precificação calculada */}
+                      {/* Painel de resultado calculado */}
                       {hasPricing && (
-                        <div className="bg-orange-50 border border-orange-100 rounded-lg p-3">
+                        <div className={`border rounded-lg p-3 ${isNeg ? "bg-red-50 border-red-200" : "bg-orange-50 border-orange-100"}`}>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-                              <TrendingUp className="w-3.5 h-3.5 text-orange-500" /> Precificação calculada
+                              <TrendingUp className="w-3.5 h-3.5 text-orange-500" /> Preço calculado
                             </span>
-                            <span className="text-lg font-bold text-orange-600">
+                            <span className={`text-lg font-bold ${isNeg ? "text-red-600" : "text-orange-600"}`}>
                               R$ {c.price.toFixed(2)}
                             </span>
                           </div>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
-                            <span>Qtd detectada: <b className="text-gray-700">{c.qty}×</b></span>
-                            <span>Fator: <b className="text-gray-700">{(c.factor * 100).toFixed(1)}%</b></span>
+                            <span>Qtd: <b className="text-gray-700">{c.qty}×</b></span>
+                            <span>Comissão Shopee: <b className="text-gray-700">{shopeeCommissionLabel(c.price)}</b></span>
                             <span>Custo produto: <b className="text-gray-700">R$ {c.totalProductCost.toFixed(2)}</b></span>
                             <span>Custo plataforma: <b className="text-gray-700">R$ {c.platformCost.toFixed(2)}</b></span>
-                            <span>Margem contribuição: <b className={c.marginContribution >= 0 ? "text-green-700" : "text-red-600"}>R$ {c.marginContribution.toFixed(2)}</b></span>
-                            <span>Lucro líquido: <b className={`${badge.bg.split(" ")[1]}`}>{c.profitPct.toFixed(1)}%</b></span>
+                            <span>Margem: <b className={c.marginContribution >= 0 ? "text-green-700" : "text-red-600"}>
+                              R$ {c.marginContribution.toFixed(2)}
+                            </b></span>
+                            <span>Lucro: <b className={badge.bg.split(" ")[1]}>{c.profitPct.toFixed(1)}%</b></span>
                           </div>
+                          {isNeg && (
+                            <p className="text-xs text-red-600 font-semibold mt-2 flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5" /> Margem negativa — ajuste o custo ou o parâmetro de precificação.
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -753,18 +933,22 @@ function VariationWizard({
             </div>
           )}
 
-          {/* ETAPA D – Revisão */}
+          {/* ── ETAPA D – Revisão ── */}
           {step === "D" && (
             <div>
               <p className="text-sm text-gray-600 mb-4">Revise antes de publicar:</p>
               <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-5">
-                <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide mb-3">
-                  {typeName} · {optionDetails.length} opção(ões)
-                </p>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
+                    {typeName} · {optionDetails.length} opção(ões)
+                  </p>
+                  <span className="text-xs text-gray-500 bg-white border border-gray-200 rounded px-2 py-0.5">
+                    Modo: {pricingMode === "multiplier" ? "Multiplicador" : pricingMode === "margin" ? "Margem %" : "Lucro R$"}
+                  </span>
+                </div>
                 <div className="space-y-3">
                   {optionDetails.map((opt, idx) => {
                     const c = computePricing(opt, idx);
-                    const hasPricing = parseFloat(pricing.unitCost) > 0;
                     const badge = profitBadge(c.profitPct);
                     return (
                       <div key={opt.id} className="bg-white rounded-lg border border-orange-100 p-3">
@@ -785,7 +969,11 @@ function VariationWizard({
                           <span>Larg: <b className="text-gray-700">{opt.width  || c.width.toFixed(1)} cm</b></span>
                           <span>Alt: <b className="text-gray-700">{opt.height || c.height.toFixed(1)} cm</b></span>
                           {opt.stock && <span>Estoque: <b className="text-gray-700">{opt.stock}</b></span>}
-                          {hasPricing && <span>Margem: <b className={c.marginContribution >= 0 ? "text-green-700" : "text-red-600"}>R$ {c.marginContribution.toFixed(2)}</b></span>}
+                          {hasPricing && (
+                            <span>Margem: <b className={c.marginContribution >= 0 ? "text-green-700" : "text-red-600"}>
+                              R$ {c.marginContribution.toFixed(2)}
+                            </b></span>
+                          )}
                         </div>
                       </div>
                     );
@@ -825,10 +1013,17 @@ function VariationWizard({
             </button>
           )}
           {step === "C" && (
-            <button onClick={() => setStep("D")}
-              className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-xl transition">
-              Revisar <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-3">
+              {hasNegativeMargin && (
+                <span className="text-xs text-red-600 font-medium flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" /> Corrija margens negativas
+                </span>
+              )}
+              <button onClick={() => setStep("D")} disabled={hasNegativeMargin}
+                className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
+                Revisar <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           )}
           {step === "D" && (
             <button onClick={handleSave}
