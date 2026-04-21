@@ -5,17 +5,50 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, XCircle, Key, Database, Loader2, Trash2 } from "lucide-react";
+import { CheckCircle, XCircle, Key, Database, Loader2, Trash2, Sparkles, Zap, CheckCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+
+const AI_PROVIDERS = [
+  { value: "anthropic", label: "Anthropic Claude",   model: "claude-sonnet-4-20250514", color: "bg-purple-100 text-purple-700 border-purple-300" },
+  { value: "groq",      label: "Groq (Gratuito)",    model: "llama-3.3-70b-versatile",  color: "bg-green-100 text-green-700 border-green-300"   },
+  { value: "openai",    label: "OpenAI GPT",         model: "gpt-4o-mini",              color: "bg-blue-100 text-blue-700 border-blue-300"       },
+  { value: "gemini",    label: "Google Gemini",      model: "gemini-2.0-flash-lite",    color: "bg-yellow-100 text-yellow-700 border-yellow-300" },
+  { value: "forge",     label: "Forge (interno)",    model: "gemini-2.5-flash",         color: "bg-gray-100 text-gray-700 border-gray-300"       },
+] as const;
 
 export default function SettingsPage() {
   const [token, setToken] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  // ── AI Provider state ──
+  const [aiProvider, setAiProvider] = useState("");
+  const [aiApiKey, setAiApiKey]     = useState("");
+  const [testResult, setTestResult] = useState<"idle"|"loading"|"ok"|"error">("idle");
+
   const utils = trpc.useUtils();
   const { data: tokenData, isLoading: tokenLoading } = trpc.settings.getToken.useQuery();
   const { data: inventoryData } = trpc.settings.getInventoryId.useQuery();
+  const { data: aiConfig, isLoading: aiLoading } = trpc.settings.getAiConfig.useQuery();
+
+  const setAiConfigMutation  = trpc.settings.setAiConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Configuração de IA salva!");
+      setAiApiKey("");
+      utils.settings.getAiConfig.invalidate();
+    },
+    onError: (err) => toast.error(err.message || "Erro ao salvar"),
+  });
+  const testAiMutation = trpc.settings.testAiConnection.useMutation({
+    onSuccess: (data) => {
+      setTestResult("ok");
+      toast.success(`Conexão OK! Resposta: "${data.response}"`);
+    },
+    onError: (err) => {
+      setTestResult("error");
+      toast.error(`Falha: ${err.message}`);
+    },
+  });
   const { data: inventories, isLoading: invLoading } = trpc.baselinker.getInventories.useQuery(undefined, {
     enabled: !!tokenData?.hasToken,
   });
@@ -59,11 +92,35 @@ export default function SettingsPage() {
     }
   };
 
+  const activeProviderInfo = AI_PROVIDERS.find(p => p.value === aiConfig?.activeProvider);
+  const selectedProviderInfo = AI_PROVIDERS.find(p => p.value === (aiProvider || aiConfig?.savedProvider || aiConfig?.activeProvider));
+
+  async function handleTestAi() {
+    const provider = (aiProvider || aiConfig?.savedProvider || aiConfig?.activeProvider) as any;
+    if (!provider || (!aiApiKey && !aiConfig?.hasKey)) {
+      toast.error("Selecione um provedor e insira a API Key");
+      return;
+    }
+    if (!aiApiKey && aiConfig?.hasKey) {
+      toast.info("Para testar insira a API Key novamente (não armazenamos em texto claro)");
+      return;
+    }
+    setTestResult("loading");
+    await testAiMutation.mutateAsync({ provider, apiKey: aiApiKey });
+  }
+
+  async function handleSaveAi() {
+    const provider = (aiProvider || aiConfig?.savedProvider) as any;
+    if (!provider) { toast.error("Selecione um provedor"); return; }
+    if (!aiApiKey)  { toast.error("Insira a API Key"); return; }
+    await setAiConfigMutation.mutateAsync({ provider, apiKey: aiApiKey });
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
-        <p className="text-muted-foreground mt-1">Gerencie sua conexão com o BaseLinker</p>
+        <p className="text-muted-foreground mt-1">Gerencie sua conexão com o BaseLinker e provedores de IA</p>
       </div>
 
       <Card>
@@ -198,6 +255,140 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Configurações de IA ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-orange-100 flex items-center justify-center">
+                <Sparkles className="h-5 w-5 text-orange-600" />
+              </div>
+              <div>
+                <CardTitle>Configurações de IA</CardTitle>
+                <CardDescription>Provedor de inteligência artificial para geração de conteúdo</CardDescription>
+              </div>
+            </div>
+            {activeProviderInfo && (
+              <Badge className={`text-xs border ${activeProviderInfo.color}`}>
+                <Zap className="h-3 w-3 mr-1" /> {activeProviderInfo.label} ativo
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {aiLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando...
+            </div>
+          ) : (
+            <>
+              {/* Status env vars */}
+              {aiConfig && (
+                <div className="flex flex-wrap gap-2">
+                  {AI_PROVIDERS.filter(p => p.value !== "forge").map(p => {
+                    const hasEnv = aiConfig.envKeys[p.value as keyof typeof aiConfig.envKeys];
+                    return (
+                      <span key={p.value} className={`text-xs px-2 py-1 rounded-full border font-medium ${hasEnv ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-400 border-gray-200"}`}>
+                        {hasEnv ? "✓" : "○"} {p.label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Seletor de provedor */}
+              <div className="space-y-2">
+                <Label>Provedor de IA</Label>
+                <Select
+                  value={aiProvider || aiConfig?.savedProvider || aiConfig?.activeProvider || ""}
+                  onValueChange={v => { setAiProvider(v); setTestResult("idle"); }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um provedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AI_PROVIDERS.map(p => (
+                      <SelectItem key={p.value} value={p.value}>
+                        <div className="flex items-center gap-2">
+                          <span>{p.label}</span>
+                          <span className="text-xs text-muted-foreground">({p.model})</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedProviderInfo && (
+                  <p className="text-xs text-muted-foreground">
+                    Modelo: <b>{selectedProviderInfo.model}</b>
+                  </p>
+                )}
+              </div>
+
+              {/* Campo API Key */}
+              <div className="space-y-2">
+                <Label>
+                  API Key
+                  {aiConfig?.hasKey && <span className="ml-2 text-xs text-green-600 font-normal">✓ Key salva ({aiConfig.maskedApiKey})</span>}
+                </Label>
+                <Input
+                  type="password"
+                  placeholder={aiConfig?.hasKey ? "Cole nova key para substituir..." : "Cole sua API Key aqui..."}
+                  value={aiApiKey}
+                  onChange={e => { setAiApiKey(e.target.value); setTestResult("idle"); }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {(aiProvider || aiConfig?.savedProvider) === "groq" && "Obtenha gratuitamente em console.groq.com"}
+                  {(aiProvider || aiConfig?.savedProvider) === "anthropic" && "Disponível em console.anthropic.com"}
+                  {(aiProvider || aiConfig?.savedProvider) === "openai" && "Disponível em platform.openai.com"}
+                  {(aiProvider || aiConfig?.savedProvider) === "gemini" && "Disponível em aistudio.google.com"}
+                </p>
+              </div>
+
+              {/* Botões */}
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={handleTestAi}
+                  disabled={testAiMutation.isPending}
+                  className="flex items-center gap-2"
+                >
+                  {testAiMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : testResult === "ok" ? (
+                    <CheckCheck className="h-4 w-4 text-green-600" />
+                  ) : testResult === "error" ? (
+                    <XCircle className="h-4 w-4 text-red-500" />
+                  ) : (
+                    <Zap className="h-4 w-4" />
+                  )}
+                  {testResult === "ok" ? "Conexão OK!" : testResult === "error" ? "Falhou" : "Testar conexão"}
+                </Button>
+
+                <Button
+                  onClick={handleSaveAi}
+                  disabled={setAiConfigMutation.isPending || !aiApiKey}
+                  className="flex items-center gap-2"
+                >
+                  {setAiConfigMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                  Salvar
+                </Button>
+              </div>
+
+              {/* Informações sobre os provedores */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t">
+                {AI_PROVIDERS.filter(p => ["anthropic","groq","openai"].includes(p.value)).map(p => (
+                  <div key={p.value} className={`rounded-lg border p-3 ${p.color}`}>
+                    <p className="text-xs font-bold">{p.label}</p>
+                    <p className="text-xs opacity-75 mt-0.5">{p.model}</p>
+                    {p.value === "groq" && <p className="text-xs font-medium mt-1">Gratuito ✓</p>}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -112,6 +112,87 @@ export const appRouter = router({
         await db.setSetting(ctx.user.id, "default_inventory_id", String(input.inventoryId));
         return { success: true };
       }),
+
+    // ── Configurações de IA ──
+
+    getAiConfig: protectedProcedure.query(async ({ ctx }) => {
+      const { ENV } = await import("./_core/env");
+      const provider = await db.getSetting(ctx.user.id, "ai_provider");
+      const apiKey   = await db.getSetting(ctx.user.id, "ai_api_key");
+      const activeProvider = provider || ENV.aiProvider || (
+        ENV.anthropicApiKey ? "anthropic" :
+        ENV.groqApiKey      ? "groq" :
+        ENV.openaiApiKey    ? "openai" :
+        ENV.geminiApiKey    ? "gemini" : "forge"
+      );
+      const maskKey = (k: string | null) =>
+        k && k.length > 8 ? `${k.slice(0, 6)}${"•".repeat(Math.min(k.length - 10, 20))}${k.slice(-4)}` : null;
+      return {
+        activeProvider,
+        savedProvider: provider || null,
+        maskedApiKey:  maskKey(apiKey),
+        hasKey:        !!apiKey,
+        envKeys: {
+          anthropic: !!ENV.anthropicApiKey,
+          groq:      !!ENV.groqApiKey,
+          openai:    !!ENV.openaiApiKey,
+          gemini:    !!ENV.geminiApiKey,
+        },
+      };
+    }),
+
+    setAiConfig: protectedProcedure
+      .input(z.object({
+        provider: z.enum(["anthropic", "groq", "openai", "gemini", "forge"]),
+        apiKey:   z.string().min(1),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await db.setSetting(ctx.user.id, "ai_provider", input.provider);
+        await db.setSetting(ctx.user.id, "ai_api_key",  input.apiKey);
+        const { setRuntimeAiProvider } = await import("./_core/llm");
+        const { resetAiProviderCache } = await import("./lib/ai-provider");
+        setRuntimeAiProvider(input.provider, input.apiKey);
+        resetAiProviderCache();
+        return { success: true };
+      }),
+
+    testAiConnection: protectedProcedure
+      .input(z.object({
+        provider: z.enum(["anthropic", "groq", "openai", "gemini", "forge"]),
+        apiKey:   z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const { invokeLLM } = await import("./_core/llm");
+        const { ENV } = await import("./_core/env");
+
+        // Configura temporariamente para o teste
+        const { setRuntimeAiProvider } = await import("./_core/llm");
+        const prevProvider = (globalThis as any).__testProvider;
+        setRuntimeAiProvider(input.provider, input.apiKey);
+
+        try {
+          const result = await invokeLLM({
+            messages: [{ role: "user", content: "Responda apenas: OK" }],
+            maxTokens: 10,
+          });
+          const text = (() => {
+            const c = result.choices[0]?.message?.content;
+            if (typeof c === "string") return c;
+            if (Array.isArray(c)) return c.filter((p: any) => p.type === "text").map((p: any) => p.text).join("");
+            return "";
+          })();
+          return { success: true, response: text.trim() };
+        } finally {
+          // Restaura configuração anterior
+          const saved = await import("../drizzle/schema").then(async s => {
+            const { eq } = await import("drizzle-orm");
+            const [p] = await (db as any).select().from(s.settings).where(eq(s.settings.settingKey, "ai_provider")).limit(1);
+            const [k] = await (db as any).select().from(s.settings).where(eq(s.settings.settingKey, "ai_api_key")).limit(1);
+            return { provider: p?.settingValue, key: k?.settingValue };
+          }).catch(() => ({ provider: null, key: null }));
+          setRuntimeAiProvider(saved.provider || ENV.aiProvider, saved.key || "");
+        }
+      }),
   }),
 
   // ============ BASELINKER ============

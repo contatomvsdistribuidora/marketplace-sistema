@@ -24,4 +24,10 @@ export const ENV = {
   geminiApiKey2: process.env.GEMINI_API_KEY_2 ?? "",
   // Groq
   groqApiKey: process.env.GROQ_API_KEY ?? "",
+  // Anthropic Claude
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  // OpenAI
+  openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  // Provedor de IA ativo (anthropic | groq | openai | gemini | forge)
+  aiProvider: process.env.AI_PROVIDER ?? "",
 };

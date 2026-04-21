@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "./env";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
@@ -317,6 +318,76 @@ const invokeGroq = async (params: InvokeParams): Promise<InvokeResult> => {
   return response as unknown as InvokeResult;
 };
 
+// ============ ANTHROPIC ============
+
+const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+
+const invokeAnthropic = async (params: InvokeParams, apiKey: string): Promise<InvokeResult> => {
+  const client = new Anthropic({ apiKey });
+  const { messages, maxTokens, max_tokens } = params;
+
+  const systemMsg = messages
+    .filter(m => m.role === "system")
+    .map(m => extractMessageText(m.content))
+    .join("\n") || undefined;
+
+  const userMessages = messages
+    .filter(m => m.role !== "system")
+    .map(m => ({
+      role: m.role as "user" | "assistant",
+      content: extractMessageText(m.content),
+    }));
+
+  const response = await client.messages.create({
+    model: ANTHROPIC_MODEL,
+    max_tokens: maxTokens || max_tokens || 8192,
+    ...(systemMsg ? { system: systemMsg } : {}),
+    messages: userMessages,
+  });
+
+  const text = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map(b => b.text)
+    .join("");
+
+  return {
+    id: response.id,
+    created: Math.floor(Date.now() / 1000),
+    model: response.model,
+    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: response.stop_reason }],
+    usage: response.usage
+      ? { prompt_tokens: response.usage.input_tokens, completion_tokens: response.usage.output_tokens, total_tokens: response.usage.input_tokens + response.usage.output_tokens }
+      : undefined,
+  };
+};
+
+// ============ OPENAI NATIVO ============
+
+const OPENAI_MODEL = "gpt-4o-mini";
+
+const invokeOpenAI = async (params: InvokeParams, apiKey: string): Promise<InvokeResult> => {
+  const { messages, tools, toolChoice, tool_choice, responseFormat, response_format, maxTokens, max_tokens } = params;
+
+  const client = new OpenAI({ apiKey });
+  const payload: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+    model: OPENAI_MODEL,
+    messages: messages.map(normalizeMessage) as OpenAI.Chat.ChatCompletionMessageParam[],
+    max_tokens: maxTokens || max_tokens || 8192,
+  };
+
+  if (tools && tools.length > 0) payload.tools = tools as OpenAI.Chat.ChatCompletionTool[];
+  const normalizedToolChoice = normalizeToolChoice(toolChoice || tool_choice, tools);
+  if (normalizedToolChoice) payload.tool_choice = normalizedToolChoice as OpenAI.Chat.ChatCompletionToolChoiceOption;
+
+  const explicitFormat = responseFormat || response_format;
+  if (explicitFormat?.type === "json_object" || explicitFormat?.type === "json_schema") {
+    payload.response_format = { type: "json_object" } as OpenAI.ResponseFormatJSONObject;
+  }
+
+  const response = await client.chat.completions.create(payload);
+  return response as unknown as InvokeResult;
+};
+
 // ============ PUBLIC API ============
 
 const isQuotaError = (err: unknown): boolean => {
@@ -324,41 +395,74 @@ const isQuotaError = (err: unknown): boolean => {
   return msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("RESOURCE_EXHAUSTED");
 };
 
+// Chave dinâmica sobrescrita em runtime (salva no banco via settings)
+let _runtimeApiKey: string | null = null;
+let _runtimeProvider: string | null = null;
+
+export function setRuntimeAiProvider(provider: string, apiKey: string) {
+  _runtimeProvider = provider || null;
+  _runtimeApiKey   = apiKey   || null;
+}
+
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  // 1. Groq (principal)
+  const provider = _runtimeProvider || ENV.aiProvider;
+  const runtimeKey = _runtimeApiKey;
+
+  // Provedor explícito definido via settings ou env
+  if (provider === "anthropic") {
+    const key = runtimeKey || ENV.anthropicApiKey;
+    if (!key) throw new Error("ANTHROPIC_API_KEY não configurada");
+    return invokeAnthropic(params, key);
+  }
+  if (provider === "openai") {
+    const key = runtimeKey || ENV.openaiApiKey;
+    if (!key) throw new Error("OPENAI_API_KEY não configurada");
+    return invokeOpenAI(params, key);
+  }
+  if (provider === "groq") {
+    const key = runtimeKey || ENV.groqApiKey;
+    if (!key) throw new Error("GROQ_API_KEY não configurada");
+    const params2 = { ...params };
+    // reutiliza invokeGroq via chave dinâmica se necessário
+    if (runtimeKey) {
+      const client = new OpenAI({ apiKey: runtimeKey, baseURL: "https://api.groq.com/openai/v1" });
+      const payload: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+        model: "llama-3.3-70b-versatile",
+        messages: params.messages.map(normalizeMessage) as OpenAI.Chat.ChatCompletionMessageParam[],
+        max_tokens: params.maxTokens || params.max_tokens || 500,
+      };
+      const response = await client.chat.completions.create(payload);
+      return response as unknown as InvokeResult;
+    }
+    return invokeGroq(params2);
+  }
+  if (provider === "gemini") {
+    const key = runtimeKey || ENV.geminiApiKey;
+    if (!key) throw new Error("GEMINI_API_KEY não configurada");
+    return invokeGeminiWithKey(key, params);
+  }
+
+  // Fallback automático (comportamento original)
   if (ENV.groqApiKey) {
-    try {
-      return await invokeGroq(params);
-    } catch (err) {
-      if (!isQuotaError(err)) throw err;
-      console.warn("[LLM] Groq quota exceeded, trying Gemini key 1");
-    }
+    try { return await invokeGroq(params); }
+    catch (err) { if (!isQuotaError(err)) throw err; console.warn("[LLM] Groq quota exceeded, trying Gemini key 1"); }
   }
-
-  // 2. Gemini chave 1
   if (ENV.geminiApiKey) {
-    try {
-      return await invokeGeminiWithKey(ENV.geminiApiKey, params);
-    } catch (err) {
-      if (!isQuotaError(err)) throw err;
-      console.warn("[LLM] Gemini key 1 quota exceeded, trying Gemini key 2");
-    }
+    try { return await invokeGeminiWithKey(ENV.geminiApiKey, params); }
+    catch (err) { if (!isQuotaError(err)) throw err; console.warn("[LLM] Gemini key 1 quota exceeded, trying key 2"); }
   }
-
-  // 3. Gemini chave 2
   if (ENV.geminiApiKey2) {
-    try {
-      return await invokeGeminiWithKey(ENV.geminiApiKey2, params);
-    } catch (err) {
-      if (!isQuotaError(err)) throw err;
-      console.warn("[LLM] Gemini key 2 quota exceeded, falling back to Forge");
-    }
+    try { return await invokeGeminiWithKey(ENV.geminiApiKey2, params); }
+    catch (err) { if (!isQuotaError(err)) throw err; console.warn("[LLM] Gemini key 2 quota exceeded, falling back to Forge"); }
   }
-
-  // 4. Forge
+  if (ENV.anthropicApiKey) {
+    return invokeAnthropic(params, ENV.anthropicApiKey);
+  }
+  if (ENV.openaiApiKey) {
+    return invokeOpenAI(params, ENV.openaiApiKey);
+  }
   if (ENV.forgeApiKey) {
     return invokeForge(params);
   }
-
-  throw new Error("No LLM provider available. Configure GROQ_API_KEY or GEMINI_API_KEY in .env.");
+  throw new Error("Nenhum provedor de IA disponível. Configure uma API Key nas Configurações.");
 }
