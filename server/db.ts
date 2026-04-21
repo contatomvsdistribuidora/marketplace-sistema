@@ -20,6 +20,8 @@ import { like, or, isNotNull, inArray, ne, gte, lte } from "drizzle-orm";
 import { ENV } from "./_core/env";
 import * as schema from "../drizzle/schema";
 
+console.log("[DB] DATABASE_URL:", process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/:([^:@]+)@/, ":***@") : "NÃO DEFINIDA");
+
 export const pool = mysql.createPool({
   uri: process.env.DATABASE_URL,
   ssl: false as any,
@@ -33,6 +35,13 @@ export const pool = mysql.createPool({
 });
 
 export const db = drizzle(pool, { schema, mode: "default" });
+
+pool.getConnection().then(conn => {
+  console.log("✅ Banco conectado com sucesso!");
+  conn.release();
+}).catch(err => {
+  console.error("❌ Erro ao conectar banco:", err.message);
+});
 
 // ============ USER ============
 export async function upsertUser(user: InsertUser): Promise<void> {
