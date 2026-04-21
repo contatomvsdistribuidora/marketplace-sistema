@@ -74,7 +74,16 @@ async function startServer() {
     const path = "/api/v2/shop/auth_partner";
     const baseString = `${partnerId}${path}${timestamp}`;
     const sign = crypto.createHmac("sha256", partnerKey ?? "").update(baseString).digest("hex");
-    return res.json({ partnerId, timestamp, path, baseString, sign, keyLength: partnerKey?.length });
+    return res.json({
+      partnerId,
+      timestamp,
+      path,
+      baseString,
+      sign,
+      keyLength: partnerKey?.length,
+      partnerKeyFirst10: partnerKey?.substring(0, 10),
+      partnerKeyLast5: partnerKey?.substring((partnerKey?.length ?? 0) - 5),
+    });
   });
 
   // tRPC API
