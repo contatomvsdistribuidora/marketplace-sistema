@@ -442,7 +442,15 @@ function VariationWizard({
     minProfit: "20",
   });
 
-  const optimizeMutation = trpc.shopee.optimizeTitle.useMutation();
+  const optimizeMutation     = trpc.shopee.optimizeTitle.useMutation();
+  const generateAdMutation   = trpc.shopee.generateAdContent.useMutation();
+
+  const [adContent, setAdContent]       = useState<any>(null);
+  const [adLoading, setAdLoading]       = useState(false);
+  const [adTab, setAdTab]               = useState<"titulo"|"descricao"|"tags"|"keywords"|"score">("titulo");
+  const [selectedTitle, setSelectedTitle] = useState<string>("");
+  const [editingDesc, setEditingDesc]   = useState(false);
+  const [editedDesc, setEditedDesc]     = useState("");
 
   const STEPS: { key: WizardStep; label: string }[] = [
     { key: "A", label: "Tipo" },
@@ -704,6 +712,37 @@ function VariationWizard({
   }
 
   // ── Etapa D ──
+  async function generateAdContent() {
+    setAdLoading(true);
+    try {
+      const variations = optionDetails.map((opt, idx) => {
+        const c = computePricing(opt, idx);
+        return {
+          label: opt.label,
+          qty: c.qty,
+          weight: opt.weight || c.weight.toFixed(2),
+          dimensions: `${opt.length || c.length.toFixed(1)}×${opt.width || c.width.toFixed(1)}×${opt.height || c.height.toFixed(1)}`,
+          price: c.price.toFixed(2),
+        };
+      });
+      const result = await generateAdMutation.mutateAsync({
+        productName: product.itemName || "Produto",
+        category: product.categoryName ?? undefined,
+        variationType: typeName,
+        variations,
+      });
+      setAdContent(result);
+      setAdTab("titulo");
+      setSelectedTitle(result.titulo_principal || "");
+      setEditedDesc(result.descricao || "");
+      setEditingDesc(false);
+    } catch {
+      // erro silencioso — usuário pode tentar novamente
+    } finally {
+      setAdLoading(false);
+    }
+  }
+
   function handleSave() {
     const opts = optionDetails.map((o, i) => {
       const c = computePricing(o, i);
@@ -1196,61 +1235,278 @@ function VariationWizard({
             </div>
           )}
 
-          {/* ── ETAPA D – Revisão ── */}
+          {/* ── ETAPA D – Revisão + Geração IA ── */}
           {step === "D" && (
-            <div>
-              <p className="text-sm text-gray-600 mb-4">Revise antes de publicar:</p>
-              <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-5">
+            <div className="space-y-4">
+
+              {/* Resumo das variações */}
+              <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
                     {typeName} · {optionDetails.length} opção(ões)
                   </p>
                   <span className="text-xs text-gray-500 bg-white border border-gray-200 rounded px-2 py-0.5">
-                    Modo: {pricingMode === "multiplier" ? "Multiplicador" : pricingMode === "margin" ? "Margem %" : "Lucro R$"}
+                    {pricingMode === "multiplier" ? "Multiplicador" : pricingMode === "margin" ? "Margem %" : "Lucro R$"}
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {optionDetails.map((opt, idx) => {
                     const c = computePricing(opt, idx);
                     const badge = profitBadge(c.profitPct);
                     return (
-                      <div key={opt.id} className="bg-white rounded-lg border border-orange-100 p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-sm font-semibold text-gray-800">
+                      <div key={opt.id} className="bg-white rounded-lg border border-orange-100 p-2.5">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-semibold text-gray-800 truncate mr-2">
                             <span className="text-orange-500">{idx + 1}.</span> {opt.label}
                           </p>
                           {hasPricing && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-base font-bold text-orange-600">R$ {c.price.toFixed(2)}</span>
-                              <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${badge.bg}`}>{c.profitPct.toFixed(1)}%</span>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-sm font-bold text-orange-600">R$ {c.price.toFixed(2)}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full border font-semibold ${badge.bg}`}>{c.profitPct.toFixed(1)}%</span>
                             </div>
                           )}
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-xs text-gray-500">
-                          <span>Peso: <b className="text-gray-700">{opt.weight || c.weight.toFixed(2)} kg</b></span>
-                          <span>Comp: <b className="text-gray-700">{opt.length || c.length.toFixed(1)} cm</b></span>
-                          <span>Larg: <b className="text-gray-700">{opt.width  || c.width.toFixed(1)} cm</b></span>
-                          <span>Alt: <b className="text-gray-700">{opt.height || c.height.toFixed(1)} cm</b></span>
-                          {opt.stock && <span>Estoque: <b className="text-gray-700">{opt.stock}</b></span>}
-                          {hasPricing && (
-                            <span>Margem: <b className={c.marginContribution >= 0 ? "text-green-700" : "text-red-600"}>
-                              R$ {c.marginContribution.toFixed(2)}
-                            </b></span>
-                          )}
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-400">
+                          <span>{opt.weight || c.weight.toFixed(2)} kg</span>
+                          <span>{opt.length || c.length.toFixed(1)}×{opt.width || c.width.toFixed(1)}×{opt.height || c.height.toFixed(1)} cm</span>
+                          {opt.stock && <span>Estoque: {opt.stock}</span>}
+                          {hasPricing && <span className={c.marginContribution >= 0 ? "text-green-600" : "text-red-500"}>Margem: R${c.marginContribution.toFixed(2)}</span>}
                         </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
-              <button onClick={() => alert("Publicação na Shopee em breve")}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm transition mb-3">
-                <Sparkles className="w-4 h-4" /> Publicar na Shopee
-              </button>
-              <button onClick={() => setStep("C")}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-300 text-gray-600 text-sm hover:bg-gray-50 transition">
-                <ArrowLeft className="w-4 h-4" /> Voltar e editar
-              </button>
+
+              {/* Botão principal de geração */}
+              {!adContent && !adLoading && (
+                <button onClick={generateAdContent}
+                  className="w-full flex items-center justify-center gap-3 py-5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold text-base transition shadow-lg shadow-orange-200">
+                  <Sparkles className="w-6 h-6" /> ✨ Gerar Conteúdo do Anúncio com IA
+                </button>
+              )}
+
+              {/* Loading */}
+              {adLoading && (
+                <div className="flex flex-col items-center justify-center py-12 gap-4 bg-orange-50 border border-orange-100 rounded-xl">
+                  <Loader2 className="w-10 h-10 text-orange-500 animate-spin" />
+                  <p className="text-sm font-semibold text-orange-700">✨ A IA está criando seu anúncio profissional...</p>
+                  <p className="text-xs text-gray-400">Analisando produto e variações, aguarde alguns segundos</p>
+                </div>
+              )}
+
+              {/* Erro */}
+              {generateAdMutation.isError && !adLoading && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  Erro ao gerar conteúdo. Tente novamente.
+                </div>
+              )}
+
+              {/* Conteúdo gerado */}
+              {adContent && !adLoading && (
+                <div className="space-y-3">
+
+                  {/* Abas */}
+                  <div className="flex rounded-xl overflow-hidden border border-gray-200 text-xs font-semibold">
+                    {([
+                      { key: "titulo"    as const, label: "📝 Título"     },
+                      { key: "descricao" as const, label: "📄 Descrição"  },
+                      { key: "tags"      as const, label: "🏷️ Tags"       },
+                      { key: "keywords"  as const, label: "🔑 Keywords"   },
+                      { key: "score"     as const, label: "📊 Score"      },
+                    ]).map(t => (
+                      <button key={t.key} onClick={() => setAdTab(t.key)}
+                        className={`flex-1 py-2.5 transition-all ${adTab === t.key ? "bg-orange-500 text-white" : "bg-white text-gray-500 hover:bg-orange-50"}`}>
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* ── ABA TÍTULO ── */}
+                  {adTab === "titulo" && (
+                    <div className="space-y-3">
+                      {[adContent.titulo_principal, ...(adContent.titulos_alternativos ?? [])].map((t: string, i: number) => {
+                        const len = t?.length ?? 0;
+                        const lenColor = len >= 80 && len <= 100 ? "text-green-600" : len < 80 ? "text-yellow-600" : "text-red-600";
+                        const isSelected = selectedTitle === t;
+                        return (
+                          <div key={i} className={`border rounded-xl p-3 transition-all ${isSelected ? "border-orange-400 bg-orange-50" : "border-gray-200 bg-white"}`}>
+                            <div className="flex items-start justify-between gap-2 mb-2">
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${i === 0 ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-600"}`}>
+                                {i === 0 ? "Principal" : `Alt. ${i}`}
+                              </span>
+                              <span className={`text-xs font-bold ${lenColor}`}>{len} chars {len >= 80 && len <= 100 ? "✓" : len < 80 ? "⚠ curto" : "⚠ longo"}</span>
+                            </div>
+                            <p className="text-sm text-gray-800 font-medium leading-snug mb-3">{t}</p>
+                            <div className="flex gap-2">
+                              <button onClick={() => navigator.clipboard?.writeText(t)}
+                                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg px-2 py-1 bg-white transition">
+                                📋 Copiar
+                              </button>
+                              <button onClick={() => setSelectedTitle(t)}
+                                className={`flex items-center gap-1 text-xs font-semibold rounded-lg px-2 py-1 transition border ${isSelected ? "bg-orange-500 text-white border-orange-500" : "border-orange-300 text-orange-600 hover:bg-orange-50"}`}>
+                                {isSelected ? "✅ Selecionado" : "Selecionar"}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* ── ABA DESCRIÇÃO ── */}
+                  {adTab === "descricao" && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-gray-500">{(editedDesc || adContent.descricao)?.length ?? 0} caracteres</p>
+                        <div className="flex gap-2">
+                          <button onClick={() => navigator.clipboard?.writeText(editedDesc || adContent.descricao)}
+                            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg px-2 py-1 bg-white transition">
+                            📋 Copiar descrição
+                          </button>
+                          <button onClick={() => { setEditingDesc(v => !v); if (!editingDesc) setEditedDesc(adContent.descricao); }}
+                            className="text-xs text-orange-600 hover:text-orange-700 border border-orange-200 rounded-lg px-2 py-1 bg-white transition">
+                            {editingDesc ? "👁 Preview" : "✏️ Editar"}
+                          </button>
+                        </div>
+                      </div>
+                      {editingDesc ? (
+                        <textarea
+                          value={editedDesc}
+                          onChange={e => setEditedDesc(e.target.value)}
+                          rows={14}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none font-mono"
+                        />
+                      ) : (
+                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
+                          {editedDesc || adContent.descricao}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── ABA TAGS ── */}
+                  {adTab === "tags" && (
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Hashtags ({adContent.hashtags?.length ?? 0})</p>
+                          <button onClick={() => navigator.clipboard?.writeText((adContent.hashtags ?? []).join(" "))}
+                            className="text-xs text-orange-600 hover:text-orange-700 border border-orange-200 rounded-lg px-2 py-1 bg-white transition">
+                            📋 Copiar hashtags
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(adContent.hashtags ?? []).map((h: string) => (
+                            <span key={h} className="px-2.5 py-1 bg-orange-500 text-white text-xs rounded-full font-medium">{h}</span>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Tags SEO ({adContent.tags_seo?.length ?? 0})</p>
+                          <button onClick={() => navigator.clipboard?.writeText((adContent.tags_seo ?? []).join(", "))}
+                            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg px-2 py-1 bg-white transition">
+                            📋 Copiar tags SEO
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(adContent.tags_seo ?? []).map((t: string) => (
+                            <span key={t} className="px-2.5 py-1 bg-gray-100 text-gray-700 text-xs rounded-full border border-gray-200">{t}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── ABA KEYWORDS ── */}
+                  {adTab === "keywords" && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-gray-500">Use estas palavras no título, descrição e tags para maximizar o ranking de busca.</p>
+                      {(adContent.keywords_principais ?? []).map((kw: string, i: number) => (
+                        <div key={kw} className="flex items-center gap-3 p-3 bg-orange-50 border border-orange-100 rounded-xl">
+                          <span className="w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-gray-800">{kw}</p>
+                            <p className="text-xs text-gray-400">Use no título e nas primeiras linhas da descrição</p>
+                          </div>
+                          <button onClick={() => navigator.clipboard?.writeText(kw)}
+                            className="text-xs text-gray-400 hover:text-gray-600 transition">📋</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── ABA SCORE ── */}
+                  {adTab === "score" && (() => {
+                    const s = adContent.score ?? {};
+                    const total: number = s.total ?? 0;
+                    const nivel: string = s.nivel ?? "C";
+                    const nivelColor = { A: "bg-green-500", B: "bg-blue-500", C: "bg-yellow-500", D: "bg-orange-500", F: "bg-red-500" }[nivel] ?? "bg-gray-400";
+                    const barColor = total >= 80 ? "bg-green-500" : total >= 60 ? "bg-yellow-500" : "bg-red-500";
+                    const cats = [
+                      { label: "Título",    val: s.titulo    ?? 0, max: 25 },
+                      { label: "Descrição", val: s.descricao ?? 0, max: 25 },
+                      { label: "Tags",      val: s.tags      ?? 0, max: 10 },
+                      { label: "Variações", val: s.variacoes ?? 0, max: 20 },
+                    ];
+                    return (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-4 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                          <span className={`w-16 h-16 rounded-xl ${nivelColor} text-white text-3xl font-black flex items-center justify-center flex-shrink-0`}>{nivel}</span>
+                          <div className="flex-1">
+                            <div className="flex items-end justify-between mb-1">
+                              <p className="text-sm font-semibold text-gray-700">Score total</p>
+                              <p className="text-2xl font-black text-gray-800">{total}<span className="text-sm text-gray-400">/100</span></p>
+                            </div>
+                            <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                              <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${Math.min(total, 100)}%` }} />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          {cats.map(c => (
+                            <div key={c.label} className="bg-white border border-gray-200 rounded-xl p-3">
+                              <div className="flex justify-between mb-1 text-xs">
+                                <span className="text-gray-600 font-medium">{c.label}</span>
+                                <span className="font-bold text-gray-800">{c.val}/{c.max}</span>
+                              </div>
+                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full ${c.val / c.max >= 0.8 ? "bg-green-500" : c.val / c.max >= 0.6 ? "bg-yellow-500" : "bg-red-400"}`}
+                                  style={{ width: `${(c.val / c.max) * 100}%` }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {(s.sugestoes ?? []).length > 0 && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Sugestões de melhoria</p>
+                            {(s.sugestoes ?? []).map((sg: string, i: number) => (
+                              <div key={i} className="flex items-start gap-2 text-xs text-blue-700">
+                                <span className="font-bold flex-shrink-0">{i + 1}.</span>
+                                <span>{sg}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Botões globais */}
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={generateAdContent}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-orange-300 text-orange-600 text-sm font-semibold hover:bg-orange-50 transition">
+                      🔄 Regenerar tudo
+                    </button>
+                    <button onClick={() => alert("Publicação na Shopee em breve")}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition">
+                      ✅ Confirmar e Publicar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

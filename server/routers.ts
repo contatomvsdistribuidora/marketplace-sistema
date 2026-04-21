@@ -2248,6 +2248,23 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         return shopeeOptimizer.batchOptimizeDescriptions(input.productIds);
       }),
+
+    generateAdContent: protectedProcedure
+      .input(z.object({
+        productName: z.string(),
+        category: z.string().optional(),
+        variationType: z.string(),
+        variations: z.array(z.object({
+          label: z.string(),
+          qty: z.number(),
+          weight: z.string(),
+          dimensions: z.string(),
+          price: z.string(),
+        })),
+      }))
+      .mutation(async ({ input }) => {
+        return shopeeOptimizer.generateAdContent(input);
+      }),
   }),
 });
 

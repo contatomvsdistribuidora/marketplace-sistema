@@ -885,3 +885,84 @@ export async function batchOptimizeDescriptions(
 
   return results;
 }
+
+// ============ GERAÇÃO DE CONTEÚDO COMPLETO DO ANÚNCIO ============
+
+export interface AdContent {
+  titulo_principal: string;
+  titulos_alternativos: string[];
+  descricao: string;
+  hashtags: string[];
+  tags_seo: string[];
+  keywords_principais: string[];
+  score: {
+    titulo: number;
+    descricao: number;
+    tags: number;
+    variacoes: number;
+    total: number;
+    nivel: string;
+    sugestoes: string[];
+  };
+}
+
+export async function generateAdContent(params: {
+  productName: string;
+  category?: string;
+  variationType: string;
+  variations: Array<{ label: string; qty: number; weight: string; dimensions: string; price: string }>;
+}): Promise<AdContent> {
+  const variationsText = params.variations
+    .map(v => `- ${v.label}: ${v.qty}un | Peso: ${v.weight}kg | Dimensões: ${v.dimensions}cm | Preço: R$${v.price}`)
+    .join("\n");
+
+  const response = await invokeLLM({
+    messages: [
+      {
+        role: "user",
+        content: `Atue como Especialista em Copywriting e SEO para Shopee Brasil com 10 anos de experiência. Crie um anúncio de ALTÍSSIMA CONVERSÃO.
+
+DADOS DO PRODUTO:
+- Nome: ${params.productName}
+- Categoria: ${params.category || "Não informada"}
+- Tipo de variação: ${params.variationType}
+
+VARIAÇÕES:
+${variationsText}
+
+GERE EXATAMENTE NESTE FORMATO JSON (sem texto antes ou depois):
+{
+  "titulo_principal": "(80-100 caracteres OBRIGATÓRIO — contar e confirmar)",
+  "titulos_alternativos": ["(80-100 chars)", "(80-100 chars)", "(80-100 chars)"],
+  "descricao": "(descrição completa estruturada com emojis e seções: headline, por que escolher, sobre o produto, tabela de variações com ideal para cada uma e % economia, ficha técnica, o que vem no pacote, dicas de uso, vantagens exclusivas, FAQ com 6 perguntas incluindo diferença entre variações, informações importantes)",
+  "hashtags": ["#tag1","#tag2","#tag3","#tag4","#tag5","#tag6","#tag7","#tag8","#tag9","#tag10"],
+  "tags_seo": ["tag1","tag2","tag3","tag4","tag5","tag6","tag7","tag8","tag9","tag10","tag11","tag12","tag13","tag14","tag15","tag16","tag17","tag18","tag19","tag20"],
+  "keywords_principais": ["kw1","kw2","kw3","kw4","kw5"],
+  "score": {
+    "titulo": 0,
+    "descricao": 0,
+    "tags": 0,
+    "variacoes": 0,
+    "total": 0,
+    "nivel": "A",
+    "sugestoes": ["dica1","dica2","dica3"]
+  }
+}
+
+REGRAS:
+- Título DEVE ter entre 80-100 caracteres — contar e confirmar antes de responder
+- Tom profissional mas acessível, linguagem brasileira natural
+- Emojis estratégicos nas seções da descrição
+- NUNCA mencionar frete grátis
+- Destacar economia ao comprar mais quantidade
+- Na tabela de variações: explicar para quem é ideal cada kit
+- score.titulo: 0-25 | score.descricao: 0-25 | score.tags: 0-10 | score.variacoes: 0-20 | score.total: soma dos anteriores
+- score.nivel: A (>=80), B (>=65), C (>=50), D (>=35), F (<35)
+- Responder JSON válido apenas, sem texto adicional`,
+      },
+    ],
+  });
+
+  const json = extractJsonFromResponse(response);
+  return JSON.parse(json) as AdContent;
+}
