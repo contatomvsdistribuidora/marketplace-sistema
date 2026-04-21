@@ -86,6 +86,86 @@ async function startServer() {
     });
   });
 
+  // Run missing table migrations
+  app.get("/api/run-migrations", async (req, res) => {
+    const { pool } = await import("../db");
+    const results: { table: string; status: string; error?: string }[] = [];
+
+    const statements: { table: string; sql: string }[] = [
+      {
+        table: "shopee_accounts",
+        sql: `CREATE TABLE IF NOT EXISTS \`shopee_accounts\` (
+  \`id\` int NOT NULL AUTO_INCREMENT,
+  \`userId\` int NOT NULL,
+  \`shopId\` bigint NOT NULL,
+  \`shopName\` varchar(256),
+  \`region\` varchar(10) NOT NULL DEFAULT 'BR',
+  \`accessToken\` text NOT NULL,
+  \`refreshToken\` text NOT NULL,
+  \`tokenExpiresAt\` timestamp NOT NULL,
+  \`refreshTokenExpiresAt\` timestamp NULL,
+  \`tokenStatus\` varchar(32) NOT NULL DEFAULT 'active',
+  \`shopStatus\` varchar(64),
+  \`totalProducts\` int DEFAULT 0,
+  \`isActive\` int NOT NULL DEFAULT 1,
+  \`lastSyncAt\` timestamp NULL,
+  \`lastUsedAt\` timestamp NULL,
+  \`createdAt\` timestamp NOT NULL DEFAULT now(),
+  \`updatedAt\` timestamp NOT NULL DEFAULT now() ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`)
+)`,
+      },
+      {
+        table: "shopee_products",
+        sql: `CREATE TABLE IF NOT EXISTS \`shopee_products\` (
+  \`id\` int NOT NULL AUTO_INCREMENT,
+  \`userId\` int NOT NULL,
+  \`shopeeAccountId\` int NOT NULL,
+  \`itemId\` bigint NOT NULL,
+  \`itemName\` varchar(1024),
+  \`itemSku\` varchar(256),
+  \`itemStatus\` varchar(32),
+  \`categoryId\` bigint,
+  \`categoryName\` varchar(512),
+  \`price\` varchar(32),
+  \`stock\` int DEFAULT 0,
+  \`sold\` int DEFAULT 0,
+  \`rating\` varchar(10),
+  \`imageUrl\` varchar(1024),
+  \`images\` json,
+  \`hasVideo\` int DEFAULT 0,
+  \`attributes\` json,
+  \`attributesFilled\` int DEFAULT 0,
+  \`attributesTotal\` int DEFAULT 0,
+  \`qualityScore\` varchar(32),
+  \`variations\` json,
+  \`weight\` varchar(32),
+  \`dimensionLength\` varchar(32),
+  \`dimensionWidth\` varchar(32),
+  \`dimensionHeight\` varchar(32),
+  \`description\` text,
+  \`lastSyncAt\` timestamp NOT NULL DEFAULT now(),
+  \`createdAt\` timestamp NOT NULL DEFAULT now(),
+  \`updatedAt\` timestamp NOT NULL DEFAULT now() ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`)
+)`,
+      },
+    ];
+
+    for (const { table, sql } of statements) {
+      try {
+        const conn = await pool.getConnection();
+        await conn.query(sql);
+        conn.release();
+        results.push({ table, status: "ok" });
+      } catch (err: any) {
+        results.push({ table, status: "error", error: err.message });
+      }
+    }
+
+    return res.json({ results });
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
