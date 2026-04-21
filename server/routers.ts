@@ -4,6 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
+import { db as sharedDb } from "./db";
 import * as baselinker from "./baselinker";
 import * as aiMapper from "./ai-mapper";
 import * as ml from "./mercadolivre";
@@ -1961,7 +1962,7 @@ export const appRouter = router({
     getProductDiagnostic: protectedProcedure
       .input(z.object({ productId: z.number() }))
       .query(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
@@ -1979,7 +1980,7 @@ export const appRouter = router({
         productDescription: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
@@ -1998,7 +1999,7 @@ export const appRouter = router({
         newTitle: z.string().min(1).max(140),
       }))
       .mutation(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const shopee = await import("./shopee");
@@ -2016,7 +2017,7 @@ export const appRouter = router({
         productId: z.number(),
       }))
       .mutation(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
@@ -2035,7 +2036,7 @@ export const appRouter = router({
         newDescription: z.string().min(1),
       }))
       .mutation(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const shopee = await import("./shopee");
@@ -2051,7 +2052,7 @@ export const appRouter = router({
     pushToShopee: protectedProcedure
       .input(z.object({ productId: z.number() }))
       .mutation(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const shopee = await import("./shopee");
@@ -2073,7 +2074,7 @@ export const appRouter = router({
       }))
       .query(async ({ input }) => {
         if (input.itemIds.length === 0) return [];
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { inArray } = await import("drizzle-orm");
         const shopeeModule = await import("./shopee");
@@ -2118,7 +2119,7 @@ export const appRouter = router({
     syncSingleProduct: protectedProcedure
       .input(z.object({ productId: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const shopeeModule = await import("./shopee");
@@ -2176,7 +2177,7 @@ export const appRouter = router({
         productId: z.number(),
       }))
       .mutation(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
@@ -2188,7 +2189,7 @@ export const appRouter = router({
     getProductChecklist: protectedProcedure
       .input(z.object({ productId: z.number() }))
       .query(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
@@ -2219,7 +2220,7 @@ export const appRouter = router({
     getProductUrls: protectedProcedure
       .input(z.object({ accountId: z.number(), productId: z.number() }))
       .query(async ({ input }) => {
-        const db = (await import("drizzle-orm/mysql2")).drizzle(process.env.DATABASE_URL!);
+        const db = sharedDb;
         const { shopeeProducts, shopeeAccounts } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const [product] = await db.select().from(shopeeProducts).where(eq(shopeeProducts.id, input.productId)).limit(1);
