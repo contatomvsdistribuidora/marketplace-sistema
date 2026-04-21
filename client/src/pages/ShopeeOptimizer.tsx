@@ -624,7 +624,7 @@ function VariationWizard({
         <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center">
           {step !== "A" ? (
             <button
-              onClick={() => setStep(s => ({ B: "A", C: "B", D: "C" }[s] as WizardStep ?? "A"))}
+              onClick={() => setStep(s => (({ B: "A", C: "B", D: "C" } as Record<string, WizardStep>)[s] ?? "A"))}
               className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition"
             >
               <ArrowLeft className="w-4 h-4" /> Voltar

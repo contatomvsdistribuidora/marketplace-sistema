@@ -825,7 +825,7 @@ export async function batchOptimizeTitles(
         );
         // Save to DB and push to Shopee API
         const { accessToken, shopId } = await getValidToken(p.shopeeAccountId);
-        await updateItemFields(accessToken, shopId, p.itemId, { name: result.optimizedTitle });
+        await updateItemFields(accessToken, shopId, p.itemId, { item_name: result.optimizedTitle });
         await db.update(shopeeProducts).set({ itemName: result.optimizedTitle }).where(eq(shopeeProducts.id, p.id));
         return { productId: p.id, itemName: p.itemName || "", result };
       })
