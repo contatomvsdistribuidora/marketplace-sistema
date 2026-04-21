@@ -198,11 +198,11 @@ function TitleDialog({
                 })}
               </div>
 
-              {optimizedTitle.keywords?.length > 0 && (
+              {Array.isArray(optimizedTitle.keywords) && optimizedTitle.keywords.length > 0 && (
                 <div>
                   <label className="text-sm font-medium mb-1 block">Palavras-chave identificadas</label>
                   <div className="flex flex-wrap gap-1">
-                    {optimizedTitle.keywords.map((kw: string, i: number) => (
+                    {(optimizedTitle?.keywords ?? []).map((kw: string, i: number) => (
                       <Badge key={i} variant="secondary">{kw}</Badge>
                     ))}
                   </div>
