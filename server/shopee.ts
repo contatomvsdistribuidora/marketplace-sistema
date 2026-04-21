@@ -91,26 +91,19 @@ function buildSignedUrl(
  * Generate the OAuth authorization URL for a user to connect their Shopee shop.
  * The user will be redirected to Shopee to authorize the app.
  */
-export function getAuthorizationUrl(redirectUrl: string, state?: string): string {
+export function getAuthorizationUrl(_redirectUrl?: string, _state?: string): string {
+  const partnerId = process.env.SHOPEE_PARTNER_ID!;
+  const partnerKey = process.env.SHOPEE_PARTNER_KEY!;
   const path = "/api/v2/shop/auth_partner";
   const timestamp = Math.floor(Date.now() / 1000);
-  const partnerId = parseInt(ENV.shopeePartnerId, 10);
-  const sign = generateSignature(path, timestamp);
+  const baseString = `${partnerId}${path}${timestamp}`;
+  const sign = crypto.createHmac("sha256", partnerKey).update(baseString).digest("hex");
 
-  const params = new URLSearchParams({
-    partner_id: partnerId.toString(),
-    timestamp: timestamp.toString(),
-    sign,
-    redirect: redirectUrl,
-  });
+  console.log({ partnerId, path, timestamp, baseString, sign });
 
-  if (state) {
-    // Encode state in the redirect URL as query param
-    const redirectWithState = `${redirectUrl}${redirectUrl.includes("?") ? "&" : "?"}state=${encodeURIComponent(state)}`;
-    params.set("redirect", redirectWithState);
-  }
+  const redirect = encodeURIComponent("https://marketplace-sistema-production.up.railway.app");
 
-  return `${SHOPEE_AUTH_BASE}${path}?${params.toString()}`;
+  return `https://partner.shopeemobile.com/api/v2/shop/auth_partner?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&redirect=${redirect}`;
 }
 
 /**
