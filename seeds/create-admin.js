@@ -2,15 +2,26 @@ import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const { MYSQLHOST, MYSQLPORT, MYSQLUSER, MYSQLPASSWORD, MYSQLDATABASE, DATABASE_URL } = process.env;
 
-if (!DATABASE_URL) {
-  console.error("[seed] DATABASE_URL não configurada, pulando seed");
+if (!MYSQLHOST && !DATABASE_URL) {
+  console.error("[seed] Nenhuma variável de banco configurada, pulando seed");
   process.exit(0);
 }
 
 async function main() {
-  const conn = await mysql.createConnection(DATABASE_URL);
+  const conn = MYSQLHOST
+    ? await mysql.createConnection({
+        host: MYSQLHOST,
+        port: Number(MYSQLPORT) || 3306,
+        user: MYSQLUSER,
+        password: MYSQLPASSWORD,
+        database: MYSQLDATABASE,
+        ssl: false,
+      })
+    : await mysql.createConnection(DATABASE_URL);
+
+  console.log("[seed] Conectado ao banco");
 
   await conn.execute(`
     CREATE TABLE IF NOT EXISTS \`users\` (
@@ -54,5 +65,5 @@ async function main() {
 
 main().catch(e => {
   console.error("[seed] Erro:", e.message);
-  process.exit(0); // não bloqueia o start mesmo se falhar
+  process.exit(0);
 });

@@ -11,14 +11,13 @@ export type TrpcContext = {
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
-  // TEMP: bypass auth — inject fake admin user
-  const user = { id: 1, email: "admin@admin.com", role: "admin" } as User;
+  let user: User | null = null;
 
-  // try {
-  //   user = await sdk.authenticateRequest(opts.req);
-  // } catch (error) {
-  //   user = null;
-  // }
+  try {
+    user = await sdk.authenticateRequest(opts.req);
+  } catch (error) {
+    user = null;
+  }
 
   return {
     req: opts.req,

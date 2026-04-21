@@ -22,8 +22,7 @@ export const appRouter = router({
   system: systemRouter,
 
   auth: router({
-    // TEMP: bypass auth — always return fake admin
-    me: publicProcedure.query(() => ({ id: 1, openId: "local_admin", name: "Admin", email: "admin@admin.com", role: "admin" as const, loginMethod: "email", passwordHash: null, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() })),
+    me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
