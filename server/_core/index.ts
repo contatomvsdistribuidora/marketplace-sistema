@@ -1,4 +1,5 @@
 import "dotenv/config";
+import crypto from "crypto";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
@@ -66,23 +67,14 @@ async function startServer() {
     }
   });
   // Shopee signature debug endpoint
-  app.get("/api/debug-shopee-sign", (req, res) => {
-    const crypto = require("crypto");
-    const partnerId = process.env.SHOPEE_PARTNER_ID ?? "";
-    const partnerKey = process.env.SHOPEE_PARTNER_KEY ?? "";
-    const path = "/api/v2/shop/auth_partner";
+  app.get("/api/debug-shopee", (req, res) => {
+    const partnerId = process.env.SHOPEE_PARTNER_ID;
+    const partnerKey = process.env.SHOPEE_PARTNER_KEY;
     const timestamp = Math.floor(Date.now() / 1000);
+    const path = "/api/v2/shop/auth_partner";
     const baseString = `${partnerId}${path}${timestamp}`;
-    const sign = crypto.createHmac("sha256", partnerKey).update(baseString).digest("hex");
-    return res.json({
-      partnerId,
-      partnerKeyLength: partnerKey.length,
-      partnerKeyLast4: partnerKey.slice(-4),
-      path,
-      timestamp,
-      baseString,
-      sign,
-    });
+    const sign = crypto.createHmac("sha256", partnerKey ?? "").update(baseString).digest("hex");
+    return res.json({ partnerId, timestamp, path, baseString, sign, keyLength: partnerKey?.length });
   });
 
   // tRPC API
