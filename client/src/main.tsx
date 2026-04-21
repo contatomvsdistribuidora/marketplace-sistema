@@ -9,8 +9,11 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
-// TEMP: bypass auth
-const redirectToLoginIfUnauthorized = (_error: unknown) => {};
+const redirectToLoginIfUnauthorized = (error: unknown) => {
+  if (error instanceof TRPCClientError && error.message === UNAUTHED_ERR_MSG) {
+    window.location.href = "/login";
+  }
+};
 
 queryClient.getQueryCache().subscribe(event => {
   if (event.type === "updated" && event.action.type === "error") {

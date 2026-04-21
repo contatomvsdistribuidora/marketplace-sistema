@@ -94,7 +94,7 @@ export function getAuthorizationUrl(_redirectUrl?: string, _state?: string): str
 
   console.log({ partnerId, path, timestamp, baseString, sign });
 
-  const redirect = encodeURIComponent("https://marketplace-sistema-production.up.railway.app/api/shopee/callback");
+  const redirect = encodeURIComponent("https://marketplace-sistema-production-04eb.up.railway.app/api/shopee/callback");
 
   return `https://partner.shopeemobile.com/api/v2/shop/auth_partner?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&redirect=${redirect}`;
 }
