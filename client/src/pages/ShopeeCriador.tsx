@@ -4,7 +4,7 @@ import {
   Search, Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
   Palette, PenLine, ArrowLeft, ArrowRight, Check,
-  CheckCircle2, X, PlusCircle,
+  CheckCircle2, X, PlusCircle, AlertTriangle, TrendingUp,
 } from "lucide-react";
 
 const PAGE_SIZE = 50;
@@ -305,6 +305,35 @@ function ProductDetail({ product, onBack }: { product: any; onBack: () => void }
 
 // ─── Tela 3 – Wizard ─────────────────────────────────────────────────────────
 
+interface PricingGlobals {
+  unitCost: string;
+  marginMultiplier: string;
+  defaultDiscount: string;
+  shopeeCommission: string;
+  transactionFee: string;
+  packagingCost: string;
+  shippingCost: string;
+}
+
+interface ComputedPricing {
+  qty: number;
+  price: number;
+  totalProductCost: number;
+  platformCost: number;
+  marginContribution: number;
+  profitPct: number;
+  weight: number;
+  length: number;
+  width: number;
+  height: number;
+  factor: number;
+}
+
+function extractQty(label: string): number {
+  const m = label.match(/\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) : 1;
+}
+
 function VariationWizard({
   product,
   onSave,
@@ -319,6 +348,16 @@ function VariationWizard({
   const [optionLabels, setOptionLabels] = useState<string[]>([""]);
   const [optionDetails, setOptionDetails] = useState<VariationOption[]>([]);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  const [qtyFactors, setQtyFactors] = useState<string[]>([]);
+  const [pricing, setPricing] = useState<PricingGlobals>({
+    unitCost: "",
+    marginMultiplier: "2.5",
+    defaultDiscount: "1",
+    shopeeCommission: "14",
+    transactionFee: "2",
+    packagingCost: "",
+    shippingCost: "",
+  });
 
   const optimizeMutation = trpc.shopee.optimizeTitle.useMutation();
 
@@ -332,6 +371,70 @@ function VariationWizard({
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
   const typeName = VARIATION_TYPES.find(t => t.type === selectedType)?.label ?? "";
 
+  // ── Precificação ──────────────────────────────────────────────────────────
+
+  function computePricing(opt: VariationOption, idx: number): ComputedPricing {
+    const isQty = selectedType === "quantidade";
+    const qty = isQty ? extractQty(opt.label) : 1;
+
+    const unitCost     = parseFloat(pricing.unitCost)        || 0;
+    const multiplier   = parseFloat(pricing.marginMultiplier)|| 1;
+    const discountPct  = parseFloat(qtyFactors[idx] ?? pricing.defaultDiscount) || 0;
+    const commission   = parseFloat(pricing.shopeeCommission) || 0;
+    const txFee        = parseFloat(pricing.transactionFee)   || 0;
+    const packaging    = parseFloat(pricing.packagingCost)    || 0;
+    const shipping     = parseFloat(pricing.shippingCost)     || 0;
+
+    // Factor: 1.00 for idx=0, cumulative -discount% per extra position
+    const factor = Math.max(1 - (discountPct / 100) * idx, 0.01);
+
+    const price            = unitCost * qty * multiplier * factor;
+    const platformCost     = price * (commission + txFee) / 100 + packaging + shipping;
+    const totalProductCost = unitCost * qty;
+    const marginContribution = price - totalProductCost - platformCost;
+    const profitPct        = price > 0 ? (marginContribution / price) * 100 : 0;
+
+    // Dimensions
+    const baseL = parseFloat(product.dimensionLength) || 0;
+    const baseW = parseFloat(product.dimensionWidth)  || 0;
+    const baseH = parseFloat(product.dimensionHeight) || 0;
+    const baseWeight = parseFloat(product.weight)     || 0;
+
+    let weight = opt.weight ? parseFloat(opt.weight) : (isQty ? baseWeight * qty : baseWeight);
+    let length = opt.length ? parseFloat(opt.length) : 0;
+    let width  = opt.width  ? parseFloat(opt.width)  : 0;
+    let height = opt.height ? parseFloat(opt.height) : 0;
+
+    if (isQty && !opt.length && baseL && baseW && baseH) {
+      const volumeBase = baseL * baseW * baseH;
+      const scale = Math.cbrt(volumeBase > 0 ? volumeBase * qty / volumeBase : qty);
+      length = parseFloat((baseL * scale).toFixed(1));
+      width  = parseFloat((baseW * scale).toFixed(1));
+      height = parseFloat((baseH * scale).toFixed(1));
+    }
+
+    return { qty, price, totalProductCost, platformCost, marginContribution, profitPct, weight, length, width, height, factor };
+  }
+
+  function profitBadge(pct: number) {
+    if (pct >= 20) return { bg: "bg-green-100 text-green-700 border-green-300",  dot: "bg-green-500"  };
+    if (pct >= 10) return { bg: "bg-yellow-100 text-yellow-700 border-yellow-300", dot: "bg-yellow-500" };
+    return             { bg: "bg-red-100 text-red-700 border-red-300",           dot: "bg-red-500"    };
+  }
+
+  function priceAlertVariation(): string | null {
+    if (!pricing.unitCost || optionDetails.length < 2) return null;
+    const prices = optionDetails.map((o, i) => computePricing(o, i).price).filter(p => p > 0);
+    if (prices.length < 2) return null;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    if (max > min * 4) {
+      const maxOpt = optionDetails[prices.indexOf(max)];
+      return `Variação "${maxOpt.label}" tem preço ${(max / min).toFixed(1)}× maior que a menor — verifique os multiplicadores.`;
+    }
+    return null;
+  }
+
   // ── Etapa A ──
   function goAtoB() {
     if (!selectedType) return;
@@ -342,22 +445,14 @@ function VariationWizard({
   function updateLabel(idx: number, val: string) {
     setOptionLabels(labels => labels.map((l, i) => (i === idx ? val : l)));
   }
-
-  function addLabel() {
-    setOptionLabels(l => [...l, ""]);
-  }
-
-  function removeLabel(idx: number) {
-    setOptionLabels(l => l.filter((_, i) => i !== idx));
-  }
+  function addLabel() { setOptionLabels(l => [...l, ""]); }
+  function removeLabel(idx: number) { setOptionLabels(l => l.filter((_, i) => i !== idx)); }
 
   async function suggestWithAI() {
     try {
       const result = await optimizeMutation.mutateAsync({ productId: product.id });
       setAiSuggestions(result.keywords?.slice(0, 5) ?? []);
-    } catch {
-      setAiSuggestions([]);
-    }
+    } catch { setAiSuggestions([]); }
   }
 
   function applySuggestion(s: string) {
@@ -372,7 +467,9 @@ function VariationWizard({
   function goBtoC() {
     const filled = optionLabels.filter(l => l.trim() !== "");
     if (filled.length === 0) return;
-    setOptionDetails(filled.map(label => emptyOption(label)));
+    const opts = filled.map(label => emptyOption(label));
+    setOptionDetails(opts);
+    setQtyFactors(opts.map((_, i) => i === 0 ? "0" : pricing.defaultDiscount));
     setStep("C");
   }
 
@@ -384,25 +481,45 @@ function VariationWizard({
   function suggestDimensions(id: string) {
     setOptionDetails(opts => opts.map(o => {
       if (o.id !== id) return o;
+      const isQty = selectedType === "quantidade";
+      const qty = isQty ? extractQty(o.label) : 1;
+      const baseWeight = parseFloat(product.weight) || 0.5;
+      const baseL = parseFloat(product.dimensionLength) || 20;
+      const baseW = parseFloat(product.dimensionWidth)  || 15;
+      const baseH = parseFloat(product.dimensionHeight) || 10;
+      const scale = isQty ? Math.cbrt(qty) : 1;
       return {
         ...o,
-        weight: o.weight || product.weight || "0.5",
-        length: o.length || product.dimensionLength || "20",
-        width:  o.width  || product.dimensionWidth  || "15",
-        height: o.height || product.dimensionHeight || "10",
+        weight: o.weight || (baseWeight * qty).toFixed(2),
+        length: o.length || (baseL * scale).toFixed(1),
+        width:  o.width  || (baseW * scale).toFixed(1),
+        height: o.height || (baseH * scale).toFixed(1),
       };
     }));
   }
 
   // ── Etapa D ──
   function handleSave() {
-    onSave({ id: uid(), type: selectedType!, typeName, options: optionDetails });
+    const opts = optionDetails.map((o, i) => {
+      const c = computePricing(o, i);
+      return {
+        ...o,
+        weight: o.weight || c.weight.toFixed(2),
+        length: o.length || c.length.toFixed(1),
+        width:  o.width  || c.width.toFixed(1),
+        height: o.height || c.height.toFixed(1),
+        price:  o.price  || c.price.toFixed(2),
+      };
+    });
+    onSave({ id: uid(), type: selectedType!, typeName, options: opts });
   }
 
   function stepBack() {
     const prev = ({ B: "A", C: "B", D: "C" } as Record<string, WizardStep>)[step];
     if (prev) setStep(prev);
   }
+
+  const priceAlert = step === "C" ? priceAlertVariation() : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
@@ -420,11 +537,9 @@ function VariationWizard({
             <div key={s.key} className="flex items-center flex-1">
               <div className="flex items-center gap-1.5">
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
-                  step === s.key
-                    ? "bg-orange-500 border-orange-500 text-white"
-                    : currentStepIndex > i
-                    ? "bg-orange-100 border-orange-300 text-orange-600"
-                    : "bg-gray-100 border-gray-300 text-gray-400"
+                  step === s.key ? "bg-orange-500 border-orange-500 text-white"
+                  : currentStepIndex > i ? "bg-orange-100 border-orange-300 text-orange-600"
+                  : "bg-gray-100 border-gray-300 text-gray-400"
                 }`}>
                   {currentStepIndex > i ? <Check className="w-3.5 h-3.5" /> : i + 1}
                 </div>
@@ -450,9 +565,7 @@ function VariationWizard({
                     key={vt.type}
                     onClick={() => setSelectedType(vt.type)}
                     className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${
-                      selectedType === vt.type
-                        ? "border-orange-500 bg-orange-50"
-                        : "border-gray-200 hover:border-orange-300 bg-white"
+                      selectedType === vt.type ? "border-orange-500 bg-orange-50" : "border-gray-200 hover:border-orange-300 bg-white"
                     }`}
                   >
                     <span className={`mt-0.5 ${selectedType === vt.type ? "text-orange-500" : "text-gray-400"}`}>{vt.icon}</span>
@@ -474,17 +587,11 @@ function VariationWizard({
                 Digite cada opção da variação <span className="font-semibold text-gray-800">({typeName})</span>:
               </p>
               <p className="text-xs text-gray-400 mb-4">Ex: "100 unidades", "Azul", "Grande"...</p>
-
               <div className="space-y-2 mb-3">
                 {optionLabels.map((label, idx) => (
                   <div key={idx} className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={label}
-                      onChange={e => updateLabel(idx, e.target.value)}
-                      placeholder={`Opção ${idx + 1}`}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                    />
+                    <input type="text" value={label} onChange={e => updateLabel(idx, e.target.value)} placeholder={`Opção ${idx + 1}`}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
                     {optionLabels.length > 1 && (
                       <button onClick={() => removeLabel(idx)} className="text-gray-300 hover:text-red-400 transition flex-shrink-0">
                         <Trash2 className="w-4 h-4" />
@@ -493,31 +600,22 @@ function VariationWizard({
                   </div>
                 ))}
               </div>
-
               <button onClick={addLabel} className="flex items-center gap-1.5 text-orange-600 text-sm font-medium hover:text-orange-700 transition mb-5">
                 <Plus className="w-4 h-4" /> Adicionar opção
               </button>
-
               <div className="border border-dashed border-orange-200 rounded-xl p-4 bg-orange-50">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-medium text-orange-700">Sugerir com IA</p>
-                  <button
-                    onClick={suggestWithAI}
-                    disabled={optimizeMutation.isPending}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium rounded-lg transition disabled:opacity-60"
-                  >
-                    {optimizeMutation.isPending
-                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      : <Sparkles className="w-3.5 h-3.5" />}
+                  <button onClick={suggestWithAI} disabled={optimizeMutation.isPending}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium rounded-lg transition disabled:opacity-60">
+                    {optimizeMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                     Sugerir com IA
                   </button>
                 </div>
                 {aiSuggestions.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     {aiSuggestions.map(s => (
-                      <button key={s} onClick={() => applySuggestion(s)} className="px-2.5 py-1 bg-white border border-orange-300 text-orange-700 text-xs rounded-full hover:bg-orange-100 transition">
-                        + {s}
-                      </button>
+                      <button key={s} onClick={() => applySuggestion(s)} className="px-2.5 py-1 bg-white border border-orange-300 text-orange-700 text-xs rounded-full hover:bg-orange-100 transition">+ {s}</button>
                     ))}
                   </div>
                 )}
@@ -529,48 +627,129 @@ function VariationWizard({
             </div>
           )}
 
-          {/* ETAPA C – Detalhes */}
+          {/* ETAPA C – Detalhes + Precificação */}
           {step === "C" && (
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600 mb-1">Preencha os detalhes de cada opção:</p>
-              {optionDetails.map((opt, idx) => (
-                <div key={opt.id} className="border border-gray-200 rounded-xl p-4 bg-gray-50">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-semibold text-gray-800">
-                      <span className="text-orange-500">{idx + 1}.</span> {opt.label}
-                    </p>
-                    <button
-                      onClick={() => suggestDimensions(opt.id)}
-                      className="flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700 border border-orange-200 rounded-lg px-2 py-1 bg-white transition"
-                    >
-                      <Sparkles className="w-3 h-3" /> IA preenche dimensões
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {([
-                      { field: "weight" as const, label: "Peso (kg)",        placeholder: "0.50", step: "0.01" },
-                      { field: "length" as const, label: "Comprimento (cm)", placeholder: "20",   step: "0.1"  },
-                      { field: "width"  as const, label: "Largura (cm)",     placeholder: "15",   step: "0.1"  },
-                      { field: "height" as const, label: "Altura (cm)",      placeholder: "10",   step: "0.1"  },
-                      { field: "price"  as const, label: "Preço (R$)",       placeholder: "0.00", step: "0.01" },
-                      { field: "stock"  as const, label: "Estoque",          placeholder: "0",    step: "1"    },
-                    ]).map(({ field, label, placeholder, step: stepVal }) => (
-                      <div key={field}>
-                        <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step={stepVal}
-                          placeholder={placeholder}
-                          value={(opt as any)[field]}
-                          onChange={e => updateDetail(opt.id, field, e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        />
-                      </div>
-                    ))}
-                  </div>
+            <div className="space-y-5">
+
+              {/* Alerta de faixa de preço */}
+              {priceAlert && (
+                <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-3">
+                  <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-700">{priceAlert}</p>
                 </div>
-              ))}
+              )}
+
+              {/* ── Campos globais de precificação ── */}
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">Parâmetros de precificação</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+                  {([
+                    { key: "unitCost"        as const, label: "Custo unitário (R$)",      placeholder: "10.00", step: "0.01" },
+                    { key: "marginMultiplier"as const, label: "Multiplicador de margem",  placeholder: "2.5",   step: "0.1"  },
+                    { key: "defaultDiscount" as const, label: "Desconto por faixa (%)",   placeholder: "1",     step: "0.1"  },
+                    { key: "shopeeCommission"as const, label: "Comissão Shopee (%)",      placeholder: "14",    step: "0.1"  },
+                    { key: "transactionFee"  as const, label: "Taxa transação (%)",       placeholder: "2",     step: "0.1"  },
+                    { key: "packagingCost"   as const, label: "Custo embalagem (R$)",     placeholder: "2.00",  step: "0.01" },
+                  ]).map(({ key, label, placeholder, step: sv }) => (
+                    <div key={key}>
+                      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                      <input type="number" min="0" step={sv} placeholder={placeholder} value={pricing[key]}
+                        onChange={e => setPricing(p => ({ ...p, [key]: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                    </div>
+                  ))}
+                </div>
+                {/* Frete manual */}
+                <div className="border-t border-gray-200 pt-3">
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Custo de envio estimado (R$)
+                    <span className="ml-1 text-gray-400 font-normal">— integração API Shopee em breve</span>
+                  </label>
+                  <input type="number" min="0" step="0.01" placeholder="0.00" value={pricing.shippingCost}
+                    onChange={e => setPricing(p => ({ ...p, shippingCost: e.target.value }))}
+                    className="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                </div>
+              </div>
+
+              {/* ── Cards por variação ── */}
+              {optionDetails.map((opt, idx) => {
+                const c = computePricing(opt, idx);
+                const badge = profitBadge(c.profitPct);
+                const hasPricing = parseFloat(pricing.unitCost) > 0;
+
+                return (
+                  <div key={opt.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                    {/* Cabeçalho do card */}
+                    <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                      <p className="text-sm font-semibold text-gray-800">
+                        <span className="text-orange-500">{idx + 1}.</span> {opt.label}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        {hasPricing && (
+                          <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${badge.bg}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                            {c.profitPct.toFixed(1)}% lucro
+                          </span>
+                        )}
+                        <button onClick={() => suggestDimensions(opt.id)}
+                          className="flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700 border border-orange-200 rounded-lg px-2 py-1 bg-white transition">
+                          <Sparkles className="w-3 h-3" /> IA dimensões
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-4">
+                      {/* Campos manuais */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {([
+                          { field: "weight" as const, label: "Peso (kg)",        placeholder: c.weight > 0 ? c.weight.toFixed(2) : "0.50", sv: "0.01" },
+                          { field: "length" as const, label: "Comprimento (cm)", placeholder: c.length > 0 ? c.length.toFixed(1) : "20",   sv: "0.1"  },
+                          { field: "width"  as const, label: "Largura (cm)",     placeholder: c.width  > 0 ? c.width.toFixed(1)  : "15",   sv: "0.1"  },
+                          { field: "height" as const, label: "Altura (cm)",      placeholder: c.height > 0 ? c.height.toFixed(1) : "10",   sv: "0.1"  },
+                          { field: "stock"  as const, label: "Estoque",          placeholder: "0",                                          sv: "1"    },
+                        ]).map(({ field, label, placeholder, sv }) => (
+                          <div key={field}>
+                            <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                            <input type="number" min="0" step={sv} placeholder={placeholder} value={(opt as any)[field]}
+                              onChange={e => updateDetail(opt.id, field, e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                          </div>
+                        ))}
+                        {/* Fator de desconto editável */}
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Desconto faixa (%)</label>
+                          <input type="number" min="0" max="100" step="0.1"
+                            value={qtyFactors[idx] ?? pricing.defaultDiscount}
+                            onChange={e => setQtyFactors(f => { const n = [...f]; n[idx] = e.target.value; return n; })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                        </div>
+                      </div>
+
+                      {/* Painel de precificação calculada */}
+                      {hasPricing && (
+                        <div className="bg-orange-50 border border-orange-100 rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold text-gray-600 flex items-center gap-1">
+                              <TrendingUp className="w-3.5 h-3.5 text-orange-500" /> Precificação calculada
+                            </span>
+                            <span className="text-lg font-bold text-orange-600">
+                              R$ {c.price.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
+                            <span>Qtd detectada: <b className="text-gray-700">{c.qty}×</b></span>
+                            <span>Fator: <b className="text-gray-700">{(c.factor * 100).toFixed(1)}%</b></span>
+                            <span>Custo produto: <b className="text-gray-700">R$ {c.totalProductCost.toFixed(2)}</b></span>
+                            <span>Custo plataforma: <b className="text-gray-700">R$ {c.platformCost.toFixed(2)}</b></span>
+                            <span>Margem contribuição: <b className={c.marginContribution >= 0 ? "text-green-700" : "text-red-600"}>R$ {c.marginContribution.toFixed(2)}</b></span>
+                            <span>Lucro líquido: <b className={`${badge.bg.split(" ")[1]}`}>{c.profitPct.toFixed(1)}%</b></span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -583,34 +762,42 @@ function VariationWizard({
                   {typeName} · {optionDetails.length} opção(ões)
                 </p>
                 <div className="space-y-3">
-                  {optionDetails.map((opt, idx) => (
-                    <div key={opt.id} className="bg-white rounded-lg border border-orange-100 p-3">
-                      <p className="text-sm font-semibold text-gray-800 mb-2">
-                        <span className="text-orange-500">{idx + 1}.</span> {opt.label}
-                      </p>
-                      <div className="grid grid-cols-3 gap-2 text-xs text-gray-500">
-                        {opt.weight && <span>Peso: <b className="text-gray-700">{opt.weight} kg</b></span>}
-                        {opt.length && <span>Comp: <b className="text-gray-700">{opt.length} cm</b></span>}
-                        {opt.width  && <span>Larg: <b className="text-gray-700">{opt.width} cm</b></span>}
-                        {opt.height && <span>Alt: <b className="text-gray-700">{opt.height} cm</b></span>}
-                        {opt.price  && <span>Preço: <b className="text-orange-600">R${opt.price}</b></span>}
-                        {opt.stock  && <span>Estoque: <b className="text-gray-700">{opt.stock}</b></span>}
+                  {optionDetails.map((opt, idx) => {
+                    const c = computePricing(opt, idx);
+                    const hasPricing = parseFloat(pricing.unitCost) > 0;
+                    const badge = profitBadge(c.profitPct);
+                    return (
+                      <div key={opt.id} className="bg-white rounded-lg border border-orange-100 p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-sm font-semibold text-gray-800">
+                            <span className="text-orange-500">{idx + 1}.</span> {opt.label}
+                          </p>
+                          {hasPricing && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-base font-bold text-orange-600">R$ {c.price.toFixed(2)}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${badge.bg}`}>{c.profitPct.toFixed(1)}%</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs text-gray-500">
+                          <span>Peso: <b className="text-gray-700">{opt.weight || c.weight.toFixed(2)} kg</b></span>
+                          <span>Comp: <b className="text-gray-700">{opt.length || c.length.toFixed(1)} cm</b></span>
+                          <span>Larg: <b className="text-gray-700">{opt.width  || c.width.toFixed(1)} cm</b></span>
+                          <span>Alt: <b className="text-gray-700">{opt.height || c.height.toFixed(1)} cm</b></span>
+                          {opt.stock && <span>Estoque: <b className="text-gray-700">{opt.stock}</b></span>}
+                          {hasPricing && <span>Margem: <b className={c.marginContribution >= 0 ? "text-green-700" : "text-red-600"}>R$ {c.marginContribution.toFixed(2)}</b></span>}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
-
-              <button
-                onClick={() => alert("Publicação na Shopee em breve")}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm transition mb-3"
-              >
+              <button onClick={() => alert("Publicação na Shopee em breve")}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm transition mb-3">
                 <Sparkles className="w-4 h-4" /> Publicar na Shopee
               </button>
-              <button
-                onClick={() => setStep("C")}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-300 text-gray-600 text-sm hover:bg-gray-50 transition"
-              >
+              <button onClick={() => setStep("C")}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-300 text-gray-600 text-sm hover:bg-gray-50 transition">
                 <ArrowLeft className="w-4 h-4" /> Voltar e editar
               </button>
             </div>
@@ -623,27 +810,29 @@ function VariationWizard({
             <button onClick={stepBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition">
               <ArrowLeft className="w-4 h-4" /> Voltar
             </button>
-          ) : (
-            <div />
-          )}
+          ) : <div />}
 
           {step === "A" && (
-            <button onClick={goAtoB} disabled={!selectedType} className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
+            <button onClick={goAtoB} disabled={!selectedType}
+              className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
               Próximo <ArrowRight className="w-4 h-4" />
             </button>
           )}
           {step === "B" && (
-            <button onClick={goBtoC} disabled={optionLabels.every(l => l.trim() === "")} className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
+            <button onClick={goBtoC} disabled={optionLabels.every(l => l.trim() === "")}
+              className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
               Próximo <ArrowRight className="w-4 h-4" />
             </button>
           )}
           {step === "C" && (
-            <button onClick={() => setStep("D")} className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-xl transition">
+            <button onClick={() => setStep("D")}
+              className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-xl transition">
               Revisar <ArrowRight className="w-4 h-4" />
             </button>
           )}
           {step === "D" && (
-            <button onClick={handleSave} className="flex items-center gap-1.5 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl transition">
+            <button onClick={handleSave}
+              className="flex items-center gap-1.5 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl transition">
               <Check className="w-4 h-4" /> Salvar variação
             </button>
           )}
