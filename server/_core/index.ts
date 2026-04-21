@@ -86,82 +86,43 @@ async function startServer() {
     });
   });
 
-  // Run missing table migrations
+  // Run all missing table migrations
   app.get("/api/run-migrations", async (req, res) => {
     const { pool } = await import("../db");
-    const results: { table: string; status: string; error?: string }[] = [];
+    const results: { name: string; status: string; error?: string }[] = [];
 
-    const statements: { table: string; sql: string }[] = [
-      {
-        table: "shopee_accounts",
-        sql: `CREATE TABLE IF NOT EXISTS \`shopee_accounts\` (
-  \`id\` int NOT NULL AUTO_INCREMENT,
-  \`userId\` int NOT NULL,
-  \`shopId\` bigint NOT NULL,
-  \`shopName\` varchar(256),
-  \`region\` varchar(10) NOT NULL DEFAULT 'BR',
-  \`accessToken\` text NOT NULL,
-  \`refreshToken\` text NOT NULL,
-  \`tokenExpiresAt\` timestamp NOT NULL,
-  \`refreshTokenExpiresAt\` timestamp NULL,
-  \`tokenStatus\` varchar(32) NOT NULL DEFAULT 'active',
-  \`shopStatus\` varchar(64),
-  \`totalProducts\` int DEFAULT 0,
-  \`isActive\` int NOT NULL DEFAULT 1,
-  \`lastSyncAt\` timestamp NULL,
-  \`lastUsedAt\` timestamp NULL,
-  \`createdAt\` timestamp NOT NULL DEFAULT now(),
-  \`updatedAt\` timestamp NOT NULL DEFAULT now() ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
-)`,
-      },
-      {
-        table: "shopee_products",
-        sql: `CREATE TABLE IF NOT EXISTS \`shopee_products\` (
-  \`id\` int NOT NULL AUTO_INCREMENT,
-  \`userId\` int NOT NULL,
-  \`shopeeAccountId\` int NOT NULL,
-  \`itemId\` bigint NOT NULL,
-  \`itemName\` varchar(1024),
-  \`itemSku\` varchar(256),
-  \`itemStatus\` varchar(32),
-  \`categoryId\` bigint,
-  \`categoryName\` varchar(512),
-  \`price\` varchar(32),
-  \`stock\` int DEFAULT 0,
-  \`sold\` int DEFAULT 0,
-  \`rating\` varchar(10),
-  \`imageUrl\` varchar(1024),
-  \`images\` json,
-  \`hasVideo\` int DEFAULT 0,
-  \`attributes\` json,
-  \`attributesFilled\` int DEFAULT 0,
-  \`attributesTotal\` int DEFAULT 0,
-  \`qualityScore\` varchar(32),
-  \`variations\` json,
-  \`weight\` varchar(32),
-  \`dimensionLength\` varchar(32),
-  \`dimensionWidth\` varchar(32),
-  \`dimensionHeight\` varchar(32),
-  \`description\` text,
-  \`lastSyncAt\` timestamp NOT NULL DEFAULT now(),
-  \`createdAt\` timestamp NOT NULL DEFAULT now(),
-  \`updatedAt\` timestamp NOT NULL DEFAULT now() ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
-)`,
-      },
+    const statements: { name: string; sql: string }[] = [
+      { name: "cache_sync", sql: `CREATE TABLE IF NOT EXISTS \`cache_sync\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`inventoryId\` int NOT NULL,\`totalProducts\` int NOT NULL DEFAULT 0,\`lastProductId\` bigint NOT NULL DEFAULT 0,\`isComplete\` int NOT NULL DEFAULT 0,\`lastSyncAt\` timestamp NOT NULL DEFAULT (now()),\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`cache_sync_id\` PRIMARY KEY(\`id\`))` },
+      { name: "product_cache", sql: `CREATE TABLE IF NOT EXISTS \`product_cache\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`inventoryId\` int NOT NULL,\`productId\` bigint NOT NULL,\`name\` varchar(1024) NOT NULL DEFAULT '',\`sku\` varchar(256) NOT NULL DEFAULT '',\`ean\` varchar(128) NOT NULL DEFAULT '',\`categoryId\` int NOT NULL DEFAULT 0,\`manufacturerId\` int NOT NULL DEFAULT 0,\`mainPrice\` varchar(32) NOT NULL DEFAULT '0',\`totalStock\` int NOT NULL DEFAULT 0,\`weight\` varchar(32) NOT NULL DEFAULT '0',\`tags\` json,\`description\` text,\`imageUrl\` varchar(1024),\`cachedAt\` timestamp NOT NULL DEFAULT (now()),CONSTRAINT \`product_cache_id\` PRIMARY KEY(\`id\`))` },
+      { name: "agent_actions", sql: `CREATE TABLE IF NOT EXISTS \`agent_actions\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`jobId\` int,\`queueItemId\` int,\`action_type\` enum('navigate','click','type','select','screenshot','wait','success','error','info') NOT NULL DEFAULT 'info',\`description\` text NOT NULL,\`screenshotUrl\` varchar(1024),\`metadata\` json,\`createdAt\` timestamp NOT NULL DEFAULT (now()),CONSTRAINT \`agent_actions_id\` PRIMARY KEY(\`id\`))` },
+      { name: "agent_queue", sql: `CREATE TABLE IF NOT EXISTS \`agent_queue\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`jobId\` int NOT NULL,\`productId\` varchar(128) NOT NULL,\`productName\` varchar(512),\`sku\` varchar(256),\`ean\` varchar(128),\`price\` varchar(32),\`stock\` int DEFAULT 0,\`imageUrl\` varchar(1024),\`description\` text,\`mappedCategory\` varchar(512),\`mappedAttributes\` json,\`marketplaceType\` varchar(64) NOT NULL,\`accountId\` varchar(128) NOT NULL,\`accountName\` varchar(256),\`inventoryId\` int NOT NULL,\`queue_status\` enum('waiting','processing','completed','failed','skipped') NOT NULL DEFAULT 'waiting',\`errorMessage\` text,\`screenshotUrl\` varchar(1024),\`processedAt\` timestamp,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`agent_queue_id\` PRIMARY KEY(\`id\`))` },
+      { name: "ml_accounts", sql: `CREATE TABLE IF NOT EXISTS \`ml_accounts\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`mlUserId\` bigint NOT NULL,\`nickname\` varchar(256),\`email\` varchar(320),\`accessToken\` text NOT NULL,\`refreshToken\` text NOT NULL,\`tokenExpiresAt\` timestamp NOT NULL,\`scopes\` text,\`siteId\` varchar(10) NOT NULL DEFAULT 'MLB',\`isActive\` int NOT NULL DEFAULT 1,\`lastUsedAt\` timestamp,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`ml_accounts_id\` PRIMARY KEY(\`id\`))` },
+      { name: "ml_listings", sql: `CREATE TABLE IF NOT EXISTS \`ml_listings\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`mlAccountId\` int NOT NULL,\`mlItemId\` varchar(64),\`productId\` varchar(128) NOT NULL,\`productName\` varchar(512),\`title\` varchar(256),\`categoryId\` varchar(64),\`categoryName\` varchar(512),\`price\` varchar(32),\`currencyId\` varchar(10) DEFAULT 'BRL',\`ml_listing_status\` enum('draft','active','paused','closed','error') NOT NULL DEFAULT 'draft',\`listingType\` varchar(64) DEFAULT 'gold_special',\`permalink\` text,\`attributes\` json,\`errorMessage\` text,\`mlResponse\` json,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`ml_listings_id\` PRIMARY KEY(\`id\`))` },
+      { name: "tiktok_accounts", sql: `CREATE TABLE IF NOT EXISTS \`tiktok_accounts\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`ttOpenId\` varchar(256) NOT NULL,\`sellerName\` varchar(256),\`sellerBaseRegion\` varchar(10),\`accessToken\` text NOT NULL,\`refreshToken\` text NOT NULL,\`accessTokenExpiresAt\` timestamp NOT NULL,\`refreshTokenExpiresAt\` timestamp NOT NULL,\`shopId\` varchar(128),\`shopName\` varchar(256),\`shopRegion\` varchar(10),\`shopCipher\` varchar(512),\`isActive\` int NOT NULL DEFAULT 1,\`lastUsedAt\` timestamp,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`tiktok_accounts_id\` PRIMARY KEY(\`id\`))` },
+      { name: "tiktok_listings", sql: `CREATE TABLE IF NOT EXISTS \`tiktok_listings\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`tiktokAccountId\` int NOT NULL,\`ttProductId\` varchar(128),\`productId\` varchar(128) NOT NULL,\`productName\` varchar(512),\`title\` varchar(256),\`categoryId\` varchar(128),\`categoryName\` varchar(512),\`price\` varchar(32),\`currency\` varchar(10) DEFAULT 'BRL',\`tt_listing_status\` enum('draft','pending','active','failed','deactivated','deleted') NOT NULL DEFAULT 'draft',\`ttResponse\` json,\`errorMessage\` text,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`tiktok_listings_id\` PRIMARY KEY(\`id\`))` },
+      { name: "background_jobs", sql: `CREATE TABLE IF NOT EXISTS \`background_jobs\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`bg_job_type\` enum('export_ml','generate_titles','generate_descriptions','generate_images','shopee_sync') NOT NULL,\`bg_job_status\` enum('scheduled','queued','processing','completed','failed','cancelled') NOT NULL DEFAULT 'queued',\`marketplaceId\` int,\`accountId\` int,\`accountName\` varchar(256),\`tagFilter\` varchar(256),\`listingTypes\` json,\`titleStyle\` varchar(64),\`descriptionStyle\` varchar(64),\`imageStyle\` varchar(64),\`concurrency\` int NOT NULL DEFAULT 5,\`productIds\` json,\`productData\` json,\`totalItems\` int NOT NULL DEFAULT 0,\`processedItems\` int NOT NULL DEFAULT 0,\`successCount\` int NOT NULL DEFAULT 0,\`errorCount\` int NOT NULL DEFAULT 0,\`scheduledFor\` timestamp,\`startedAt\` timestamp,\`completedAt\` timestamp,\`lastError\` text,\`resultLog\` json,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`background_jobs_id\` PRIMARY KEY(\`id\`))` },
+      { name: "amazon_accounts", sql: `CREATE TABLE IF NOT EXISTS \`amazon_accounts\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`sellerId\` varchar(128) NOT NULL,\`sellerName\` varchar(256),\`email\` varchar(320),\`marketplaceId\` varchar(32) NOT NULL DEFAULT 'A2Q3Y263D00KWC',\`region\` varchar(32) NOT NULL DEFAULT 'na',\`accessToken\` text,\`refreshToken\` text NOT NULL,\`tokenExpiresAt\` timestamp,\`isActive\` int NOT NULL DEFAULT 1,\`lastUsedAt\` timestamp,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`amazon_accounts_id\` PRIMARY KEY(\`id\`))` },
+      { name: "amazon_listings", sql: `CREATE TABLE IF NOT EXISTS \`amazon_listings\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`amazonAccountId\` int NOT NULL,\`asin\` varchar(32),\`sku\` varchar(256) NOT NULL,\`productId\` varchar(128) NOT NULL,\`productName\` varchar(512),\`title\` varchar(512),\`productType\` varchar(256),\`categoryName\` varchar(512),\`price\` varchar(32),\`currency\` varchar(10) DEFAULT 'BRL',\`amz_listing_status\` enum('draft','active','inactive','error','suppressed') NOT NULL DEFAULT 'draft',\`submissionId\` varchar(128),\`issues\` json,\`permalink\` text,\`amzResponse\` json,\`errorMessage\` text,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`amazon_listings_id\` PRIMARY KEY(\`id\`))` },
+      { name: "shopee_accounts", sql: `CREATE TABLE IF NOT EXISTS \`shopee_accounts\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`shopId\` bigint NOT NULL,\`shopName\` varchar(256),\`region\` varchar(10) NOT NULL DEFAULT 'BR',\`accessToken\` text NOT NULL,\`refreshToken\` text NOT NULL,\`tokenExpiresAt\` timestamp NOT NULL,\`refreshTokenExpiresAt\` timestamp,\`tokenStatus\` varchar(32) NOT NULL DEFAULT 'active',\`shopStatus\` varchar(64),\`totalProducts\` int DEFAULT 0,\`isActive\` int NOT NULL DEFAULT 1,\`lastSyncAt\` timestamp,\`lastUsedAt\` timestamp,\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`shopee_accounts_id\` PRIMARY KEY(\`id\`))` },
+      { name: "shopee_products", sql: `CREATE TABLE IF NOT EXISTS \`shopee_products\` (\`id\` int AUTO_INCREMENT NOT NULL,\`userId\` int NOT NULL,\`shopeeAccountId\` int NOT NULL,\`itemId\` bigint NOT NULL,\`itemName\` varchar(1024),\`itemSku\` varchar(256),\`itemStatus\` varchar(32),\`categoryId\` bigint,\`categoryName\` varchar(512),\`price\` varchar(32),\`stock\` int DEFAULT 0,\`sold\` int DEFAULT 0,\`rating\` varchar(10),\`imageUrl\` varchar(1024),\`images\` json,\`hasVideo\` int DEFAULT 0,\`attributes\` json,\`attributesFilled\` int DEFAULT 0,\`attributesTotal\` int DEFAULT 0,\`qualityScore\` varchar(32),\`variations\` json,\`weight\` varchar(32),\`dimensionLength\` varchar(32),\`dimensionWidth\` varchar(32),\`dimensionHeight\` varchar(32),\`description\` text,\`lastSyncAt\` timestamp NOT NULL DEFAULT (now()),\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`shopee_products_id\` PRIMARY KEY(\`id\`))` },
+      // 0012: ALTER columns (ignored if already present)
+      { name: "alter:background_jobs:shopee_sync", sql: `ALTER TABLE \`background_jobs\` MODIFY COLUMN \`bg_job_type\` enum('export_ml','generate_titles','generate_descriptions','generate_images','shopee_sync') NOT NULL` },
+      { name: "alter:shopee_accounts:refreshTokenExpiresAt", sql: `ALTER TABLE \`shopee_accounts\` ADD COLUMN \`refreshTokenExpiresAt\` timestamp` },
+      { name: "alter:shopee_accounts:tokenStatus", sql: `ALTER TABLE \`shopee_accounts\` ADD COLUMN \`tokenStatus\` varchar(32) NOT NULL DEFAULT 'active'` },
     ];
 
-    for (const { table, sql } of statements) {
+    const conn = await pool.getConnection();
+    for (const { name, sql } of statements) {
       try {
-        const conn = await pool.getConnection();
         await conn.query(sql);
-        conn.release();
-        results.push({ table, status: "ok" });
+        results.push({ name, status: "ok" });
       } catch (err: any) {
-        results.push({ table, status: "error", error: err.message });
+        // Duplicate column errors (1060) are expected on re-runs — treat as ok
+        const ok = err.errno === 1060 || err.errno === 1061;
+        results.push({ name, status: ok ? "already_exists" : "error", error: ok ? undefined : err.message });
       }
     }
+    conn.release();
 
     return res.json({ results });
   });
