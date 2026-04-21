@@ -47,14 +47,23 @@ async function startServer() {
   registerShopeeRoutes(app);
   // One-time admin setup endpoint
   app.get("/api/setup-admin", async (req, res) => {
-    return res.json({
-      MYSQLHOST: process.env.MYSQLHOST || "NÃO DEFINIDO",
-      MYSQLPORT: process.env.MYSQLPORT || "NÃO DEFINIDO",
-      MYSQLUSER: process.env.MYSQLUSER || "NÃO DEFINIDO",
-      MYSQLDATABASE: process.env.MYSQLDATABASE || "NÃO DEFINIDO",
-      MYSQLPASSWORD: process.env.MYSQLPASSWORD ? "DEFINIDO" : "NÃO DEFINIDO",
-      DATABASE_URL: process.env.DATABASE_URL || "NÃO DEFINIDO",
-    });
+    try {
+      const mysql = await import("mysql2/promise");
+      const conn = await (mysql as any).createConnection(process.env.DATABASE_URL);
+      await conn.query("SELECT 1");
+      await conn.end();
+      return res.json({ success: true, message: "Conexão OK" });
+    } catch (err: any) {
+      return res.json({
+        error: err.message,
+        code: err.code,
+        errno: err.errno,
+        sqlState: err.sqlState,
+        url: process.env.DATABASE_URL
+          ? process.env.DATABASE_URL.replace(/:([^:@]+)@/, ":***@")
+          : "NÃO DEFINIDA",
+      });
+    }
   });
   // tRPC API
   app.use(
