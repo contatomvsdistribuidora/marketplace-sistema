@@ -67,9 +67,23 @@ export function registerShopeeRoutes(app: Express) {
         return res.redirect(errorRedirect);
       }
 
+      console.log("[Shopee callback] recebido:", { code: String(code).substring(0, 8) + "...", shop_id, userId });
+
       // Exchange code for tokens
       console.log(`[Shopee OAuth] Exchanging code for shop ${shopId}, user ${userId}...`);
-      const tokenData = await shopee.exchangeCodeForToken(String(code), shopId);
+      let tokenData: Awaited<ReturnType<typeof shopee.exchangeCodeForToken>>;
+      try {
+        tokenData = await shopee.exchangeCodeForToken(String(code), shopId);
+        console.log("[Shopee OAuth] Token recebido:", {
+          hasAccessToken: !!tokenData.accessToken,
+          hasRefreshToken: !!tokenData.refreshToken,
+          expiresIn: tokenData.expiresIn,
+          shopId: tokenData.shopId,
+        });
+      } catch (err: any) {
+        console.error("[Shopee OAuth] Erro no exchangeCodeForToken:", err.message, err.code);
+        return res.redirect(`/shopee-accounts?shopee_error=${encodeURIComponent("token_exchange: " + err.message)}`);
+      }
 
       // Try to get shop name
       let shopName: string | undefined;
@@ -81,15 +95,22 @@ export function registerShopeeRoutes(app: Express) {
       }
 
       // Save account to database
-      await shopee.saveAccount(
-        userId,
-        tokenData.shopId,
-        tokenData.accessToken,
-        tokenData.refreshToken,
-        tokenData.expiresIn,
-        shopName,
-        tokenData.refreshTokenExpiresIn
-      );
+      console.log("[Shopee OAuth] Salvando no banco para userId:", userId, "shopId:", tokenData.shopId);
+      try {
+        await shopee.saveAccount(
+          userId,
+          tokenData.shopId,
+          tokenData.accessToken,
+          tokenData.refreshToken,
+          tokenData.expiresIn,
+          shopName,
+          tokenData.refreshTokenExpiresIn
+        );
+        console.log("[Shopee OAuth] Salvo com sucesso no banco.");
+      } catch (err: any) {
+        console.error("[Shopee OAuth] Erro ao salvar no banco:", err.message, err.code, err.cause?.message);
+        return res.redirect(`/shopee-accounts?shopee_error=${encodeURIComponent("db_save: " + err.message)}`);
+      }
 
       console.log(`[Shopee OAuth] Successfully connected shop ${shopId} (${shopName || "unknown"}) for user ${userId}`);
 
