@@ -9,19 +9,8 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
-const redirectToLoginIfUnauthorized = (error: unknown) => {
-  if (!(error instanceof TRPCClientError)) return;
-  if (typeof window === "undefined") return;
-
-  const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
-
-  if (!isUnauthorized) return;
-
-  // Redirect to local login page instead of Manus OAuth
-  if (window.location.pathname !== "/login") {
-    window.location.href = "/login";
-  }
-};
+// TEMP: auth bypass — redirect disabled
+const redirectToLoginIfUnauthorized = (_error: unknown) => {};
 
 queryClient.getQueryCache().subscribe(event => {
   if (event.type === "updated" && event.action.type === "error") {
