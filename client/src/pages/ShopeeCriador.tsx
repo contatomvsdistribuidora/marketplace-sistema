@@ -309,6 +309,7 @@ type PricingMode = "multiplier" | "margin" | "profit";
 
 interface PricingGlobals {
   unitCost: string;
+  baseProductQty: string;   // quantas unidades o produto base representa
   packagingCost: string;
   shippingCost: string;
   transactionFee: string;
@@ -423,6 +424,7 @@ function VariationWizard({
 
   const [pricing, setPricing] = useState<PricingGlobals>({
     unitCost: "",
+    baseProductQty: "1",
     packagingCost: "",
     shippingCost: "",
     transactionFee: "2",
@@ -484,19 +486,21 @@ function VariationWizard({
     const profitPct       = price > 0 ? (marginContribution / price) * 100 : 0;
 
     // Dimensions
-    const baseL      = parseFloat(product.dimensionLength) || 0;
-    const baseW      = parseFloat(product.dimensionWidth)  || 0;
-    const baseH      = parseFloat(product.dimensionHeight) || 0;
-    const baseWeight = parseFloat(product.weight)          || 0;
-    let weight = opt.weight ? parseFloat(opt.weight) : (isQty ? baseWeight * qty : baseWeight);
+    const baseL         = parseFloat(product.dimensionLength) || 0;
+    const baseW         = parseFloat(product.dimensionWidth)  || 0;
+    const baseH         = parseFloat(product.dimensionHeight) || 0;
+    const baseWeight    = parseFloat(product.weight)          || 0;
+    const baseProductQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
+    const dimRatio      = isQty ? qty / baseProductQty : 1;
+    const scaleF        = Math.cbrt(dimRatio);
+    let weight = opt.weight ? parseFloat(opt.weight) : (isQty ? baseWeight * dimRatio : baseWeight);
     let length = opt.length ? parseFloat(opt.length) : 0;
     let width  = opt.width  ? parseFloat(opt.width)  : 0;
     let height = opt.height ? parseFloat(opt.height) : 0;
     if (isQty && !opt.length && baseL && baseW && baseH) {
-      const scale = Math.cbrt(qty);
-      length = parseFloat((baseL * scale).toFixed(1));
-      width  = parseFloat((baseW * scale).toFixed(1));
-      height = parseFloat((baseH * scale).toFixed(1));
+      length = parseFloat((baseL * scaleF).toFixed(1));
+      width  = parseFloat((baseW * scaleF).toFixed(1));
+      height = parseFloat((baseH * scaleF).toFixed(1));
     }
 
     return { qty, price, totalProductCost, platformCost, commissionRate, marginContribution, profitPct, weight, length, width, height, factor };
@@ -655,14 +659,16 @@ function VariationWizard({
       if (o.id !== id) return o;
       const isQty = selectedType === "quantidade";
       const qty = isQty ? extractQty(o.label) : 1;
+      const baseProductQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
       const baseWeight = parseFloat(product.weight) || 0.5;
       const baseL = parseFloat(product.dimensionLength) || 20;
       const baseW = parseFloat(product.dimensionWidth)  || 15;
       const baseH = parseFloat(product.dimensionHeight) || 10;
-      const scale = isQty ? Math.cbrt(qty) : 1;
+      const ratio = isQty ? qty / baseProductQty : 1;
+      const scale = Math.cbrt(ratio);
       return {
         ...o,
-        weight: o.weight || (baseWeight * qty).toFixed(2),
+        weight: o.weight || (baseWeight * ratio).toFixed(2),
         length: o.length || (baseL * scale).toFixed(1),
         width:  o.width  || (baseW * scale).toFixed(1),
         height: o.height || (baseH * scale).toFixed(1),
@@ -854,6 +860,58 @@ function VariationWizard({
                 {pricingMode === "margin"     && "Preço calculado via iteração para atingir exatamente a margem desejada, considerando a tabela de comissões Shopee 2026."}
                 {pricingMode === "profit"     && "Preço calculado via iteração para garantir o lucro mínimo em R$ por variação, considerando todos os custos da Shopee."}
               </div>
+
+              {/* ── Produto base ── */}
+              {selectedType === "quantidade" && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Produto base cadastrado</p>
+                  <p className="text-xs text-blue-500 mb-3">
+                    Quantas unidades o produto "{product.itemName}" representa? Peso e dimensões serão calculados proporcionalmente.
+                  </p>
+                  <div className="flex items-end gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1 font-medium">Qtd. do produto base (un.)</label>
+                      <input
+                        type="number" min="0.001" step="1" placeholder="1"
+                        value={pricing.baseProductQty}
+                        onChange={e => setPricing(p => ({ ...p, baseProductQty: e.target.value }))}
+                        className="w-32 px-3 py-2 border border-blue-300 bg-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 font-semibold"
+                      />
+                    </div>
+                    <div className="text-xs text-blue-600 pb-2 space-y-0.5">
+                      {product.weight       && <p>Peso base: <b>{product.weight} kg</b></p>}
+                      {product.dimensionLength && <p>Dims base: <b>{product.dimensionLength}×{product.dimensionWidth}×{product.dimensionHeight} cm</b></p>}
+                    </div>
+                  </div>
+                  {(() => {
+                    const bq = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
+                    const bw = parseFloat(product.weight) || 0;
+                    const bl = parseFloat(product.dimensionLength) || 0;
+                    const bwi = parseFloat(product.dimensionWidth) || 0;
+                    const bh = parseFloat(product.dimensionHeight) || 0;
+                    const exampleQty = extractQty(optionDetails[0]?.label ?? "") || bq;
+                    const ratio = exampleQty / bq;
+                    const sc = Math.cbrt(ratio);
+                    if (!bw && !bl) return null;
+                    return (
+                      <div className="mt-3 pt-3 border-t border-blue-200 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-blue-700">
+                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
+                          Ex. {exampleQty}un → Peso: <b>{bw > 0 ? (bw * ratio).toFixed(2) : "—"} kg</b>
+                        </span>
+                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
+                          Comp: <b>{bl > 0 ? (bl * sc).toFixed(1) : "—"} cm</b>
+                        </span>
+                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
+                          Larg: <b>{bwi > 0 ? (bwi * sc).toFixed(1) : "—"} cm</b>
+                        </span>
+                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
+                          Alt: <b>{bh > 0 ? (bh * sc).toFixed(1) : "—"} cm</b>
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {/* ── Campos globais ── */}
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
