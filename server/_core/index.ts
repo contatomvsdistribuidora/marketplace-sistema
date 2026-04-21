@@ -127,6 +127,18 @@ async function startServer() {
     return res.json({ results });
   });
 
+  // DB table sizes
+  app.get("/api/db-size", async (req, res) => {
+    const { pool } = await import("../db");
+    const [rows] = await pool.query(
+      `SELECT table_name, ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb
+       FROM information_schema.TABLES
+       WHERE table_schema = 'railway'
+       ORDER BY size_mb DESC`
+    );
+    res.json(rows);
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
