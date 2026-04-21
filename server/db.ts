@@ -18,34 +18,25 @@ import {
 } from "../drizzle/schema";
 import { like, or, isNotNull, inArray, ne, gte, lte } from "drizzle-orm";
 import { ENV } from "./_core/env";
+import * as schema from "../drizzle/schema";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+export const pool = mysql.createPool({
+  uri: process.env.DATABASE_URL,
+  ssl: false as any,
+  waitForConnections: true,
+  connectionLimit: 10,
+  maxIdle: 10,
+  idleTimeout: 60000,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
+});
 
-export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      const pool = mysql.createPool({
-        uri: process.env.DATABASE_URL,
-        waitForConnections: true,
-        connectionLimit: 10,
-        enableKeepAlive: true,
-        keepAliveInitialDelay: 0,
-        ssl: false,
-      });
-      _db = drizzle(pool);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
-  }
-  return _db;
-}
+export const db = drizzle(pool, { schema, mode: "default" });
 
 // ============ USER ============
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
-  const db = await getDb();
-  if (!db) { console.warn("[Database] Cannot upsert user: database not available"); return; }
   try {
     const values: InsertUser = { openId: user.openId };
     const updateSet: Record<string, unknown> = {};
@@ -68,16 +59,12 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 }
 
 export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 
 // ============ SETTINGS ============
 export async function getSetting(userId: number, key: string) {
-  const db = await getDb();
-  if (!db) return null;
   const result = await db
     .select()
     .from(settings)
@@ -87,8 +74,6 @@ export async function getSetting(userId: number, key: string) {
 }
 
 export async function setSetting(userId: number, key: string, value: string) {
-  const db = await getDb();
-  if (!db) return;
   const existing = await db
     .select()
     .from(settings)
@@ -106,29 +91,21 @@ export async function setSetting(userId: number, key: string, value: string) {
 }
 
 export async function deleteSetting(userId: number, key: string) {
-  const db = await getDb();
-  if (!db) return;
   await db.delete(settings).where(and(eq(settings.userId, userId), eq(settings.settingKey, key)));
 }
 
 // ============ MARKETPLACES ============
 export async function getMarketplaces() {
-  const db = await getDb();
-  if (!db) return [];
   return db.select().from(marketplaces).where(eq(marketplaces.active, 1));
 }
 
 export async function getMarketplaceById(id: number) {
-  const db = await getDb();
-  if (!db) return null;
   const result = await db.select().from(marketplaces).where(eq(marketplaces.id, id)).limit(1);
   return result.length > 0 ? result[0] : null;
 }
 
 // ============ CATEGORY MAPPINGS ============
 export async function getCategoryMappings(userId: number, marketplaceId: number) {
-  const db = await getDb();
-  if (!db) return [];
   return db
     .select()
     .from(categoryMappings)
@@ -144,9 +121,6 @@ export async function saveCategoryMapping(data: {
   targetCategoryPath?: string;
   confidence?: number;
 }) {
-  const db = await getDb();
-  if (!db) return;
-
   const existing = await db
     .select()
     .from(categoryMappings)
@@ -190,8 +164,6 @@ export async function createExportJob(data: {
   tagFilter?: string;
   config?: any;
 }) {
-  const db = await getDb();
-  if (!db) return null;
   const result = await db.insert(exportJobs).values({
     userId: data.userId,
     marketplaceId: data.marketplaceId,
@@ -211,14 +183,10 @@ export async function updateExportJob(jobId: number, data: Partial<{
   startedAt: Date;
   completedAt: Date;
 }>) {
-  const db = await getDb();
-  if (!db) return;
   await db.update(exportJobs).set(data).where(eq(exportJobs.id, jobId));
 }
 
 export async function getExportJobs(userId: number, limit: number = 50) {
-  const db = await getDb();
-  if (!db) return [];
   return db
     .select()
     .from(exportJobs)
@@ -228,8 +196,6 @@ export async function getExportJobs(userId: number, limit: number = 50) {
 }
 
 export async function getExportJob(jobId: number) {
-  const db = await getDb();
-  if (!db) return null;
   const result = await db.select().from(exportJobs).where(eq(exportJobs.id, jobId)).limit(1);
   return result.length > 0 ? result[0] : null;
 }
@@ -250,8 +216,6 @@ export async function createExportLog(data: {
   errorDetails?: any;
   baselinkerResponse?: any;
 }) {
-  const db = await getDb();
-  if (!db) return;
   await db.insert(exportLogs).values({
     jobId: data.jobId,
     userId: data.userId,
@@ -270,8 +234,6 @@ export async function createExportLog(data: {
 }
 
 export async function getExportLogs(jobId: number, limit: number = 500) {
-  const db = await getDb();
-  if (!db) return [];
   return db
     .select()
     .from(exportLogs)
@@ -281,8 +243,6 @@ export async function getExportLogs(jobId: number, limit: number = 500) {
 }
 
 export async function getExportLogProductIds(jobId: number) {
-  const db = await getDb();
-  if (!db) return [];
   return db
     .select({
       productId: exportLogs.productId,
@@ -296,8 +256,6 @@ export async function getExportLogProductIds(jobId: number) {
 }
 
 export async function getRecentLogs(userId: number, limit: number = 100) {
-  const db = await getDb();
-  if (!db) return [];
   return db
     .select()
     .from(exportLogs)
@@ -314,9 +272,6 @@ export async function getExportHistory(userId: number, filters?: {
   page?: number;
   pageSize?: number;
 }) {
-  const db = await getDb();
-  if (!db) return { logs: [], total: 0, totalPages: 0 };
-
   const conditions: any[] = [eq(exportLogs.userId, userId)];
   if (filters?.status && filters.status !== "all") {
     conditions.push(eq(exportLogs.status, filters.status as any));
@@ -367,9 +322,6 @@ export async function getExportHistory(userId: number, filters?: {
 }
 
 export async function getExportHistoryStats(userId: number) {
-  const db = await getDb();
-  if (!db) return { totalExported: 0, totalSuccess: 0, totalError: 0, totalProducts: 0, byListingType: [], byStatus: [] };
-
   const [totals, byListingType, byStatus, uniqueProducts] = await Promise.all([
     db.select({
       total: sql<number>`COUNT(*)`,
@@ -409,26 +361,20 @@ export async function getExportHistoryStats(userId: number) {
   };
 }
 
-/** Get productIds that have been successfully exported (for filtering in Products page) */
 export async function getExportedProductIds(userId: number): Promise<string[]> {
-  const db = await getDb();
-  if (!db) return [];
   const results = await db.selectDistinct({ productId: exportLogs.productId })
     .from(exportLogs)
     .where(and(eq(exportLogs.userId, userId), eq(exportLogs.status, "success")));
   return results.map(r => r.productId);
 }
 
-/** Get detailed export info per product (marketplace, listingType) for advanced filtering */
 export async function getExportedProductDetails(userId: number): Promise<{
   productId: string;
   marketplaceId: number;
   marketplaceName: string;
   listingType: string | null;
 }[]> {
-  const db = await getDb();
-  if (!db) return [];
-  const results = await db.select({
+  return db.select({
     productId: exportLogs.productId,
     marketplaceId: exportLogs.marketplaceId,
     marketplaceName: marketplaces.name,
@@ -437,27 +383,20 @@ export async function getExportedProductDetails(userId: number): Promise<{
     .from(exportLogs)
     .innerJoin(marketplaces, eq(exportLogs.marketplaceId, marketplaces.id))
     .where(and(eq(exportLogs.userId, userId), eq(exportLogs.status, "success")));
-  return results;
 }
 
-/** Get distinct marketplace names that have successful exports */
 export async function getExportedMarketplaces(userId: number): Promise<{ id: number; name: string }[]> {
-  const db = await getDb();
-  if (!db) return [];
-  const results = await db.selectDistinct({
+  return db.selectDistinct({
     id: marketplaces.id,
     name: marketplaces.name,
   })
     .from(exportLogs)
     .innerJoin(marketplaces, eq(exportLogs.marketplaceId, marketplaces.id))
     .where(and(eq(exportLogs.userId, userId), eq(exportLogs.status, "success")));
-  return results;
 }
 
 // ============ AGENT QUEUE ============
 export async function addToAgentQueue(items: InsertAgentQueue[]) {
-  const db = await getDb();
-  if (!db) return [];
   const ids: number[] = [];
   for (const item of items) {
     const result = await db.insert(agentQueue).values(item).$returningId();
@@ -467,8 +406,6 @@ export async function addToAgentQueue(items: InsertAgentQueue[]) {
 }
 
 export async function getAgentQueue(userId: number, jobId?: number, status?: string) {
-  const db = await getDb();
-  if (!db) return [];
   const conditions = [eq(agentQueue.userId, userId)];
   if (jobId) conditions.push(eq(agentQueue.jobId, jobId));
   if (status) conditions.push(eq(agentQueue.status, status as any));
@@ -476,8 +413,6 @@ export async function getAgentQueue(userId: number, jobId?: number, status?: str
 }
 
 export async function getAgentQueueStats(userId: number, jobId?: number) {
-  const db = await getDb();
-  if (!db) return { total: 0, waiting: 0, processing: 0, completed: 0, failed: 0 };
   const conditions = [eq(agentQueue.userId, userId)];
   if (jobId) conditions.push(eq(agentQueue.jobId, jobId));
   const result = await db.select({
@@ -496,14 +431,10 @@ export async function updateAgentQueueItem(id: number, data: Partial<{
   screenshotUrl: string;
   processedAt: Date;
 }>) {
-  const db = await getDb();
-  if (!db) return;
   await db.update(agentQueue).set(data).where(eq(agentQueue.id, id));
 }
 
 export async function getNextQueueItem(userId: number) {
-  const db = await getDb();
-  if (!db) return null;
   const result = await db.select().from(agentQueue)
     .where(and(eq(agentQueue.userId, userId), eq(agentQueue.status, "waiting")))
     .orderBy(agentQueue.createdAt)
@@ -513,23 +444,17 @@ export async function getNextQueueItem(userId: number) {
 
 // ============ AGENT ACTIONS ============
 export async function addAgentAction(data: InsertAgentAction) {
-  const db = await getDb();
-  if (!db) return null;
   const result = await db.insert(agentActions).values(data).$returningId();
   return result[0]?.id || null;
 }
 
 export async function getAgentActions(userId: number, jobId?: number, limit: number = 100) {
-  const db = await getDb();
-  if (!db) return [];
   const conditions = [eq(agentActions.userId, userId)];
   if (jobId) conditions.push(eq(agentActions.jobId, jobId));
   return db.select().from(agentActions).where(and(...conditions)).orderBy(desc(agentActions.createdAt)).limit(limit);
 }
 
 export async function getLatestScreenshot(userId: number) {
-  const db = await getDb();
-  if (!db) return null;
   const result = await db.select().from(agentActions)
     .where(and(
       eq(agentActions.userId, userId),
@@ -542,9 +467,6 @@ export async function getLatestScreenshot(userId: number) {
 
 // ============ STATS ============
 export async function getDashboardStats(userId: number) {
-  const db = await getDb();
-  if (!db) return { totalJobs: 0, totalExported: 0, totalErrors: 0, totalSuccess: 0 };
-
   const jobs = await db
     .select({
       totalJobs: sql<number>`COUNT(*)`,

@@ -6,30 +6,12 @@
 
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
 import { users } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import crypto from "crypto";
+import { db } from "./db";
 
 const SALT_ROUNDS = 12;
-
-let _pool: mysql.Pool | null = null;
-
-function getDb() {
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
-  if (!_pool) {
-    _pool = mysql.createPool({
-      uri: process.env.DATABASE_URL,
-      waitForConnections: true,
-      connectionLimit: 10,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 0,
-      ssl: false,
-    });
-  }
-  return drizzle(_pool);
-}
 
 /**
  * Generate a unique openId for local users (not from Manus OAuth)
@@ -44,7 +26,6 @@ function generateLocalOpenId(): string {
  * Register a new user with email and password
  */
 export async function registerUser(email: string, password: string, name: string) {
-  const db = getDb();
 
   // Check if email already exists
   const existing = await db
@@ -97,7 +78,6 @@ export async function registerUser(email: string, password: string, name: string
  * Login with email and password
  */
 export async function loginUser(email: string, password: string) {
-  const db = getDb();
 
   // Find user by email
   let user: typeof users.$inferSelect | undefined;
@@ -141,7 +121,6 @@ export async function loginUser(email: string, password: string) {
  * Change password for an existing user
  */
 export async function changePassword(userId: number, currentPassword: string, newPassword: string) {
-  const db = getDb();
 
   const [user] = await db
     .select()
@@ -179,7 +158,6 @@ export async function changePassword(userId: number, currentPassword: string, ne
  * Get user by email (for checking if exists)
  */
 export async function getUserByEmail(email: string) {
-  const db = getDb();
   const [user] = await db
     .select()
     .from(users)

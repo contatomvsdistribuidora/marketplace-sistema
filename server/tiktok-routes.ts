@@ -5,7 +5,7 @@ import type { Express, Request, Response } from "express";
 import { exchangeCodeForToken, saveTiktokAccount, getAuthorizedShops } from "./tiktokshop";
 import { tiktokAccounts } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
-import { getDb } from "./db";
+import { db } from "./db";
 
 const PROD_DOMAIN = "https://blmarketexp-nqnujejx.manus.space";
 
@@ -44,18 +44,15 @@ export function registerTiktokRoutes(app: Express) {
         const shops = await getAuthorizedShops(tokenData.accessToken);
         if (shops.length > 0) {
           const shop = shops[0];
-          const db = await getDb();
-          if (db) {
-            await db
-              .update(tiktokAccounts)
-              .set({
-                shopId: shop.id,
-                shopName: shop.name,
-                shopRegion: shop.region,
-                shopCipher: shop.cipher,
-              })
-              .where(eq(tiktokAccounts.id, accountId));
-          }
+          await db
+            .update(tiktokAccounts)
+            .set({
+              shopId: shop.id,
+              shopName: shop.name,
+              shopRegion: shop.region,
+              shopCipher: shop.cipher,
+            })
+            .where(eq(tiktokAccounts.id, accountId));
         }
       } catch (shopErr) {
         console.error("Failed to fetch TikTok shops:", shopErr);

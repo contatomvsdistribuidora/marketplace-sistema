@@ -4,7 +4,7 @@
  */
 import crypto from "crypto";
 import { ENV } from "./_core/env";
-import { getDb } from "./db";
+import { db } from "./db";
 import { tiktokAccounts, tiktokListings } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -170,8 +170,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
 
 /** Get a valid access token for a TikTok account, refreshing if needed */
 export async function getValidToken(accountId: number): Promise<string> {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+
   const [account] = await db
     .select()
     .from(tiktokAccounts)
@@ -409,8 +408,7 @@ export async function saveTiktokAccount(
     sellerBaseRegion: string;
   }
 ): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+
   // Check if account already exists
   const existing = await db
     .select()
@@ -458,8 +456,7 @@ export async function saveTiktokAccount(
 
 /** Get all TikTok accounts for a user */
 export async function getUserTiktokAccounts(userId: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+
   return db
     .select({
       id: tiktokAccounts.id,
@@ -479,8 +476,7 @@ export async function getUserTiktokAccounts(userId: number) {
 
 /** Disconnect a TikTok account */
 export async function disconnectTiktokAccount(userId: number, accountId: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+
   await db
     .update(tiktokAccounts)
     .set({ isActive: 0 })

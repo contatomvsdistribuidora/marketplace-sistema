@@ -9,20 +9,13 @@
 
 import crypto from "crypto";
 import { eq, and, desc } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
 import { shopeeAccounts, shopeeProducts } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { db } from "./db";
 
 // Live production endpoints
 const SHOPEE_API_BASE = "https://partner.shopeemobile.com";
 const SHOPEE_AUTH_BASE = "https://partner.shopeemobile.com";
-
-// ============ DATABASE HELPERS ============
-
-function getDb() {
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not configured");
-  return drizzle(process.env.DATABASE_URL);
-}
 
 // ============ SIGNATURE HELPERS ============
 
@@ -203,7 +196,6 @@ export async function getValidToken(accountId: number): Promise<{ accessToken: s
   const existing = refreshLocks.get(accountId);
   if (existing) await existing;
 
-  const db = getDb();
   const [account] = await db
     .select()
     .from(shopeeAccounts)
@@ -262,7 +254,6 @@ export async function getValidToken(accountId: number): Promise<{ accessToken: s
     refreshLocks.delete(accountId);
   }
 
-  return { accessToken: refreshed.accessToken, shopId: account.shopId };
 }
 
 // ============ SHOP API ============
@@ -438,7 +429,6 @@ export async function saveAccount(
   shopName?: string,
   refreshTokenExpiresIn?: number
 ) {
-  const db = getDb();
   const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
   const refreshTokenExpiresAt = new Date(
     Date.now() + (refreshTokenExpiresIn ?? 2592000) * 1000
@@ -485,7 +475,6 @@ export async function saveAccount(
  * Get all Shopee accounts for a user.
  */
 export async function getAccounts(userId: number) {
-  const db = getDb();
   return db
     .select({
       id: shopeeAccounts.id,
@@ -510,7 +499,6 @@ export async function getAccounts(userId: number) {
  * Delete (deactivate) a Shopee account.
  */
 export async function deactivateAccount(userId: number, accountId: number) {
-  const db = getDb();
   await db
     .update(shopeeAccounts)
     .set({ isActive: 0 })
@@ -594,7 +582,6 @@ export async function upsertItemBatch(
   accountId: number,
   itemIds: number[]
 ): Promise<{ added: number; updated: number; errors: Array<{ itemId: number; error: string }> }> {
-  const db = getDb();
   let added = 0;
   let updated = 0;
   const errors: Array<{ itemId: number; error: string }> = [];
@@ -682,7 +669,6 @@ export async function removeStaleProducts(
   accountId: number,
   liveIds: Set<number>
 ): Promise<number> {
-  const db = getDb();
   const local = await db
     .select({ id: shopeeProducts.id, itemId: shopeeProducts.itemId })
     .from(shopeeProducts)
@@ -705,7 +691,6 @@ export async function updateAccountSyncMeta(
   accountId: number,
   totalProducts: number
 ): Promise<void> {
-  const db = getDb();
   await db
     .update(shopeeAccounts)
     .set({ totalProducts, lastSyncAt: new Date() })
@@ -762,7 +747,6 @@ export async function getLocalProducts(
   offset: number = 0,
   limit: number = 50
 ) {
-  const db = getDb();
   const products = await db
     .select()
     .from(shopeeProducts)
@@ -778,7 +762,6 @@ export async function getLocalProducts(
  * Get product count for an account.
  */
 export async function getProductCount(accountId: number) {
-  const db = getDb();
   const result = await db
     .select({ id: shopeeProducts.id })
     .from(shopeeProducts)
@@ -790,7 +773,6 @@ export async function getProductCount(accountId: number) {
  * Get product quality stats for an account.
  */
 export async function getProductQualityStats(accountId: number) {
-  const db = getDb();
   const products = await db
     .select({
       attributesFilled: shopeeProducts.attributesFilled,
