@@ -11,13 +11,8 @@ export type TrpcContext = {
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
-  let user: User | null = null;
-
-  try {
-    user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    user = null;
-  }
+  // TEMP: bypass auth
+  const user = { id: 1, openId: "local_admin", name: "Admin", email: "admin@admin.com", role: "admin" as const, loginMethod: "email", passwordHash: null, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() } as User;
 
   return {
     req: opts.req,
