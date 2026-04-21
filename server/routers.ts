@@ -2060,7 +2060,7 @@ export const appRouter = router({
         if (!product) throw new Error("Produto não encontrado");
         const { accessToken, shopId } = await shopee.getValidToken(product.shopeeAccountId);
         await shopee.updateItemFields(accessToken, shopId, product.itemId, {
-          name: product.itemName || undefined,
+          item_name: product.itemName || undefined,
           description: product.description || undefined,
         });
         return { success: true, itemId: product.itemId };

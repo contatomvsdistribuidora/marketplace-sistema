@@ -388,7 +388,7 @@ export async function updateItemFields(
   accessToken: string,
   shopId: number,
   itemId: number,
-  fields: { name?: string; description?: string }
+  fields: { item_name?: string; description?: string }
 ): Promise<void> {
   const path = "/api/v2/product/update_item";
   const url = buildSignedUrl(path, {}, accessToken, shopId);
@@ -412,7 +412,7 @@ export async function updateItemName(
   itemId: number,
   name: string
 ): Promise<void> {
-  return updateItemFields(accessToken, shopId, itemId, { name });
+  return updateItemFields(accessToken, shopId, itemId, { item_name: name });
 }
 
 // ============ ACCOUNT MANAGEMENT ============
