@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { trpc } from "../utils/trpc";
+import { trpc } from "../lib/trpc";
 import {
   Search, Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
