@@ -434,40 +434,61 @@ export async function saveAccount(
     Date.now() + (refreshTokenExpiresIn ?? 2592000) * 1000
   );
 
-  const [existing] = await db
-    .select()
-    .from(shopeeAccounts)
-    .where(and(eq(shopeeAccounts.userId, userId), eq(shopeeAccounts.shopId, shopId)))
-    .limit(1);
+  console.log("[saveAccount] Buscando conta existente:", { userId, shopId });
+  let existing: typeof shopeeAccounts.$inferSelect | undefined;
+  try {
+    const rows = await db
+      .select()
+      .from(shopeeAccounts)
+      .where(and(eq(shopeeAccounts.userId, userId), eq(shopeeAccounts.shopId, shopId)))
+      .limit(1);
+    existing = rows[0];
+  } catch (err: any) {
+    console.error("[saveAccount] Erro no SELECT:", err.message, "cause:", err.cause?.message ?? err.cause, "code:", err.cause?.code ?? err.code);
+    throw err;
+  }
 
   if (existing) {
-    await db
-      .update(shopeeAccounts)
-      .set({
+    console.log("[saveAccount] Atualizando conta existente id:", existing.id);
+    try {
+      await db
+        .update(shopeeAccounts)
+        .set({
+          accessToken,
+          refreshToken,
+          tokenExpiresAt,
+          refreshTokenExpiresAt,
+          tokenStatus: "active",
+          shopName: shopName || existing.shopName,
+          isActive: 1,
+        })
+        .where(eq(shopeeAccounts.id, existing.id));
+    } catch (err: any) {
+      console.error("[saveAccount] Erro no UPDATE:", err.message, "cause:", err.cause?.message ?? err.cause, "code:", err.cause?.code ?? err.code);
+      throw err;
+    }
+    return existing.id;
+  } else {
+    console.log("[saveAccount] Inserindo nova conta");
+    try {
+      const [result] = await db.insert(shopeeAccounts).values({
+        userId,
+        shopId,
+        shopName: shopName || `Loja Shopee ${shopId}`,
         accessToken,
         refreshToken,
         tokenExpiresAt,
         refreshTokenExpiresAt,
         tokenStatus: "active",
-        shopName: shopName || existing.shopName,
+        region: "BR",
         isActive: 1,
-      })
-      .where(eq(shopeeAccounts.id, existing.id));
-    return existing.id;
-  } else {
-    const [result] = await db.insert(shopeeAccounts).values({
-      userId,
-      shopId,
-      shopName: shopName || `Loja Shopee ${shopId}`,
-      accessToken,
-      refreshToken,
-      tokenExpiresAt,
-      refreshTokenExpiresAt,
-      tokenStatus: "active",
-      region: "BR",
-      isActive: 1,
-    });
-    return result.insertId;
+      });
+      console.log("[saveAccount] Inserido com sucesso, insertId:", result.insertId);
+      return result.insertId;
+    } catch (err: any) {
+      console.error("[saveAccount] Erro no INSERT:", err.message, "cause:", err.cause?.message ?? err.cause, "code:", err.cause?.code ?? err.code);
+      throw err;
+    }
   }
 }
 
