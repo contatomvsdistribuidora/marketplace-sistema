@@ -228,7 +228,33 @@ export default function ShopeeCriador() {
 
 // ─── Tela 2 – Detalhe do produto ──────────────────────────────────────────────
 
+function GradeBadge({ grade }: { grade: string }) {
+  const colors: Record<string, string> = {
+    A: "bg-green-100 text-green-700 border-green-300",
+    B: "bg-blue-100 text-blue-700 border-blue-300",
+    C: "bg-yellow-100 text-yellow-700 border-yellow-300",
+    D: "bg-orange-100 text-orange-700 border-orange-300",
+    F: "bg-red-100 text-red-700 border-red-300",
+  };
+  return (
+    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full border-2 text-xs font-bold ${colors[grade] ?? colors.F}`}>
+      {grade}
+    </span>
+  );
+}
+
+function ScoreBar({ score, max }: { score: number; max: number }) {
+  const pct = max > 0 ? Math.round((score / max) * 100) : 0;
+  const color = pct >= 85 ? "bg-green-500" : pct >= 70 ? "bg-blue-500" : pct >= 50 ? "bg-yellow-500" : pct >= 30 ? "bg-orange-500" : "bg-red-500";
+  return (
+    <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+      <div className={`${color} h-1.5 rounded-full transition-all`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
 function ProductDetail({ product, accountId, onBack }: { product: any; accountId: number; onBack: () => void }) {
+  // — existing wizard/publish state —
   const [wizardOpen, setWizardOpen] = useState(false);
   const [savedVariations, setSavedVariations] = useState<VariationGroup[]>([]);
   const [showPublishModal, setShowPublishModal] = useState(false);
@@ -236,16 +262,57 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   const [publishModalResult, setPublishModalResult] = useState<{ itemId: number; itemUrl: string } | null>(null);
   const [publishModalError, setPublishModalError] = useState("");
 
+  // — new state —
+  const allImages: string[] = Array.isArray(product.images) && product.images.length > 0
+    ? product.images
+    : product.imageUrl ? [product.imageUrl] : [];
+  const [activeImg, setActiveImg] = useState(0);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState(product.description || "");
+  const [savingDesc, setSavingDesc] = useState(false);
+  const [editingAttrId, setEditingAttrId] = useState<number | null>(null);
+  const [editingAttrValue, setEditingAttrValue] = useState("");
+
+  // — queries —
+  const { data: diagData, isLoading: diagLoading } =
+    trpc.shopee.getProductDiagnostic.useQuery({ productId: product.id }, { staleTime: 60_000 });
+  const { data: urlData } =
+    trpc.shopee.getProductUrls.useQuery({ accountId, productId: product.id }, { staleTime: 300_000 });
+
+  // — mutations —
   const detailPublishMutation = trpc.shopee.createProductFromWizard.useMutation();
+  const applyDescMutation = trpc.shopee.applyDescription.useMutation();
+
+  const diagnostic = diagData?.diagnostic;
+  const statusLabel = product.itemStatus === "BANNED" ? "Banido"
+    : product.itemStatus === "UNLIST" ? "Deslistado"
+    : product.itemStatus === "SELLER_DELETE" ? "Excluído"
+    : "Ativo";
+  const statusColor = product.itemStatus === "NORMAL" || !product.itemStatus
+    ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
+
+  const attrs: any[] = Array.isArray(product.attributes) ? product.attributes : [];
+  const filledAttrs = attrs.filter((a: any) => a.attribute_value_list?.length > 0);
 
   function handleSaveVariation(group: VariationGroup) {
     setSavedVariations(v => [...v, group]);
     setWizardOpen(false);
   }
 
+  async function handleSaveDesc() {
+    if (!descDraft.trim()) return;
+    setSavingDesc(true);
+    try {
+      await applyDescMutation.mutateAsync({ productId: product.id, newDescription: descDraft });
+      product.description = descDraft;
+      setEditingDesc(false);
+    } catch {}
+    setSavingDesc(false);
+  }
+
   async function handlePublishFromDetail() {
     if (savedVariations.length === 0) return;
-    const group = savedVariations[savedVariations.length - 1]; // usa a última criada
+    const group = savedVariations[savedVariations.length - 1];
     const variations = group.options
       .map(o => ({
         label:  o.label,
@@ -279,49 +346,264 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 mb-6 text-sm transition">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4">
+      <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 text-sm transition">
         <ArrowLeft className="w-4 h-4" /> Voltar para lista
       </button>
 
-      {/* Dados atuais do produto */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
-        <div className="flex gap-5 items-start">
-          {product.imageUrl ? (
-            <img src={product.imageUrl} alt={product.itemName} className="w-28 h-28 object-cover rounded-xl flex-shrink-0 border border-gray-100" />
-          ) : (
-            <div className="w-28 h-28 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0">
-              <Package className="w-10 h-10 text-gray-400" />
+      {/* ── 1. HEADER ─────────────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="flex gap-4 items-start">
+          {/* Gallery */}
+          <div className="flex flex-col gap-2 flex-shrink-0">
+            <div className="w-28 h-28 rounded-xl border border-gray-100 overflow-hidden bg-gray-50 flex items-center justify-center">
+              {allImages[activeImg]
+                ? <img src={allImages[activeImg]} alt="" className="w-full h-full object-cover" />
+                : <Package className="w-10 h-10 text-gray-300" />}
             </div>
-          )}
+            {allImages.length > 1 && (
+              <div className="flex gap-1 flex-wrap max-w-[112px]">
+                {allImages.slice(0, 6).map((url, i) => (
+                  <button key={i} onClick={() => setActiveImg(i)}
+                    className={`w-8 h-8 rounded-md border-2 overflow-hidden flex-shrink-0 ${i === activeImg ? "border-orange-400" : "border-transparent"}`}>
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Info */}
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-gray-900 leading-snug">{product.itemName || "Sem título"}</h2>
-            <p className="text-xs text-gray-400 mt-1">ID: {product.itemId}</p>
-            {product.price && <p className="text-base font-bold text-orange-600 mt-2">R$ {Number(product.price).toFixed(2)}</p>}
-          </div>
-        </div>
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <h2 className="text-base font-semibold text-gray-900 leading-snug">{product.itemName || "Sem título"}</h2>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {diagLoading && <Loader2 className="w-4 h-4 text-gray-300 animate-spin" />}
+                {diagnostic && <GradeBadge grade={diagnostic.grade} />}
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">ID: {product.itemId}</p>
+            {product.price && (
+              <p className="text-base font-bold text-orange-600 mt-1">R$ {Number(product.price).toFixed(2)}</p>
+            )}
+            <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium mt-1.5 ${statusColor}`}>
+              {statusLabel}
+            </span>
 
-        {product.description && (
-          <div className="mt-5 border-t border-gray-100 pt-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Descrição</p>
-            <p className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-5">{product.description}</p>
-          </div>
-        )}
-
-        <div className="mt-5 border-t border-gray-100 pt-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Peso e medidas</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <InfoBox label="Peso" value={product.weight ? `${product.weight} kg` : "—"} />
-            <InfoBox label="Comprimento" value={product.dimensionLength ? `${product.dimensionLength} cm` : "—"} />
-            <InfoBox label="Largura" value={product.dimensionWidth ? `${product.dimensionWidth} cm` : "—"} />
-            <InfoBox label="Altura" value={product.dimensionHeight ? `${product.dimensionHeight} cm` : "—"} />
+            <div className="flex gap-2 mt-3 flex-wrap">
+              {urlData?.shopeeUrl && (
+                <a href={urlData.shopeeUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-orange-300 text-orange-600 hover:bg-orange-50 transition font-medium">
+                  <ExternalLink className="w-3.5 h-3.5" /> Ver na Shopee
+                </a>
+              )}
+              {urlData?.sellerCenterUrl && (
+                <a href={urlData.sellerCenterUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition font-medium">
+                  ✏️ Editar na Shopee
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Variações já criadas */}
+      {/* ── 2. QUALIDADE DO ANÚNCIO ───────────────────────────────────────── */}
+      {diagLoading && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5 flex items-center gap-3 text-sm text-gray-400">
+          <Loader2 className="w-4 h-4 animate-spin" /> Calculando qualidade do anúncio…
+        </div>
+      )}
+      {diagnostic && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-gray-800">📊 Qualidade do Anúncio</span>
+              <GradeBadge grade={diagnostic.grade} />
+            </div>
+            <span className="text-xs text-gray-500">{diagnostic.overallScore}/100</span>
+          </div>
+
+          {/* Overall bar */}
+          <div>
+            <div className="w-full bg-gray-100 rounded-full h-2">
+              <div
+                className={`h-2 rounded-full transition-all ${
+                  diagnostic.overallScore >= 85 ? "bg-green-500" :
+                  diagnostic.overallScore >= 70 ? "bg-blue-500" :
+                  diagnostic.overallScore >= 50 ? "bg-yellow-500" :
+                  diagnostic.overallScore >= 30 ? "bg-orange-500" : "bg-red-500"
+                }`}
+                style={{ width: `${diagnostic.overallScore}%` }}
+              />
+            </div>
+          </div>
+
+          {/* 4 mini-cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {([
+              { key: "title",       label: "Título" },
+              { key: "description", label: "Descrição" },
+              { key: "images",      label: "Imagens" },
+              { key: "attributes",  label: "Atributos" },
+            ] as const).map(({ key, label }) => {
+              const cat = diagnostic.categories[key];
+              const pct = cat.maxScore > 0 ? Math.round((cat.score / cat.maxScore) * 100) : 0;
+              return (
+                <div key={key} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                  <p className="text-xs text-gray-500 font-medium">{label}</p>
+                  <p className="text-sm font-bold text-gray-800 mt-0.5">{cat.score}<span className="text-xs font-normal text-gray-400">/{cat.maxScore}</span></p>
+                  <ScoreBar score={cat.score} max={cat.maxScore} />
+                  {cat.suggestions[0] && (
+                    <p className="text-xs text-gray-400 mt-1.5 leading-tight line-clamp-2">{cat.suggestions[0]}</p>
+                  )}
+                  {cat.issues[0] && !cat.suggestions[0] && (
+                    <p className="text-xs text-orange-500 mt-1.5 leading-tight line-clamp-2">{cat.issues[0]}</p>
+                  )}
+                  {pct === 100 && (
+                    <p className="text-xs text-green-600 mt-1.5 font-medium">✓ Ótimo</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={() => { window.location.href = "/shopee-optimizer"; }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white text-sm font-semibold transition shadow-sm shadow-orange-200">
+            <Sparkles className="w-4 h-4" /> ✨ Otimizar com IA
+          </button>
+        </div>
+      )}
+
+      {/* ── 3. DESCRIÇÃO ─────────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Descrição</p>
+          {!editingDesc && (
+            <button onClick={() => { setDescDraft(product.description || ""); setEditingDesc(true); }}
+              className="text-xs flex items-center gap-1 text-gray-400 hover:text-orange-500 transition">
+              ✏️ Editar
+            </button>
+          )}
+        </div>
+        {editingDesc ? (
+          <div className="space-y-2">
+            <textarea
+              value={descDraft}
+              onChange={e => setDescDraft(e.target.value)}
+              rows={8}
+              className="w-full text-sm text-gray-700 border border-gray-300 rounded-xl p-3 resize-y focus:outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setEditingDesc(false)}
+                className="flex-1 py-2 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition">
+                Cancelar
+              </button>
+              <button onClick={handleSaveDesc} disabled={savingDesc}
+                className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-xl disabled:opacity-50 transition">
+                {savingDesc ? <Loader2 className="w-4 h-4 animate-spin" /> : "Salvar"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-700 whitespace-pre-wrap">
+            {product.description || <span className="text-gray-400 italic">Sem descrição</span>}
+          </p>
+        )}
+      </div>
+
+      {/* ── 4. PESO E MEDIDAS ────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Peso e Medidas</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <InfoBox label="Peso" value={product.weight ? `${product.weight} kg` : "—"} />
+          <InfoBox label="Comprimento" value={product.dimensionLength ? `${product.dimensionLength} cm` : "—"} />
+          <InfoBox label="Largura" value={product.dimensionWidth ? `${product.dimensionWidth} cm` : "—"} />
+          <InfoBox label="Altura" value={product.dimensionHeight ? `${product.dimensionHeight} cm` : "—"} />
+        </div>
+      </div>
+
+      {/* ── 5. FICHA TÉCNICA / ATRIBUTOS ─────────────────────────────────── */}
+      {filledAttrs.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            📋 Ficha Técnica <span className="normal-case font-normal text-gray-400">({filledAttrs.length} atributo{filledAttrs.length !== 1 ? "s" : ""})</span>
+          </p>
+          <div className="divide-y divide-gray-100">
+            {filledAttrs.map((attr: any) => {
+              const attrId: number = attr.attribute_id;
+              const attrName: string = attr.display_attribute_name || attr.attribute_name || `Atributo ${attrId}`;
+              const values: any[] = attr.attribute_value_list || [];
+              const displayValue = values.map((v: any) => {
+                const name = v.original_value_name || v.display_value_name || "";
+                const unit = v.value_unit ? ` ${v.value_unit}` : "";
+                return `${name}${unit}`;
+              }).filter(Boolean).join(", ");
+
+              const isEditing = editingAttrId === attrId;
+              return (
+                <div key={attrId} className="py-2.5 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-500">{attrName}</p>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editingAttrValue}
+                        onChange={e => setEditingAttrValue(e.target.value)}
+                        className="text-sm border border-orange-400 rounded-lg px-2 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-orange-400 mt-0.5"
+                        autoFocus
+                      />
+                    ) : (
+                      <p className="text-sm font-medium text-gray-800 truncate">{displayValue || "—"}</p>
+                    )}
+                  </div>
+                  {isEditing ? (
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <button onClick={() => setEditingAttrId(null)}
+                        className="text-xs px-2.5 py-1 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50">
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setEditingAttrId(attrId); setEditingAttrValue(displayValue); }}
+                      className="text-xs text-gray-400 hover:text-orange-500 transition flex-shrink-0">
+                      ✏️
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── 6. FOTOS ────────────────────────────────────────────────────── */}
+      {allImages.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Fotos ({allImages.length})</p>
+            <button
+              onClick={() => { window.location.href = urlData?.sellerCenterUrl || urlData?.shopeeUrl || "#"; }}
+              className="text-xs flex items-center gap-1 text-gray-400 hover:text-orange-500 transition">
+              ➕ Adicionar foto
+            </button>
+          </div>
+          <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+            {allImages.map((url, i) => (
+              <button key={i} onClick={() => setActiveImg(i)}
+                className={`aspect-square rounded-xl border-2 overflow-hidden ${i === activeImg ? "border-orange-400" : "border-gray-100"} hover:border-orange-300 transition`}>
+                <img src={url} alt="" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── 7. VARIAÇÕES CRIADAS ─────────────────────────────────────────── */}
       {savedVariations.length > 0 && (
-        <div className="mb-6 space-y-3">
+        <div className="space-y-3">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Variações criadas</p>
           {savedVariations.map((group, gi) => (
             <div key={group.id} className="bg-white border border-orange-100 rounded-xl p-4">
@@ -349,25 +631,21 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
         </div>
       )}
 
-      {/* Botão Publicar na Shopee (só aparece quando há variações salvas) */}
+      {/* Publicar / Criar variação */}
       {savedVariations.length > 0 && (
         <button
           onClick={() => { setShowPublishModal(true); setPublishModalStatus("idle"); setPublishModalResult(null); }}
-          className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-base transition shadow-md shadow-orange-200 mb-3"
-        >
+          className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-base transition shadow-md shadow-orange-200">
           🚀 Publicar na Shopee
         </button>
       )}
-
-      {/* Botão criar variação */}
       <button
         onClick={() => setWizardOpen(true)}
-        className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50 mb-4"
-      >
+        className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50">
         <PlusCircle className="w-5 h-5" /> {savedVariations.length > 0 ? "Criar Nova Variação" : "Criar Variação de Anúncio"}
       </button>
 
-      {/* Modal de publicação */}
+      {/* ── Modal de publicação ──────────────────────────────────────────── */}
       {showPublishModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
