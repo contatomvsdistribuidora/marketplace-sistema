@@ -593,8 +593,26 @@ export async function countShopeeItems(
 }
 
 /**
+ * Remove control characters that cause DB issues (null bytes, BEL, BS, etc.)
+ * but preserve newlines, tabs, and all Unicode (emojis, accents, CJK, etc.).
+ */
+function sanitizeText(s: string | null | undefined): string {
+  if (!s) return "";
+  // Strip C0 control chars except HT (\x09), LF (\x0A), CR (\x0D)
+  // Also strip DEL (\x7F) and C1 (\x80-\x9F) which MySQL rejects in strict mode
+  return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]/g, "");
+}
+
+function isTokenExpiredError(message: string): boolean {
+  // Shopee typos both "invalid_access_token" and "invalid_acceess_token"
+  return /invalid_acce+ss_token/i.test(message);
+}
+
+/**
  * Upsert a single batch (max 50) of items into the local DB.
- * Returns per-batch add/update/error counts.
+ * Returns per-batch add/update/error counts, plus a refreshedToken if the
+ * access token was automatically renewed mid-sync.  Callers should update
+ * their local accessToken/shopId variables when refreshedToken is present.
  */
 export async function upsertItemBatch(
   accessToken: string,
@@ -602,18 +620,41 @@ export async function upsertItemBatch(
   userId: number,
   accountId: number,
   itemIds: number[]
-): Promise<{ added: number; updated: number; errors: Array<{ itemId: number; error: string }> }> {
+): Promise<{
+  added: number;
+  updated: number;
+  errors: Array<{ itemId: number; error: string }>;
+  refreshedToken?: { accessToken: string; shopId: number };
+}> {
   let added = 0;
   let updated = 0;
   const errors: Array<{ itemId: number; error: string }> = [];
+  let refreshedToken: { accessToken: string; shopId: number } | undefined;
 
   let items: any[] = [];
   try {
     items = await getItemBaseInfo(accessToken, shopId, itemIds);
   } catch (e: any) {
-    console.warn(`[Shopee] getItemBaseInfo failed:`, e.message);
-    itemIds.forEach((id) => errors.push({ itemId: id, error: `getItemBaseInfo: ${e.message}` }));
-    return { added, updated, errors };
+    if (isTokenExpiredError(e.message)) {
+      // Token expired — refresh once and retry the entire batch
+      console.warn(`[Shopee] Token expired during upsertItemBatch, refreshing…`);
+      try {
+        const fresh = await getValidToken(accountId);
+        accessToken = fresh.accessToken;
+        shopId = fresh.shopId;
+        refreshedToken = fresh;
+        items = await getItemBaseInfo(accessToken, shopId, itemIds);
+        console.log(`[Shopee] Token refreshed, batch retry succeeded`);
+      } catch (retryErr: any) {
+        console.warn(`[Shopee] Batch retry after token refresh failed:`, retryErr.message);
+        itemIds.forEach((id) => errors.push({ itemId: id, error: `getItemBaseInfo (after refresh): ${retryErr.message}` }));
+        return { added, updated, errors, refreshedToken };
+      }
+    } else {
+      console.warn(`[Shopee] getItemBaseInfo failed:`, e.message);
+      itemIds.forEach((id) => errors.push({ itemId: id, error: `getItemBaseInfo: ${e.message}` }));
+      return { added, updated, errors };
+    }
   }
 
   let extraInfoMap: Record<number, any> = {};
@@ -640,18 +681,22 @@ export async function upsertItemBatch(
         .where(and(eq(shopeeProducts.shopeeAccountId, accountId), eq(shopeeProducts.itemId, item.item_id)))
         .limit(1);
 
+      // Truncate rating to 4 decimal places — varchar(10) can't hold IEEE floats like 4.7272727272727275
+      const ratingRaw = extra.rating_star ?? extra.rating ?? null;
+      const rating = ratingRaw != null ? parseFloat(ratingRaw).toFixed(4) : "0";
+
       const payload = {
         userId,
         shopeeAccountId: accountId,
         itemId: item.item_id,
-        itemName: item.item_name || "",
-        itemSku: item.item_sku || "",
+        itemName: sanitizeText(item.item_name).slice(0, 1024),
+        itemSku: sanitizeText(item.item_sku).slice(0, 256),
         itemStatus: item.item_status || "NORMAL",
         categoryId: item.category_id || null,
         price: priceInfo.current_price?.toString() || priceInfo.original_price?.toString() || "0",
         stock: stockInfo.total_available_stock || 0,
-        sold: extra.sale || 0,
-        rating: extra.rating_star?.toString() || "0",
+        sold: extra.sale || extra.sale_count || 0,
+        rating,
         imageUrl: mainImage,
         images: allImages,
         hasVideo: item.video_info?.length > 0 ? 1 : 0,
@@ -663,7 +708,7 @@ export async function upsertItemBatch(
         dimensionLength: item.dimension?.package_length?.toString() || "",
         dimensionWidth: item.dimension?.package_width?.toString() || "",
         dimensionHeight: item.dimension?.package_height?.toString() || "",
-        description: item.description || "",
+        description: sanitizeText(item.description),
         lastSyncAt: new Date(),
       };
 
@@ -680,7 +725,7 @@ export async function upsertItemBatch(
     }
   }
 
-  return { added, updated, errors };
+  return { added, updated, errors, refreshedToken };
 }
 
 /**
@@ -728,7 +773,7 @@ export async function syncProducts(
   accountId: number,
   onProgress?: (current: number, total: number, page?: number) => void
 ): Promise<{ added: number; updated: number; removed: number; total: number; errors: Array<{ itemId: number; error: string }> }> {
-  const { accessToken, shopId } = await getValidToken(accountId);
+  let { accessToken, shopId } = await getValidToken(accountId);
 
   const { itemIds: allItemIds } = await collectAllItemIds(accessToken, shopId);
   const totalItems = allItemIds.length;
@@ -743,6 +788,9 @@ export async function syncProducts(
     page++;
     const batch = allItemIds.slice(i, i + 50);
     const result = await upsertItemBatch(accessToken, shopId, userId, accountId, batch);
+    if (result.refreshedToken) {
+      ({ accessToken, shopId } = result.refreshedToken);
+    }
     added += result.added;
     updated += result.updated;
     errors.push(...result.errors);

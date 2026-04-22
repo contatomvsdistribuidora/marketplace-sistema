@@ -357,8 +357,8 @@ async function processShopeeSync(job: typeof backgroundJobs.$inferSelect) {
   const accountId = job.accountId;
   if (!accountId) throw new Error("accountId is required for shopee_sync jobs");
 
-  // Get a valid token once (reused for all batches in this session)
-  const { accessToken, shopId } = await shopee.getValidToken(accountId);
+  // Get a valid token once (reused for all batches; refreshed automatically on expiry)
+  let { accessToken, shopId } = await shopee.getValidToken(accountId);
 
   const saved = job.productData as ShopeeSyncCheckpoint | null;
   let allItemIds: number[];
@@ -413,6 +413,12 @@ async function processShopeeSync(job: typeof backgroundJobs.$inferSelect) {
     const batchResult = await shopee.upsertItemBatch(
       accessToken, shopId, job.userId, accountId, batch
     );
+
+    // Propagate refreshed token so subsequent batches don't repeat the expiry retry
+    if (batchResult.refreshedToken) {
+      ({ accessToken, shopId } = batchResult.refreshedToken);
+      console.log(`[BG Worker] shopee_sync #${job.id} token refreshed mid-sync`);
+    }
 
     added += batchResult.added;
     updated += batchResult.updated;
