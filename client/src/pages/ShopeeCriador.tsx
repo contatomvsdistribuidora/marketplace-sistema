@@ -879,6 +879,7 @@ function VariationWizard({
   const [inlinePriceEdits, setInlinePriceEdits]     = useState<Record<string, string>>({});
   const [inlineLabelEdits, setInlineLabelEdits]     = useState<Record<string, string>>({});
   const [attributeValues, setAttributeValues]       = useState<Record<number, { valueId: number; originalValue: string }>>({});
+  const [aiFillingAttrs, setAiFillingAttrs]         = useState(false);
 
   const [pricing, setPricing] = useState<PricingGlobals>({
     unitCost: "",
@@ -898,6 +899,7 @@ function VariationWizard({
   const optimizeMutation     = trpc.shopee.optimizeTitle.useMutation();
   const generateAdMutation   = trpc.shopee.generateAdContent.useMutation();
   const publishMutation      = trpc.shopee.createProductFromWizard.useMutation();
+  const fillAttrsMutation    = trpc.ai.fillAttributes.useMutation();
 
   // Busca atributos da categoria do produto para a Ficha Técnica
   const categoryId = product.categoryId ? Number(product.categoryId) : null;
@@ -1343,6 +1345,60 @@ function VariationWizard({
     }
   }
 
+  async function autoFillAttributes() {
+    if (!categoryAttributes || (categoryAttributes as any[]).length === 0) return;
+    setAiFillingAttrs(true);
+    try {
+      const attrs = categoryAttributes as Array<{
+        attribute_id: number;
+        display_attribute_name: string;
+        is_mandatory: boolean;
+        input_type: string;
+        attribute_value_list: Array<{ value_id: number; display_value_name: string }>;
+      }>;
+      const suggestions = await fillAttrsMutation.mutateAsync({
+        product: {
+          name: product.itemName || "",
+          description: (product.description || "").slice(0, 2000),
+          features: {},
+          category: product.categoryName || "",
+        },
+        requiredAttributes: attrs.map(a => ({
+          name: a.display_attribute_name,
+          id: String(a.attribute_id),
+          required: a.is_mandatory,
+          options: (a.attribute_value_list ?? []).slice(0, 30).map(o => o.display_value_name),
+        })),
+        marketplace: "shopee",
+      });
+      setAttributeValues(prev => {
+        const next = { ...prev };
+        for (const s of suggestions) {
+          if (!s.value) continue;
+          const attrId = parseInt(s.attributeId);
+          const attrDef = attrs.find(a => a.attribute_id === attrId);
+          if (!attrDef) continue;
+          if (attrDef.input_type === "DROP_DOWN") {
+            const valueLower = s.value.toLowerCase();
+            const match = (attrDef.attribute_value_list ?? []).find(
+              o => o.display_value_name.toLowerCase() === valueLower
+            ) ?? (attrDef.attribute_value_list ?? []).find(
+              o => o.display_value_name.toLowerCase().includes(valueLower) ||
+                   valueLower.includes(o.display_value_name.toLowerCase())
+            );
+            if (match) next[attrId] = { valueId: match.value_id, originalValue: match.display_value_name };
+          } else {
+            next[attrId] = { valueId: 0, originalValue: s.value };
+          }
+        }
+        return next;
+      });
+    } catch {
+      // silent — user can fill manually
+    }
+    setAiFillingAttrs(false);
+  }
+
   // Labels por modo
   const modeParamLabel = pricingMode === "multiplier" ? "Multiplicador" : pricingMode === "margin" ? "Margem %" : "Lucro mín. R$";
   const modeGlobalKey  = pricingMode === "multiplier" ? "marginMultiplier" as const : pricingMode === "margin" ? "desiredMargin" as const : "minProfit" as const;
@@ -1708,6 +1764,133 @@ function VariationWizard({
                   </div>
                 </div>
               </div>
+
+              {/* ── Especificações do Produto (Ficha Técnica) ── */}
+              {categoryId && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-700">📋 Especificações do Produto</span>
+                      {attrLoading && <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin" />}
+                      {!attrLoading && categoryAttributes && (categoryAttributes as any[]).length > 0 && (
+                        <span className="text-xs text-gray-400">
+                          {(categoryAttributes as any[]).filter((a: any) => a.is_mandatory).length} obrigatório(s)
+                        </span>
+                      )}
+                    </div>
+                    {!attrLoading && categoryAttributes && (categoryAttributes as any[]).length > 0 && (
+                      <button
+                        onClick={autoFillAttributes}
+                        disabled={aiFillingAttrs}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-3 py-1.5 rounded-lg transition">
+                        {aiFillingAttrs
+                          ? <><Loader2 className="w-3 h-3 animate-spin" /> Preenchendo…</>
+                          : <><Sparkles className="w-3 h-3" /> ✨ Preencher com IA</>}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Form body */}
+                  <div className="p-4 space-y-4">
+                    {attrError && (
+                      <p className="text-xs text-red-500">Erro ao carregar atributos da categoria.</p>
+                    )}
+                    {!attrLoading && !attrError && (!categoryAttributes || (categoryAttributes as any[]).length === 0) && (
+                      <p className="text-xs text-gray-400">Nenhum atributo disponível para esta categoria.</p>
+                    )}
+
+                    {!attrLoading && !attrError && categoryAttributes && (categoryAttributes as any[]).length > 0 && (() => {
+                      const attrs = categoryAttributes as Array<{
+                        attribute_id: number;
+                        display_attribute_name: string;
+                        is_mandatory: boolean;
+                        input_type: string;
+                        attribute_value_list: Array<{ value_id: number; display_value_name: string }>;
+                      }>;
+                      const mandatory = attrs.filter(a => a.is_mandatory);
+                      const optional  = attrs.filter(a => !a.is_mandatory);
+
+                      function renderAttrField(attr: typeof attrs[number]) {
+                        const current = attributeValues[attr.attribute_id];
+                        const isEmpty = !current || current.originalValue.trim() === "";
+                        const border  = attr.is_mandatory && isEmpty ? "border-orange-400" : "border-gray-200";
+                        const bg      = attr.is_mandatory && isEmpty ? "bg-orange-50"      : "bg-white";
+
+                        return (
+                          <div key={attr.attribute_id} className="space-y-1">
+                            <label className="text-xs font-medium text-gray-600">
+                              {attr.display_attribute_name}
+                              {attr.is_mandatory && <span className="text-orange-500 ml-0.5">*</span>}
+                            </label>
+                            {attr.input_type === "DROP_DOWN" ? (
+                              <select
+                                value={current?.valueId ?? ""}
+                                onChange={e => {
+                                  const opt = attr.attribute_value_list.find(o => o.value_id === Number(e.target.value));
+                                  if (opt) {
+                                    setAttributeValues(prev => ({ ...prev, [attr.attribute_id]: { valueId: opt.value_id, originalValue: opt.display_value_name } }));
+                                  } else {
+                                    setAttributeValues(prev => { const n = { ...prev }; delete n[attr.attribute_id]; return n; });
+                                  }
+                                }}
+                                className={`w-full text-xs rounded-lg border ${border} ${bg} px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                              >
+                                <option value="">Selecionar…</option>
+                                {attr.attribute_value_list.map(o => (
+                                  <option key={o.value_id} value={o.value_id}>{o.display_value_name}</option>
+                                ))}
+                              </select>
+                            ) : attr.input_type === "INT_TYPE" ? (
+                              <input type="number" step={1}
+                                value={current?.originalValue ?? ""}
+                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.attribute_id]: { valueId: 0, originalValue: e.target.value } }))}
+                                placeholder="0"
+                                className={`w-full text-xs rounded-lg border ${border} ${bg} px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                              />
+                            ) : attr.input_type === "FLOAT_TYPE" ? (
+                              <input type="number" step={0.01}
+                                value={current?.originalValue ?? ""}
+                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.attribute_id]: { valueId: 0, originalValue: e.target.value } }))}
+                                placeholder="0.00"
+                                className={`w-full text-xs rounded-lg border ${border} ${bg} px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                              />
+                            ) : (
+                              <input type="text"
+                                value={current?.originalValue ?? ""}
+                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.attribute_id]: { valueId: 0, originalValue: e.target.value } }))}
+                                placeholder="Digitar…"
+                                className={`w-full text-xs rounded-lg border ${border} ${bg} px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                              />
+                            )}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-4">
+                          {mandatory.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-orange-600 mb-2">Obrigatórios *</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {mandatory.map(renderAttrField)}
+                              </div>
+                            </div>
+                          )}
+                          {optional.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 mb-2">Opcionais</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {optional.map(renderAttrField)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
 
               {/* ── Cards por variação ── */}
               {optionDetails.map((opt, idx) => {
@@ -2460,12 +2643,24 @@ function VariationWizard({
             </button>
           )}
           {step === "C" && (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               {hasNegativeMargin && (
                 <span className="text-xs text-red-600 font-medium flex items-center gap-1">
                   <AlertTriangle className="w-3.5 h-3.5" /> Corrija margens negativas
                 </span>
               )}
+              {!hasNegativeMargin && (() => {
+                const mandatoryEmpty = categoryAttributes
+                  ? (categoryAttributes as any[]).filter((a: any) =>
+                      a.is_mandatory && (!attributeValues[a.attribute_id] || !attributeValues[a.attribute_id].originalValue.trim())
+                    ).length
+                  : 0;
+                return mandatoryEmpty > 0 ? (
+                  <span className="text-xs text-amber-600 font-medium flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" /> {mandatoryEmpty} atributo{mandatoryEmpty > 1 ? "s" : ""} obrigatório{mandatoryEmpty > 1 ? "s" : ""} vazio{mandatoryEmpty > 1 ? "s" : ""}
+                  </span>
+                ) : null;
+              })()}
               {!hasNegativeMargin && hasPricing && optionDetails.length >= 2 && (
                 <button onClick={applyFourTimesRule}
                   className="flex items-center gap-1 text-xs text-amber-700 border border-amber-300 rounded-lg px-3 py-2 bg-amber-50 hover:bg-amber-100 transition">
