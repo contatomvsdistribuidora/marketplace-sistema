@@ -1932,19 +1932,73 @@ export const appRouter = router({
         return shopeePublish.getCategories(accessToken, shopId);
       }),
 
-    // Get attributes for a category
+    // Get attributes for a category (API first, local DB fallback)
     getCategoryAttributes: protectedProcedure
       .input(z.object({ accountId: z.number(), categoryId: z.number() }))
       .query(async ({ input }) => {
         if (!input.categoryId) return [];
         try {
           const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
-          return await shopeePublish.getCategoryAttributes(accessToken, shopId, input.categoryId);
+          const attrs = await shopeePublish.getCategoryAttributes(accessToken, shopId, input.categoryId);
+          if (attrs.length > 0) return attrs;
+          // API returned empty (likely suspended) — try local DB fallback
+          const db = sharedDb;
+          const { shopeeCategoryAttributes } = await import("../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const [row] = await db.select().from(shopeeCategoryAttributes)
+            .where(eq(shopeeCategoryAttributes.categoryId, input.categoryId)).limit(1);
+          if (row?.attributeList && (row.attributeList as any[]).length > 0) {
+            console.log(`[Router] getCategoryAttributes(${input.categoryId}): usando fallback local (${(row.attributeList as any[]).length} atributos)`);
+            return row.attributeList as any[];
+          }
+          return [];
         } catch (e: any) {
-          // Token/account errors should surface; API suspension returns [] silently (handled inside getCategoryAttributes)
           console.error(`[Router] getCategoryAttributes(${input.categoryId}):`, e.message);
           return [];
         }
+      }),
+
+    // Seed or update local category attributes (admin)
+    seedCategoryAttributes: protectedProcedure
+      .input(z.object({
+        categoryId: z.number(),
+        categoryName: z.string().optional(),
+        attributeList: z.array(z.any()),
+      }))
+      .mutation(async ({ input }) => {
+        const db = sharedDb;
+        const { shopeeCategoryAttributes } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [existing] = await db.select({ id: shopeeCategoryAttributes.id })
+          .from(shopeeCategoryAttributes)
+          .where(eq(shopeeCategoryAttributes.categoryId, input.categoryId)).limit(1);
+        if (existing) {
+          await db.update(shopeeCategoryAttributes)
+            .set({ categoryName: input.categoryName, attributeList: input.attributeList, source: "manual" })
+            .where(eq(shopeeCategoryAttributes.categoryId, input.categoryId));
+        } else {
+          await db.insert(shopeeCategoryAttributes).values({
+            categoryId: input.categoryId,
+            categoryName: input.categoryName,
+            attributeList: input.attributeList,
+            source: "manual",
+          });
+        }
+        return { success: true, categoryId: input.categoryId, count: input.attributeList.length };
+      }),
+
+    // List all locally stored category attributes
+    listLocalCategoryAttributes: protectedProcedure
+      .query(async () => {
+        const db = sharedDb;
+        const { shopeeCategoryAttributes } = await import("../drizzle/schema");
+        return db.select({
+          id: shopeeCategoryAttributes.id,
+          categoryId: shopeeCategoryAttributes.categoryId,
+          categoryName: shopeeCategoryAttributes.categoryName,
+          source: shopeeCategoryAttributes.source,
+          updatedAt: shopeeCategoryAttributes.updatedAt,
+        }).from(shopeeCategoryAttributes).orderBy(shopeeCategoryAttributes.categoryId);
       }),
 
     // Search categories by keyword

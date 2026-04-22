@@ -459,3 +459,16 @@ export const shopeeProducts = mysqlTable("shopee_products", {
 
 export type ShopeeProduct = typeof shopeeProducts.$inferSelect;
 export type InsertShopeeProduct = typeof shopeeProducts.$inferInsert;
+
+/** Local fallback for Shopee category attributes (used when get_attributes API is suspended) */
+export const shopeeCategoryAttributes = mysqlTable("shopee_category_attributes", {
+  id: int("id").autoincrement().primaryKey(),
+  categoryId: bigint("categoryId", { mode: "number" }).notNull().unique(),
+  categoryName: varchar("categoryName", { length: 512 }),
+  attributeList: json("attributeList").$type<any[]>(),
+  source: varchar("source", { length: 32 }).default("seed").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeCategoryAttribute = typeof shopeeCategoryAttributes.$inferSelect;
