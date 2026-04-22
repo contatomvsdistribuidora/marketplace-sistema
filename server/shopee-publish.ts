@@ -374,21 +374,18 @@ export async function createProduct(
     }));
   }
 
-  // Brand
-  if (input.brand) {
-    body.brand = {
-      brand_id: input.brand.brandId,
-      ...(input.brand.originalBrandName
-        ? { original_brand_name: input.brand.originalBrandName }
-        : {}),
-    };
-  }
+  // Brand — always required by Shopee; brand_id must be a number (0 = no registered brand)
+  body.brand = {
+    brand_id: Number(input.brand?.brandId ?? 0),
+    original_brand_name: input.brand?.originalBrandName || "No Brand",
+  };
 
   // SKU
   if (input.sku) {
     body.item_sku = input.sku;
   }
 
+  console.log("[Shopee] add_item payload:", JSON.stringify(body));
   const res = await shopeePost(
     "/api/v2/product/add_item",
     body,
