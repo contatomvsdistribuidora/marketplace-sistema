@@ -5,6 +5,7 @@ import {
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
   Palette, PenLine, ArrowLeft, ArrowRight, Check,
   CheckCircle2, X, PlusCircle, AlertTriangle, TrendingUp,
+  ExternalLink,
 } from "lucide-react";
 
 const PAGE_SIZE = 50;
@@ -84,7 +85,7 @@ export default function ShopeeCriador() {
   }
 
   if (selectedProduct) {
-    return <ProductDetail product={selectedProduct} onBack={() => setSelectedProduct(null)} />;
+    return <ProductDetail product={selectedProduct} accountId={selectedAccountId!} onBack={() => setSelectedProduct(null)} />;
   }
 
   return (
@@ -204,7 +205,7 @@ export default function ShopeeCriador() {
 
 // ─── Tela 2 – Detalhe do produto ──────────────────────────────────────────────
 
-function ProductDetail({ product, onBack }: { product: any; onBack: () => void }) {
+function ProductDetail({ product, accountId, onBack }: { product: any; accountId: number; onBack: () => void }) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [savedVariations, setSavedVariations] = useState<VariationGroup[]>([]);
 
@@ -295,6 +296,7 @@ function ProductDetail({ product, onBack }: { product: any; onBack: () => void }
       {wizardOpen && (
         <VariationWizard
           product={product}
+          accountId={accountId}
           onSave={handleSaveVariation}
           onClose={() => setWizardOpen(false)}
         />
@@ -407,10 +409,12 @@ function solvePriceByMinProfit(
 
 function VariationWizard({
   product,
+  accountId,
   onSave,
   onClose,
 }: {
   product: any;
+  accountId: number;
   onSave: (group: VariationGroup) => void;
   onClose: () => void;
 }) {
@@ -451,6 +455,10 @@ function VariationWizard({
 
   const optimizeMutation     = trpc.shopee.optimizeTitle.useMutation();
   const generateAdMutation   = trpc.shopee.generateAdContent.useMutation();
+  const publishMutation      = trpc.shopee.createProductFromWizard.useMutation();
+  const [publishStatus, setPublishStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [publishResult, setPublishResult] = useState<{ itemId: number; itemUrl: string } | null>(null);
+  const [publishError, setPublishError]   = useState<string>("");
 
   const [adContent, setAdContent]       = useState<any>(null);
   const [adLoading, setAdLoading]       = useState(false);
@@ -767,6 +775,52 @@ function VariationWizard({
       };
     });
     onSave({ id: uid(), type: selectedType!, typeName, options: opts });
+  }
+
+  async function handlePublishToShopee() {
+    const opts = optionDetails.map((o, i) => {
+      const c = computePricing(o, i);
+      const rawPrice = inlinePriceEdits[o.id] || o.price || (c.price > 0 ? c.price.toFixed(2) : "0");
+      const rawWeight = o.weight || c.weight.toFixed(2);
+      const rawLength = o.length || c.length.toFixed(1);
+      const rawWidth  = o.width  || c.width.toFixed(1);
+      const rawHeight = o.height || c.height.toFixed(1);
+      return {
+        label:  o.label,
+        price:  Math.max(parseFloat(rawPrice)  || 0, 0.01),
+        stock:  Math.max(parseInt(o.stock || "0", 10), 0),
+        weight: Math.max(parseFloat(rawWeight) || 0.1, 0.01),
+        length: parseFloat(rawLength) > 0 ? parseFloat(rawLength) : undefined,
+        width:  parseFloat(rawWidth)  > 0 ? parseFloat(rawWidth)  : undefined,
+        height: parseFloat(rawHeight) > 0 ? parseFloat(rawHeight) : undefined,
+      };
+    });
+
+    const validOpts = opts.filter(v => v.price > 0);
+    if (validOpts.length === 0) return;
+
+    const title = selectedTitle || adContent?.titulo_principal || product.itemName || "";
+    const description = editedDesc || adContent?.descricao || product.description || "";
+    const hashtags: string[] = adContent?.hashtags ?? [];
+
+    setPublishStatus("loading");
+    setPublishError("");
+    try {
+      const result = await publishMutation.mutateAsync({
+        accountId,
+        sourceProductId: product.id,
+        variationTypeName: typeName,
+        variations: validOpts,
+        title,
+        description,
+        hashtags,
+      });
+      setPublishResult({ itemId: result.itemId, itemUrl: result.itemUrl });
+      setPublishStatus("success");
+    } catch (e: any) {
+      setPublishError(e.message || "Erro desconhecido ao publicar");
+      setPublishStatus("error");
+    }
   }
 
   function stepBack() {
@@ -1420,10 +1474,41 @@ function VariationWizard({
 
               {/* Botão principal de geração */}
               {!adContent && !adLoading && (
-                <button onClick={generateAdContent}
-                  className="w-full flex items-center justify-center gap-3 py-5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold text-base transition shadow-lg shadow-orange-200">
-                  <Sparkles className="w-6 h-6" /> ✨ Gerar Conteúdo do Anúncio com IA
-                </button>
+                <div className="space-y-2">
+                  <button onClick={generateAdContent}
+                    className="w-full flex items-center justify-center gap-3 py-5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold text-base transition shadow-lg shadow-orange-200">
+                    <Sparkles className="w-6 h-6" /> ✨ Gerar Conteúdo do Anúncio com IA
+                  </button>
+                  <button
+                    onClick={handlePublishToShopee}
+                    disabled={publishStatus === "loading" || optionDetails.length === 0}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 text-sm font-semibold transition">
+                    {publishStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {publishStatus === "loading" ? "Publicando..." : "Publicar sem conteúdo IA"}
+                  </button>
+                  {publishStatus === "success" && publishResult && (
+                    <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-green-800">
+                        <p className="font-semibold">Produto publicado com sucesso!</p>
+                        <a href={publishResult.itemUrl} target="_blank" rel="noopener noreferrer"
+                          className="text-green-700 underline hover:text-green-900 flex items-center gap-1 mt-1">
+                          Ver produto na Shopee <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  {publishStatus === "error" && (
+                    <div className="bg-red-50 border border-red-300 rounded-xl p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-red-800">
+                        <p className="font-semibold">Erro ao publicar</p>
+                        <p className="mt-0.5 text-red-700">{publishError}</p>
+                        <button onClick={() => setPublishStatus("idle")} className="text-xs text-red-600 underline mt-1">Tentar novamente</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Loading */}
@@ -1640,11 +1725,38 @@ function VariationWizard({
                       className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-orange-300 text-orange-600 text-sm font-semibold hover:bg-orange-50 transition">
                       🔄 Regenerar tudo
                     </button>
-                    <button onClick={() => alert("Publicação na Shopee em breve")}
-                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition">
-                      ✅ Confirmar e Publicar
+                    <button
+                      onClick={handlePublishToShopee}
+                      disabled={publishStatus === "loading" || optionDetails.length === 0}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition">
+                      {publishStatus === "loading"
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <CheckCircle2 className="w-4 h-4" />}
+                      {publishStatus === "loading" ? "Publicando..." : "Confirmar e Publicar"}
                     </button>
                   </div>
+                  {publishStatus === "success" && publishResult && (
+                    <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-green-800">
+                        <p className="font-semibold">Produto publicado com sucesso!</p>
+                        <a href={publishResult.itemUrl} target="_blank" rel="noopener noreferrer"
+                          className="text-green-700 underline hover:text-green-900 flex items-center gap-1 mt-1">
+                          Ver produto na Shopee <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  {publishStatus === "error" && (
+                    <div className="bg-red-50 border border-red-300 rounded-xl p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-red-800">
+                        <p className="font-semibold">Erro ao publicar</p>
+                        <p className="mt-0.5 text-red-700">{publishError}</p>
+                        <button onClick={() => setPublishStatus("idle")} className="text-xs text-red-600 underline mt-1">Tentar novamente</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

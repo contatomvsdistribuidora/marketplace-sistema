@@ -2346,6 +2346,110 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         return shopeeOptimizer.generateAdContent(input);
       }),
+
+    // Publish a product created via the ShopeeCriador wizard
+    createProductFromWizard: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        sourceProductId: z.number(),
+        variationTypeName: z.string(),
+        variations: z.array(z.object({
+          label: z.string().max(20),
+          price: z.number().positive(),
+          stock: z.number().int().min(0),
+          weight: z.number().positive(),
+          length: z.number().positive().optional(),
+          width: z.number().positive().optional(),
+          height: z.number().positive().optional(),
+        })).min(1),
+        title: z.string().min(1).max(120),
+        description: z.string(),
+        hashtags: z.array(z.string()).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = sharedDb;
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+
+        const [sourceProduct] = await db.select().from(shopeeProducts)
+          .where(eq(shopeeProducts.id, input.sourceProductId)).limit(1);
+        if (!sourceProduct) throw new Error("Produto base não encontrado no banco de dados");
+
+        const categoryId = sourceProduct.categoryId;
+        if (!categoryId) throw new Error("Produto base não possui categoria Shopee. Sincronize os produtos antes de publicar.");
+
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+
+        // Get enabled logistics channels
+        let logisticIds: number[] = [];
+        try {
+          const channels = await shopeePublish.getLogisticsChannels(accessToken, shopId);
+          logisticIds = (channels as any[])
+            .filter((c) => c.enabled)
+            .map((c) => c.logistics_channel_id)
+            .slice(0, 5);
+        } catch (e) {
+          console.warn("[Shopee Wizard] Could not fetch logistics channels:", e);
+        }
+
+        // Collect image URLs from source product (up to 9)
+        const imageUrls: string[] = [];
+        const imgs = sourceProduct.images;
+        if (Array.isArray(imgs) && imgs.length > 0) {
+          imageUrls.push(...(imgs as string[]).filter(Boolean).slice(0, 9));
+        } else if (sourceProduct.imageUrl) {
+          imageUrls.push(sourceProduct.imageUrl);
+        }
+        if (imageUrls.length === 0) throw new Error("Produto base não possui imagens. Adicione imagens ao produto na Shopee e sincronize.");
+
+        // Upload images to Shopee media space
+        console.log(`[Shopee Wizard] Uploading ${imageUrls.length} image(s) for "${input.title}"...`);
+        const imageIds = await shopeePublish.uploadImages(accessToken, shopId, imageUrls);
+        if (imageIds.length === 0) throw new Error("Falha ao enviar imagens para a Shopee. Verifique se as URLs estão acessíveis.");
+
+        // Build description with hashtags appended
+        let fullDescription = input.description;
+        if (input.hashtags && input.hashtags.length > 0) {
+          fullDescription += "\n\n" + input.hashtags.slice(0, 20).join(" ");
+        }
+
+        // Use first variation's data for product-level fields
+        const firstVar = input.variations[0];
+
+        console.log(`[Shopee Wizard] Creating product "${input.title}" (category ${categoryId})...`);
+        const { itemId } = await shopeePublish.createProduct(accessToken, shopId, {
+          itemName: input.title.substring(0, 120),
+          description: fullDescription.substring(0, 5000),
+          categoryId,
+          price: firstVar.price,
+          stock: input.variations.length === 1 ? firstVar.stock : 0,
+          weight: firstVar.weight,
+          imageIds,
+          condition: "NEW",
+          dimension: firstVar.length && firstVar.width && firstVar.height
+            ? { packageLength: firstVar.length, packageWidth: firstVar.width, packageHeight: firstVar.height }
+            : undefined,
+          logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
+        });
+
+        // Add tier variations when there are multiple options
+        if (input.variations.length > 1) {
+          console.log(`[Shopee Wizard] Adding ${input.variations.length} tier variations to item ${itemId}...`);
+          await shopeePublish.initTierVariation(accessToken, shopId, itemId, {
+            name: input.variationTypeName,
+            options: input.variations.map((v) => v.label),
+            models: input.variations.map((v, i) => ({
+              tierIndex: [i],
+              price: v.price,
+              stock: v.stock,
+            })),
+          });
+        }
+
+        const itemUrl = `https://shopee.com.br/product/${shopId}/${itemId}`;
+        console.log(`[Shopee Wizard] Published item ${itemId}: ${itemUrl}`);
+        return { success: true, itemId, itemUrl, shopId };
+      }),
   }),
 });
 
