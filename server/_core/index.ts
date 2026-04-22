@@ -163,9 +163,39 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
-    // Start background worker for processing scheduled jobs
     startBackgroundWorker();
+    seedAiConfigFromEnv().catch(e => console.warn("[AI Seed] Failed:", e.message));
   });
+}
+
+/**
+ * On startup, if no AI provider is configured in the DB yet,
+ * auto-seed from environment variables (ANTHROPIC_API_KEY / GROQ_API_KEY).
+ * Uses userId=1 (admin / first user). Idempotent — does nothing if already set.
+ */
+async function seedAiConfigFromEnv() {
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const groqKey      = process.env.GROQ_API_KEY;
+
+  if (!anthropicKey && !groqKey) return; // nothing to seed
+
+  const { getSetting, setSetting } = await import("../db");
+
+  const existingProvider = await getSetting(1, "ai_provider");
+  const existingKey      = await getSetting(1, "ai_api_key");
+  if (existingProvider && existingKey) return; // already configured by user
+
+  const provider = anthropicKey ? "anthropic" : "groq";
+  const apiKey   = (anthropicKey || groqKey)!;
+
+  await setSetting(1, "ai_provider", provider);
+  await setSetting(1, "ai_api_key",  apiKey);
+
+  // Initialise the runtime LLM provider immediately
+  const { setRuntimeAiProvider } = await import("./llm");
+  setRuntimeAiProvider(provider, apiKey);
+
+  console.log(`[AI Seed] Auto-configured provider "${provider}" from environment variable`);
 }
 
 startServer().catch(console.error);

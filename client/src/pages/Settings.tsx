@@ -112,8 +112,8 @@ export default function SettingsPage() {
   async function handleSaveAi() {
     const provider = (aiProvider || aiConfig?.savedProvider) as any;
     if (!provider) { toast.error("Selecione um provedor"); return; }
-    if (!aiApiKey)  { toast.error("Insira a API Key"); return; }
-    await setAiConfigMutation.mutateAsync({ provider, apiKey: aiApiKey });
+    if (!aiApiKey && !aiConfig?.hasKey) { toast.error("Insira a API Key"); return; }
+    await setAiConfigMutation.mutateAsync({ provider, apiKey: aiApiKey || undefined });
   }
 
   return (
@@ -329,19 +329,38 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <Label>
                   API Key
-                  {aiConfig?.hasKey && <span className="ml-2 text-xs text-green-600 font-normal">✓ Key salva ({aiConfig.maskedApiKey})</span>}
+                  {aiConfig?.hasKey && aiConfig.keyFromEnv && (
+                    <span className="ml-2 text-xs text-blue-600 font-normal">
+                      ✓ Configurada via ambiente ({aiConfig.maskedApiKey})
+                    </span>
+                  )}
+                  {aiConfig?.hasKey && !aiConfig.keyFromEnv && (
+                    <span className="ml-2 text-xs text-green-600 font-normal">
+                      ✓ Key salva ({aiConfig.maskedApiKey})
+                    </span>
+                  )}
                 </Label>
-                <Input
-                  type="password"
-                  placeholder={aiConfig?.hasKey ? "Cole nova key para substituir..." : "Cole sua API Key aqui..."}
-                  value={aiApiKey}
-                  onChange={e => { setAiApiKey(e.target.value); setTestResult("idle"); }}
-                />
+                {aiConfig?.hasKey ? (
+                  <Input
+                    type="password"
+                    placeholder="Cole nova key para substituir (opcional)..."
+                    value={aiApiKey}
+                    onChange={e => { setAiApiKey(e.target.value); setTestResult("idle"); }}
+                  />
+                ) : (
+                  <Input
+                    type="password"
+                    placeholder="Cole sua API Key aqui..."
+                    value={aiApiKey}
+                    onChange={e => { setAiApiKey(e.target.value); setTestResult("idle"); }}
+                  />
+                )}
                 <p className="text-xs text-muted-foreground">
                   {(aiProvider || aiConfig?.savedProvider) === "groq" && "Obtenha gratuitamente em console.groq.com"}
                   {(aiProvider || aiConfig?.savedProvider) === "anthropic" && "Disponível em console.anthropic.com"}
                   {(aiProvider || aiConfig?.savedProvider) === "openai" && "Disponível em platform.openai.com"}
                   {(aiProvider || aiConfig?.savedProvider) === "gemini" && "Disponível em aistudio.google.com"}
+                  {aiConfig?.hasKey && !aiApiKey && "Deixe em branco para manter a key atual"}
                 </p>
               </div>
 
@@ -367,7 +386,7 @@ export default function SettingsPage() {
 
                 <Button
                   onClick={handleSaveAi}
-                  disabled={setAiConfigMutation.isPending || !aiApiKey}
+                  disabled={setAiConfigMutation.isPending || (!aiApiKey && !aiConfig?.hasKey)}
                   className="flex items-center gap-2"
                 >
                   {setAiConfigMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}

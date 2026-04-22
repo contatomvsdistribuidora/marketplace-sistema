@@ -127,11 +127,19 @@ export const appRouter = router({
       );
       const maskKey = (k: string | null) =>
         k && k.length > 8 ? `${k.slice(0, 6)}${"•".repeat(Math.min(k.length - 10, 20))}${k.slice(-4)}` : null;
+      // Detect if the stored key was auto-seeded from an env var
+      const keyFromEnv = !!apiKey && (
+        (!!ENV.anthropicApiKey && apiKey === ENV.anthropicApiKey) ||
+        (!!ENV.groqApiKey      && apiKey === ENV.groqApiKey)      ||
+        (!!ENV.openaiApiKey    && apiKey === ENV.openaiApiKey)    ||
+        (!!ENV.geminiApiKey    && apiKey === ENV.geminiApiKey)
+      );
       return {
         activeProvider,
         savedProvider: provider || null,
         maskedApiKey:  maskKey(apiKey),
         hasKey:        !!apiKey,
+        keyFromEnv,
         envKeys: {
           anthropic: !!ENV.anthropicApiKey,
           groq:      !!ENV.groqApiKey,
@@ -144,14 +152,18 @@ export const appRouter = router({
     setAiConfig: protectedProcedure
       .input(z.object({
         provider: z.enum(["anthropic", "groq", "openai", "gemini", "forge"]),
-        apiKey:   z.string().min(1),
+        // apiKey is optional when there is already a key saved in the DB
+        apiKey:   z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         await db.setSetting(ctx.user.id, "ai_provider", input.provider);
-        await db.setSetting(ctx.user.id, "ai_api_key",  input.apiKey);
+        if (input.apiKey) {
+          await db.setSetting(ctx.user.id, "ai_api_key", input.apiKey);
+        }
+        const resolvedKey = input.apiKey || (await db.getSetting(ctx.user.id, "ai_api_key")) || "";
         const { setRuntimeAiProvider } = await import("./_core/llm");
         const { resetAiProviderCache } = await import("./lib/ai-provider");
-        setRuntimeAiProvider(input.provider, input.apiKey);
+        setRuntimeAiProvider(input.provider, resolvedKey);
         resetAiProviderCache();
         return { success: true };
       }),
