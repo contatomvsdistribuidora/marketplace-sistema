@@ -17,9 +17,7 @@ let _initialized = false;
 
 async function ensureInitialized() {
   if (_initialized) return;
-  _initialized = true;
   try {
-    // Tenta carregar provedor salvo no banco (userId=1 é o admin/único usuário)
     const { settings } = await import("../../drizzle/schema");
     const { eq, and } = await import("drizzle-orm");
     const [providerRow] = await db.select()
@@ -33,8 +31,10 @@ async function ensureInitialized() {
     if (providerRow?.settingValue) {
       setRuntimeAiProvider(providerRow.settingValue, keyRow?.settingValue ?? "");
     }
+    _initialized = true; // só marca como inicializado após sucesso
   } catch {
-    // Silencioso — usa fallback env vars
+    // DB indisponível — mantém _initialized = false para tentar novamente
+    // na próxima chamada; invokeLLM usará os env vars como fallback
   }
 }
 

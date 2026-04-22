@@ -925,6 +925,10 @@ export async function generateAdContent(params: {
     maxTokens: 4096,
     messages: [
       {
+        role: "system",
+        content: "Você é um especialista em copywriting e SEO para Shopee Brasil. Responda SOMENTE com JSON válido, sem markdown, sem blocos de código, sem texto antes ou depois do JSON.",
+      },
+      {
         role: "user",
         content: `Atue como Especialista em Copywriting e SEO para Shopee Brasil com 10 anos de experiência. Crie um anúncio de ALTÍSSIMA CONVERSÃO.
 
@@ -936,7 +940,7 @@ DADOS DO PRODUTO:
 VARIAÇÕES:
 ${variationsText}
 
-GERE EXATAMENTE NESTE FORMATO JSON (sem texto antes ou depois):
+RETORNE APENAS O JSON ABAIXO, SEM NENHUM TEXTO ADICIONAL, SEM MARKDOWN, SEM BLOCOS \`\`\`json:
 {
   "titulo_principal": "(80-100 caracteres OBRIGATÓRIO — contar e confirmar)",
   "titulos_alternativos": ["(80-100 chars)", "(80-100 chars)", "(80-100 chars)"],
@@ -963,12 +967,29 @@ REGRAS:
 - Destacar economia ao comprar mais quantidade
 - Na tabela de variações: explicar para quem é ideal cada kit
 - score.titulo: 0-25 | score.descricao: 0-25 | score.tags: 0-10 | score.variacoes: 0-20 | score.total: soma dos anteriores
-- score.nivel: A (>=80), B (>=65), C (>=50), D (>=35), F (<35)
-- Responder JSON válido apenas, sem texto adicional`,
+- score.nivel: A (>=80), B (>=65), C (>=50), D (>=35), F (<35)`,
       },
     ],
   });
 
-  const json = extractJsonFromResponse(response);
-  return JSON.parse(json) as AdContent;
+  const raw = extractJsonFromResponse(response);
+
+  // Parse defensivo: tenta direto, depois via regex se falhar
+  try {
+    return JSON.parse(raw) as AdContent;
+  } catch {
+    // Remove possíveis blocos de markdown residuais e tenta novamente
+    const stripped = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    try {
+      return JSON.parse(stripped) as AdContent;
+    } catch {
+      // Última tentativa: extrai o primeiro objeto JSON encontrado no texto
+      const match = stripped.match(/\{[\s\S]*\}/);
+      if (match) return JSON.parse(match[0]) as AdContent;
+      throw new Error(`generateAdContent: resposta da IA não é JSON válido. Preview: ${raw.slice(0, 200)}`);
+    }
+  }
 }
