@@ -1936,8 +1936,15 @@ export const appRouter = router({
     getCategoryAttributes: protectedProcedure
       .input(z.object({ accountId: z.number(), categoryId: z.number() }))
       .query(async ({ input }) => {
-        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
-        return shopeePublish.getCategoryAttributes(accessToken, shopId, input.categoryId);
+        if (!input.categoryId) return [];
+        try {
+          const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+          return await shopeePublish.getCategoryAttributes(accessToken, shopId, input.categoryId);
+        } catch (e: any) {
+          // Token/account errors should surface; API suspension returns [] silently (handled inside getCategoryAttributes)
+          console.error(`[Router] getCategoryAttributes(${input.categoryId}):`, e.message);
+          return [];
+        }
       }),
 
     // Search categories by keyword

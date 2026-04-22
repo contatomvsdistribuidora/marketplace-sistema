@@ -119,20 +119,39 @@ export async function getCategories(
 
 /**
  * Get attributes required/optional for a specific category.
+ * Returns [] when the API is suspended or permission is denied for this shop.
  */
 export async function getCategoryAttributes(
   accessToken: string,
   shopId: number,
   categoryId: number,
   language: string = "pt-BR"
-) {
-  const res = await shopeeGet(
-    "/api/v2/product/get_attributes",
-    { category_id: categoryId, language },
-    accessToken,
-    shopId
-  );
-  return res?.attribute_list || [];
+): Promise<any[]> {
+  if (!categoryId) return [];
+  try {
+    const res = await shopeeGet(
+      "/api/v2/product/get_attributes",
+      { category_id: categoryId, language },
+      accessToken,
+      shopId
+    );
+    return res?.attribute_list || [];
+  } catch (e: any) {
+    // api_suspended / no_permission / permission_denied → not a fatal error for the caller
+    const isPermissionError =
+      e.message?.includes("api_suspended") ||
+      e.message?.includes("no_permission") ||
+      e.message?.includes("permission_denied") ||
+      e.message?.includes("Permission denied");
+    if (isPermissionError) {
+      console.warn(
+        `[Shopee] getCategoryAttributes(${categoryId}): API não disponível para este parceiro — ${e.message}`
+      );
+    } else {
+      console.error(`[Shopee] getCategoryAttributes(${categoryId}): ${e.message}`);
+    }
+    return [];
+  }
 }
 
 /**
