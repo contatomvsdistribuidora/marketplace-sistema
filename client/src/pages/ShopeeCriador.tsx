@@ -262,7 +262,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   const [publishModalResult, setPublishModalResult] = useState<{ itemId: number; itemUrl: string } | null>(null);
   const [publishModalError, setPublishModalError] = useState("");
 
-  // — new state —
+  // — state —
   const allImages: string[] = Array.isArray(product.images) && product.images.length > 0
     ? product.images
     : product.imageUrl ? [product.imageUrl] : [];
@@ -270,8 +270,17 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState(product.description || "");
   const [savingDesc, setSavingDesc] = useState(false);
+  const [generatingDesc, setGeneratingDesc] = useState(false);
   const [editingAttrId, setEditingAttrId] = useState<number | null>(null);
   const [editingAttrValue, setEditingAttrValue] = useState("");
+  const [generatingTitle, setGeneratingTitle] = useState(false);
+  const [titleSuggestion, setTitleSuggestion] = useState<{
+    optimizedTitle: string; alternatives: string[]; keywords: string[]; explanation: string;
+  } | null>(null);
+  const [selectedSuggestedTitle, setSelectedSuggestedTitle] = useState("");
+  const [applyingTitle, setApplyingTitle] = useState(false);
+  // live product name — updated when title is applied
+  const [displayName, setDisplayName] = useState(product.itemName || "");
 
   // — queries —
   const { data: diagData, isLoading: diagLoading } =
@@ -280,8 +289,11 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
     trpc.shopee.getProductUrls.useQuery({ accountId, productId: product.id }, { staleTime: 300_000 });
 
   // — mutations —
-  const detailPublishMutation = trpc.shopee.createProductFromWizard.useMutation();
-  const applyDescMutation = trpc.shopee.applyDescription.useMutation();
+  const detailPublishMutation   = trpc.shopee.createProductFromWizard.useMutation();
+  const applyDescMutation       = trpc.shopee.applyDescription.useMutation();
+  const generateAdMutation      = trpc.shopee.generateAdContent.useMutation();
+  const optimizeTitleMutation   = trpc.shopee.optimizeTitle.useMutation();
+  const applyTitleMutation      = trpc.shopee.applyTitle.useMutation();
 
   const diagnostic = diagData?.diagnostic;
   const statusLabel = product.itemStatus === "BANNED" ? "Banido"
@@ -308,6 +320,51 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
       setEditingDesc(false);
     } catch {}
     setSavingDesc(false);
+  }
+
+  async function handleGenerateDesc() {
+    setGeneratingDesc(true);
+    try {
+      const result = await generateAdMutation.mutateAsync({
+        productName: product.itemName || "",
+        category: product.categoryName || undefined,
+        variationType: "Unidade",
+        variations: [{
+          label: "1 Unidade",
+          qty: 1,
+          weight: product.weight ? String(product.weight) : "0.5",
+          dimensions: [product.dimensionLength, product.dimensionWidth, product.dimensionHeight]
+            .filter(Boolean).join("x") || "20x15x10",
+          price: product.price ? String(product.price) : "0",
+        }],
+      });
+      const generated = (result as any).descricao || (result as any).description || "";
+      setDescDraft(generated);
+      setEditingDesc(true);
+    } catch {}
+    setGeneratingDesc(false);
+  }
+
+  async function handleGenerateTitle() {
+    setGeneratingTitle(true);
+    try {
+      const result = await optimizeTitleMutation.mutateAsync({ productId: product.id });
+      setTitleSuggestion(result);
+      setSelectedSuggestedTitle(result.optimizedTitle);
+    } catch {}
+    setGeneratingTitle(false);
+  }
+
+  async function handleApplyTitle() {
+    if (!selectedSuggestedTitle.trim()) return;
+    setApplyingTitle(true);
+    try {
+      await applyTitleMutation.mutateAsync({ productId: product.id, newTitle: selectedSuggestedTitle });
+      product.itemName = selectedSuggestedTitle;
+      setDisplayName(selectedSuggestedTitle);
+      setTitleSuggestion(null);
+    } catch {}
+    setApplyingTitle(false);
   }
 
   async function handlePublishFromDetail() {
@@ -376,7 +433,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
           {/* Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2 flex-wrap">
-              <h2 className="text-base font-semibold text-gray-900 leading-snug">{product.itemName || "Sem título"}</h2>
+              <h2 className="text-base font-semibold text-gray-900 leading-snug">{displayName || "Sem título"}</h2>
               <div className="flex items-center gap-2 flex-shrink-0">
                 {diagLoading && <Loader2 className="w-4 h-4 text-gray-300 animate-spin" />}
                 {diagnostic && <GradeBadge grade={diagnostic.grade} />}
@@ -403,6 +460,15 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
                   ✏️ Editar na Shopee
                 </a>
               )}
+              <button
+                onClick={handleGenerateTitle}
+                disabled={generatingTitle}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-purple-300 text-purple-600 bg-purple-50 hover:bg-purple-100 disabled:opacity-50 transition font-medium">
+                {generatingTitle
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Sparkles className="w-3.5 h-3.5" />}
+                {generatingTitle ? "Gerando…" : "✨ Gerar Título"}
+              </button>
             </div>
           </div>
         </div>
@@ -481,10 +547,20 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Descrição</p>
           {!editingDesc && (
-            <button onClick={() => { setDescDraft(product.description || ""); setEditingDesc(true); }}
-              className="text-xs flex items-center gap-1 text-gray-400 hover:text-orange-500 transition">
-              ✏️ Editar
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleGenerateDesc}
+                disabled={generatingDesc}
+                className="text-xs flex items-center gap-1 text-purple-500 hover:text-purple-700 disabled:opacity-50 transition font-medium">
+                {generatingDesc ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                {generatingDesc ? "Gerando…" : "✨ Gerar com IA"}
+              </button>
+              <span className="text-gray-200">|</span>
+              <button onClick={() => { setDescDraft(product.description || ""); setEditingDesc(true); }}
+                className="text-xs flex items-center gap-1 text-gray-400 hover:text-orange-500 transition">
+                ✏️ Editar
+              </button>
+            </div>
           )}
         </div>
         {editingDesc ? (
@@ -644,6 +720,73 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
         className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50">
         <PlusCircle className="w-5 h-5" /> {savedVariations.length > 0 ? "Criar Nova Variação" : "Criar Variação de Anúncio"}
       </button>
+
+      {/* ── Modal de sugestão de título ─────────────────────────────────── */}
+      {titleSuggestion && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-500" /> Título Otimizado com IA
+              </h3>
+              <button onClick={() => setTitleSuggestion(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Titles to pick from */}
+            <div className="space-y-2">
+              {[titleSuggestion.optimizedTitle, ...titleSuggestion.alternatives].map((t, i) => (
+                <button
+                  key={i}
+                  onClick={() => setSelectedSuggestedTitle(t)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl border-2 text-sm transition ${
+                    selectedSuggestedTitle === t
+                      ? "border-purple-500 bg-purple-50 text-purple-900 font-medium"
+                      : "border-gray-200 hover:border-purple-300 text-gray-700"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="leading-snug">{t}</span>
+                    <span className={`text-xs flex-shrink-0 mt-0.5 font-mono ${t.length > 100 ? "text-red-500" : t.length >= 70 ? "text-green-600" : "text-amber-500"}`}>
+                      {t.length}ch
+                    </span>
+                  </div>
+                  {i === 0 && <span className="text-xs text-purple-500 font-semibold mt-0.5 block">✨ Principal</span>}
+                </button>
+              ))}
+            </div>
+
+            {/* Keywords */}
+            {titleSuggestion.keywords.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {titleSuggestion.keywords.map((kw, i) => (
+                  <span key={i} className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">{kw}</span>
+                ))}
+              </div>
+            )}
+
+            {/* Explanation */}
+            {titleSuggestion.explanation && (
+              <p className="text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-3">{titleSuggestion.explanation}</p>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setTitleSuggestion(null)}
+                className="flex-1 py-2.5 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition">
+                Cancelar
+              </button>
+              <button
+                onClick={handleApplyTitle}
+                disabled={applyingTitle || !selectedSuggestedTitle.trim()}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-purple-600 hover:bg-purple-700 text-white rounded-xl disabled:opacity-50 transition">
+                {applyingTitle ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {applyingTitle ? "Aplicando…" : "Aplicar Título"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Modal de publicação ──────────────────────────────────────────── */}
       {showPublishModal && (
