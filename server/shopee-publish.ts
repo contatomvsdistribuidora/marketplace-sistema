@@ -135,6 +135,24 @@ export async function getCategoryAttributes(
   return res?.attribute_list || [];
 }
 
+/**
+ * Search categories by keyword (used in the wizard's category search).
+ */
+export async function searchCategory(
+  accessToken: string,
+  shopId: number,
+  keyword: string,
+  language: string = "pt-BR"
+): Promise<ShopeeCategory[]> {
+  const res = await shopeeGet(
+    "/api/v2/product/search_category",
+    { keyword, language },
+    accessToken,
+    shopId
+  );
+  return res?.category_list || [];
+}
+
 // ============ LOGISTICS ============
 
 /**
@@ -456,6 +474,10 @@ export interface WizardPublishInput {
   }>;
   baseSku?: string;
   logisticIds?: number[];
+  attributes?: Array<{
+    attributeId: number;
+    attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
+  }>;
 }
 
 export interface PublishResult {
@@ -606,6 +628,7 @@ export async function publishProductFromWizard(
       ? { packageLength: firstVar.length, packageWidth: firstVar.width, packageHeight: firstVar.height }
       : undefined,
     logisticIds: input.logisticIds,
+    attributes: input.attributes,
   });
 
   // Step 3: Add tier variations when there are multiple options

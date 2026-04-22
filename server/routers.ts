@@ -1940,6 +1940,14 @@ export const appRouter = router({
         return shopeePublish.getCategoryAttributes(accessToken, shopId, input.categoryId);
       }),
 
+    // Search categories by keyword
+    searchCategory: protectedProcedure
+      .input(z.object({ accountId: z.number(), keyword: z.string().min(1) }))
+      .query(async ({ input }) => {
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+        return shopeePublish.searchCategory(accessToken, shopId, input.keyword);
+      }),
+
     // Get logistics channels
     getLogisticsChannels: protectedProcedure
       .input(z.object({ accountId: z.number() }))
@@ -2377,6 +2385,13 @@ export const appRouter = router({
         title: z.string().min(1).max(120),
         description: z.string(),
         hashtags: z.array(z.string()).optional(),
+        attributes: z.array(z.object({
+          attributeId: z.number(),
+          attributeValueList: z.array(z.object({
+            valueId: z.number(),
+            originalValueName: z.string().optional(),
+          })),
+        })).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = sharedDb;
@@ -2430,6 +2445,7 @@ export const appRouter = router({
           baseSku: sourceProduct.itemSku ?? undefined,
           variationTypeName: input.variationTypeName,
           variations: input.variations,
+          attributes: input.attributes,
         });
 
         console.log(`[Shopee Wizard] Published item ${result.itemId}: ${result.itemUrl}`);
