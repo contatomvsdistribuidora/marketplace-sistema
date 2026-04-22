@@ -429,6 +429,7 @@ export interface ProductToPublish {
   createKits?: boolean;
   kitQuantities?: number[];
   kitDiscounts?: number[];
+  kitBaseOptionName?: string; // label for the base (qty=1) option; defaults to "1 Unidade"
   // Logistics
   logisticIds?: number[];
   // Attributes
@@ -436,6 +437,25 @@ export interface ProductToPublish {
     attributeId: number;
     attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
   }>;
+}
+
+export interface WizardPublishInput {
+  title: string;
+  description: string;
+  categoryId: number;
+  imageUrls: string[];
+  variationTypeName: string;
+  variations: Array<{
+    label: string;
+    price: number;
+    stock: number;
+    weight: number;
+    length?: number;
+    width?: number;
+    height?: number;
+  }>;
+  baseSku?: string;
+  logisticIds?: number[];
 }
 
 export interface PublishResult {
@@ -491,6 +511,7 @@ export async function publishProduct(
         : undefined,
       logisticIds: product.logisticIds,
       attributes: product.attributes,
+      brand: product.brand ? { brandId: 0, originalBrandName: product.brand } : undefined,
     });
 
     // Step 3: Add kit variations if requested
@@ -498,7 +519,8 @@ export async function publishProduct(
     if (product.createKits && product.kitQuantities && product.kitQuantities.length > 0) {
       if (onProgress) onProgress("Criando variações de kit...");
       try {
-        const options: string[] = ["1 Unidade"];
+        const baseOptionName = product.kitBaseOptionName ?? "1 Unidade";
+        const options: string[] = [baseOptionName];
         const models: KitVariation["models"] = [
           { tierIndex: [0], price: product.price, stock: product.stock, sku: `${product.sku}-1UN` },
         ];
@@ -545,6 +567,64 @@ export async function publishProduct(
       error: e.message || "Erro desconhecido",
     };
   }
+}
+
+/**
+ * Publish a product created via the ShopeeCriador wizard.
+ * Handles image upload, product creation, and tier variation setup with
+ * correct labels, prices, stocks, and SKUs derived from the wizard input.
+ */
+export async function publishProductFromWizard(
+  accessToken: string,
+  shopId: number,
+  input: WizardPublishInput,
+  onProgress?: (step: string) => void
+): Promise<{ itemId: number; itemUrl: string; imagesUploaded: number }> {
+  // Step 1: Upload images
+  if (onProgress) onProgress("Enviando imagens...");
+  const imageIds = await uploadImages(accessToken, shopId, input.imageUrls);
+  if (imageIds.length === 0) {
+    throw new Error("Falha ao enviar imagens para a Shopee. Verifique se as URLs estão acessíveis.");
+  }
+
+  const firstVar = input.variations[0];
+  const baseSku = input.baseSku ?? "";
+
+  // Step 2: Create product using first variation's physical attributes as base
+  if (onProgress) onProgress("Criando produto...");
+  const { itemId } = await createProduct(accessToken, shopId, {
+    itemName: input.title.substring(0, 120),
+    description: input.description.substring(0, 5000),
+    categoryId: input.categoryId,
+    price: firstVar.price,
+    stock: input.variations.length === 1 ? firstVar.stock : 0,
+    weight: firstVar.weight,
+    imageIds,
+    sku: baseSku || undefined,
+    condition: "NEW",
+    dimension: firstVar.length && firstVar.width && firstVar.height
+      ? { packageLength: firstVar.length, packageWidth: firstVar.width, packageHeight: firstVar.height }
+      : undefined,
+    logisticIds: input.logisticIds,
+  });
+
+  // Step 3: Add tier variations when there are multiple options
+  if (input.variations.length > 1) {
+    if (onProgress) onProgress(`Adicionando ${input.variations.length} variações...`);
+    await initTierVariation(accessToken, shopId, itemId, {
+      name: input.variationTypeName,
+      options: input.variations.map((v) => v.label),
+      models: input.variations.map((v, i) => ({
+        tierIndex: [i],
+        price: v.price,
+        stock: v.stock,
+        sku: baseSku ? `${baseSku}-${i + 1}` : undefined,
+      })),
+    });
+  }
+
+  const itemUrl = `https://shopee.com.br/product/${shopId}/${itemId}`;
+  return { itemId, itemUrl, imagesUploaded: imageIds.length };
 }
 
 /**

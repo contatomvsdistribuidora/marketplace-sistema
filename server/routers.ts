@@ -2402,53 +2402,26 @@ export const appRouter = router({
         }
         if (imageUrls.length === 0) throw new Error("Produto base não possui imagens. Adicione imagens ao produto na Shopee e sincronize.");
 
-        // Upload images to Shopee media space
-        console.log(`[Shopee Wizard] Uploading ${imageUrls.length} image(s) for "${input.title}"...`);
-        const imageIds = await shopeePublish.uploadImages(accessToken, shopId, imageUrls);
-        if (imageIds.length === 0) throw new Error("Falha ao enviar imagens para a Shopee. Verifique se as URLs estão acessíveis.");
-
         // Build description with hashtags appended
         let fullDescription = input.description;
         if (input.hashtags && input.hashtags.length > 0) {
           fullDescription += "\n\n" + input.hashtags.slice(0, 20).join(" ");
         }
 
-        // Use first variation's data for product-level fields
-        const firstVar = input.variations[0];
-
-        console.log(`[Shopee Wizard] Creating product "${input.title}" (category ${categoryId})...`);
-        const { itemId } = await shopeePublish.createProduct(accessToken, shopId, {
-          itemName: input.title.substring(0, 120),
-          description: fullDescription.substring(0, 5000),
+        console.log(`[Shopee Wizard] Publishing "${input.title}" (${input.variations.length} variation(s), category ${categoryId})...`);
+        const result = await shopeePublish.publishProductFromWizard(accessToken, shopId, {
+          title: input.title,
+          description: fullDescription,
           categoryId,
-          price: firstVar.price,
-          stock: input.variations.length === 1 ? firstVar.stock : 0,
-          weight: firstVar.weight,
-          imageIds,
-          condition: "NEW",
-          dimension: firstVar.length && firstVar.width && firstVar.height
-            ? { packageLength: firstVar.length, packageWidth: firstVar.width, packageHeight: firstVar.height }
-            : undefined,
+          imageUrls,
           logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
+          baseSku: sourceProduct.itemSku ?? undefined,
+          variationTypeName: input.variationTypeName,
+          variations: input.variations,
         });
 
-        // Add tier variations when there are multiple options
-        if (input.variations.length > 1) {
-          console.log(`[Shopee Wizard] Adding ${input.variations.length} tier variations to item ${itemId}...`);
-          await shopeePublish.initTierVariation(accessToken, shopId, itemId, {
-            name: input.variationTypeName,
-            options: input.variations.map((v) => v.label),
-            models: input.variations.map((v, i) => ({
-              tierIndex: [i],
-              price: v.price,
-              stock: v.stock,
-            })),
-          });
-        }
-
-        const itemUrl = `https://shopee.com.br/product/${shopId}/${itemId}`;
-        console.log(`[Shopee Wizard] Published item ${itemId}: ${itemUrl}`);
-        return { success: true, itemId, itemUrl, shopId };
+        console.log(`[Shopee Wizard] Published item ${result.itemId}: ${result.itemUrl}`);
+        return { success: true, itemId: result.itemId, itemUrl: result.itemUrl, shopId };
       }),
   }),
 });
