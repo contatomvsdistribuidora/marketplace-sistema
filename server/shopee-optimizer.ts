@@ -15,6 +15,7 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { shopeeProducts, shopeeAccounts } from "../drizzle/schema";
 import { invokeLLM, type InvokeResult } from "./_core/llm";
+import { loadAiProviderFromDb } from "./lib/ai-provider";
 import { getValidToken, updateItemFields } from "./shopee";
 
 function getDb() {
@@ -260,6 +261,7 @@ export async function optimizeTitle(
   description: string,
   category?: string
 ): Promise<{ optimizedTitle: string; alternatives: string[]; keywords: string[]; explanation: string }> {
+  await loadAiProviderFromDb();
   const response = await invokeLLM({
     messages: [
       {
@@ -322,6 +324,7 @@ export async function optimizeDescription(
   currentDescription: string,
   category?: string
 ): Promise<{ optimizedDescription: string; wordCount: number; explanation: string }> {
+  await loadAiProviderFromDb();
   const response = await invokeLLM({
     messages: [
       {
@@ -394,6 +397,7 @@ export async function getOptimizationSuggestions(product: any): Promise<{
     impact: "alto" | "médio" | "baixo";
   }>;
 }> {
+  await loadAiProviderFromDb();
   const diagnostic = calculateQualityScore(product);
 
   const response = await invokeLLM({
@@ -912,11 +916,13 @@ export async function generateAdContent(params: {
   variationType: string;
   variations: Array<{ label: string; qty: number; weight: string; dimensions: string; price: string }>;
 }): Promise<AdContent> {
+  await loadAiProviderFromDb();
   const variationsText = params.variations
     .map(v => `- ${v.label}: ${v.qty}un | Peso: ${v.weight}kg | Dimensões: ${v.dimensions}cm | Preço: R$${v.price}`)
     .join("\n");
 
   const response = await invokeLLM({
+    maxTokens: 4096,
     messages: [
       {
         role: "user",

@@ -296,7 +296,7 @@ const invokeGroq = async (params: InvokeParams): Promise<InvokeResult> => {
   const payload: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
     model: "llama-3.3-70b-versatile",
     messages: messages.map(normalizeMessage) as OpenAI.Chat.ChatCompletionMessageParam[],
-    max_tokens: 500,
+    max_tokens: maxTokens || max_tokens || 4096,
   };
 
   if (tools && tools.length > 0) payload.tools = tools as OpenAI.Chat.ChatCompletionTool[];
