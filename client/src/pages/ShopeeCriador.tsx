@@ -41,6 +41,29 @@ function emptyOption(label = ""): VariationOption {
   return { id: uid(), label, weight: "", length: "", width: "", height: "", price: "", stock: "" };
 }
 
+// Abrevia nomes longos de variação para caber em 20 chars
+function truncateVariationName(name: string): string {
+  const abbrevs: [RegExp, string][] = [
+    [/\bUnidades\b/gi, "Un."],
+    [/\bUnidade\b/gi,  "Un."],
+    [/\bquadrado\b/gi, "quad."],
+    [/\bRedondo\b/gi,  "red."],
+    [/\bRetangular\b/gi, "ret."],
+    [/\bMililitros\b/gi, "ml"],
+    [/\bLitros\b/gi,   "L"],
+    [/\bGramas\b/gi,   "g"],
+    [/\bKilograma[s]?\b/gi, "kg"],
+    [/\bcentímetros\b/gi, "cm"],
+    [/\s+de\s+/gi, " "],
+    [/\s+com\s+/gi, " c/"],
+    [/\s+para\s+/gi, " p/"],
+  ];
+  let r = name;
+  for (const [pat, rep] of abbrevs) r = r.replace(pat, rep);
+  r = r.replace(/\s+/g, " ").trim();
+  return r.slice(0, 20);
+}
+
 const VARIATION_TYPES: { type: VariationType; label: string; icon: React.ReactNode; examples: string }[] = [
   { type: "quantidade",    label: "Quantidade",    icon: <Hash className="w-5 h-5" />,    examples: "50un, 100un, 200un" },
   { type: "tamanho",       label: "Tamanho",       icon: <Ruler className="w-5 h-5" />,   examples: "P, M, G ou 10L, 50L" },
@@ -208,10 +231,51 @@ export default function ShopeeCriador() {
 function ProductDetail({ product, accountId, onBack }: { product: any; accountId: number; onBack: () => void }) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [savedVariations, setSavedVariations] = useState<VariationGroup[]>([]);
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [publishModalStatus, setPublishModalStatus] = useState<"idle"|"loading"|"success"|"error">("idle");
+  const [publishModalResult, setPublishModalResult] = useState<{ itemId: number; itemUrl: string } | null>(null);
+  const [publishModalError, setPublishModalError] = useState("");
+
+  const detailPublishMutation = trpc.shopee.createProductFromWizard.useMutation();
 
   function handleSaveVariation(group: VariationGroup) {
     setSavedVariations(v => [...v, group]);
     setWizardOpen(false);
+  }
+
+  async function handlePublishFromDetail() {
+    if (savedVariations.length === 0) return;
+    const group = savedVariations[savedVariations.length - 1]; // usa a última criada
+    const variations = group.options
+      .map(o => ({
+        label:  o.label,
+        price:  Math.max(parseFloat(o.price) || 0.01, 0.01),
+        stock:  Math.max(parseInt(o.stock || "0", 10), 0),
+        weight: Math.max(parseFloat(o.weight) || 0.1, 0.01),
+        length: parseFloat(o.length) > 0 ? parseFloat(o.length) : undefined,
+        width:  parseFloat(o.width)  > 0 ? parseFloat(o.width)  : undefined,
+        height: parseFloat(o.height) > 0 ? parseFloat(o.height) : undefined,
+      }))
+      .filter(v => v.price > 0);
+    if (variations.length === 0) return;
+    setPublishModalStatus("loading");
+    setPublishModalError("");
+    try {
+      const result = await detailPublishMutation.mutateAsync({
+        accountId,
+        sourceProductId: product.id,
+        variationTypeName: group.typeName,
+        variations,
+        title: product.itemName || "",
+        description: product.description || "",
+        hashtags: [],
+      });
+      setPublishModalResult({ itemId: result.itemId, itemUrl: result.itemUrl });
+      setPublishModalStatus("success");
+    } catch (e: any) {
+      setPublishModalError(e.message || "Erro desconhecido ao publicar");
+      setPublishModalStatus("error");
+    }
   }
 
   return (
@@ -285,13 +349,110 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
         </div>
       )}
 
-      {/* Botão principal */}
+      {/* Botão Publicar na Shopee (só aparece quando há variações salvas) */}
+      {savedVariations.length > 0 && (
+        <button
+          onClick={() => { setShowPublishModal(true); setPublishModalStatus("idle"); setPublishModalResult(null); }}
+          className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-base transition shadow-md shadow-orange-200 mb-3"
+        >
+          🚀 Publicar na Shopee
+        </button>
+      )}
+
+      {/* Botão criar variação */}
       <button
         onClick={() => setWizardOpen(true)}
-        className="w-full flex items-center justify-center gap-3 py-5 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-lg transition shadow-md shadow-orange-200 mb-4"
+        className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50 mb-4"
       >
-        <PlusCircle className="w-6 h-6" /> Criar Variação de Anúncio
+        <PlusCircle className="w-5 h-5" /> {savedVariations.length > 0 ? "Criar Nova Variação" : "Criar Variação de Anúncio"}
       </button>
+
+      {/* Modal de publicação */}
+      {showPublishModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-base font-bold text-gray-900">🚀 Publicar na Shopee</h3>
+              <button onClick={() => setShowPublishModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {publishModalStatus !== "success" && (
+              <div className="space-y-3 mb-5">
+                <div className="bg-orange-50 border border-orange-100 rounded-xl p-3">
+                  <p className="text-xs text-gray-500 mb-0.5">Produto</p>
+                  <p className="text-sm font-semibold text-gray-800 truncate">{product.itemName || "Sem título"}</p>
+                </div>
+                {savedVariations.length > 0 && (() => {
+                  const group = savedVariations[savedVariations.length - 1];
+                  return (
+                    <div className="bg-orange-50 border border-orange-100 rounded-xl p-3">
+                      <p className="text-xs text-gray-500 mb-0.5">Variações ({group.typeName})</p>
+                      <p className="text-sm font-semibold text-gray-800 mb-2">{group.options.length} opção(ões)</p>
+                      <div className="flex flex-wrap gap-1">
+                        {group.options.slice(0, 5).map(o => (
+                          <span key={o.id} className="px-2 py-0.5 bg-white border border-orange-200 rounded-full text-xs text-orange-700">
+                            {o.label}{o.price ? ` · R$${o.price}` : ""}
+                          </span>
+                        ))}
+                        {group.options.length > 5 && (
+                          <span className="text-xs text-gray-400">+{group.options.length - 5} mais</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+                <p className="text-xs text-gray-400 text-center">
+                  O título e descrição do produto atual serão usados. Gere conteúdo com IA no wizard para personalizar.
+                </p>
+              </div>
+            )}
+
+            {publishModalStatus === "error" && (
+              <div className="bg-red-50 border border-red-300 rounded-xl p-3 mb-4 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-red-800">
+                  <p className="font-semibold">Erro ao publicar</p>
+                  <p className="mt-0.5 text-red-700 text-xs">{publishModalError}</p>
+                </div>
+              </div>
+            )}
+
+            {publishModalStatus === "success" && publishModalResult && (
+              <div className="bg-green-50 border border-green-300 rounded-xl p-5 mb-4 text-center">
+                <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
+                <p className="font-bold text-green-800 text-base">Produto publicado!</p>
+                <a href={publishModalResult.itemUrl} target="_blank" rel="noopener noreferrer"
+                  className="text-green-700 underline flex items-center justify-center gap-1 mt-2 text-sm hover:text-green-900">
+                  Ver produto na Shopee <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            )}
+
+            {publishModalStatus !== "success" ? (
+              <div className="flex gap-3">
+                <button onClick={() => setShowPublishModal(false)}
+                  className="flex-1 py-2.5 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition">
+                  Cancelar
+                </button>
+                <button
+                  onClick={handlePublishFromDetail}
+                  disabled={publishModalStatus === "loading"}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-xl disabled:opacity-50 transition">
+                  {publishModalStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : "🚀"}
+                  {publishModalStatus === "loading" ? "Publicando..." : "Confirmar e Publicar"}
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setShowPublishModal(false)}
+                className="w-full py-2.5 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-xl transition">
+                Fechar
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {wizardOpen && (
         <VariationWizard
@@ -341,6 +502,7 @@ interface ComputedPricing {
   width: number;
   height: number;
   factor: number;
+  effectiveDisc: number;
   minMarginAdjusted: boolean;
 }
 
@@ -437,6 +599,7 @@ function VariationWizard({
   const [baseWidthOverride, setBaseWidthOverride]   = useState<string>("");
   const [baseHeightOverride, setBaseHeightOverride] = useState<string>("");
   const [inlinePriceEdits, setInlinePriceEdits]     = useState<Record<string, string>>({});
+  const [inlineLabelEdits, setInlineLabelEdits]     = useState<Record<string, string>>({});
 
   const [pricing, setPricing] = useState<PricingGlobals>({
     unitCost: "",
@@ -461,7 +624,8 @@ function VariationWizard({
   const [publishError, setPublishError]   = useState<string>("");
 
   const [adContent, setAdContent]       = useState<any>(null);
-  const [adLoading, setAdLoading]       = useState(false);
+  const [adLoadingSection, setAdLoadingSection] = useState<"all"|"title"|"desc"|"tags"|null>(null);
+  const adLoading = adLoadingSection === "all";
   const [adTab, setAdTab]               = useState<"titulo"|"descricao"|"tags"|"keywords"|"score">("titulo");
   const [selectedTitle, setSelectedTitle] = useState<string>("");
   const [editingDesc, setEditingDesc]   = useState(false);
@@ -492,7 +656,8 @@ function VariationWizard({
     const autoDiscount   = (idx + 1) * (parseFloat(pricing.defaultDiscount) || 0);
     const hasQtyFactor   = qtyFactors[idx] !== undefined && qtyFactors[idx] !== "";
     const effectiveDisc  = hasQtyFactor ? (parseFloat(qtyFactors[idx]) || 0) : autoDiscount;
-    const factor         = pricingMode === "multiplier" ? Math.max(1 - effectiveDisc / 100, 0.01) : 1;
+    // factor aplica em TODOS os modos como desconto sobre o preço final
+    const factor         = Math.max(1 - effectiveDisc / 100, 0.01);
     const totalProductCost = unitCost * qty;
 
     // Effective per-variation param (override or global)
@@ -502,7 +667,7 @@ function VariationWizard({
     let price = 0;
     if (pricingMode === "multiplier") {
       const multiplier = parseFloat(paramOverride || pricing.marginMultiplier) || 1;
-      price = totalProductCost * multiplier * factor;
+      price = totalProductCost * multiplier;
     } else if (pricingMode === "margin") {
       const desiredMarginPct = parseFloat(paramOverride || pricing.desiredMargin) || 0;
       price = solvePriceByMargin(totalProductCost, packaging, shipping, txFee, desiredMarginPct);
@@ -511,7 +676,7 @@ function VariationWizard({
       price = solvePriceByMinProfit(totalProductCost, packaging, shipping, txFee, minProfit);
     }
 
-    // Aplica margem mínima desejada (piso)
+    // Aplica margem mínima desejada (piso) sobre o preço base
     let minMarginAdjusted = false;
     const minMarginFloor = parseFloat(pricing.minMarginPct) || 0;
     if (minMarginFloor > 0 && price > 0 && totalProductCost > 0) {
@@ -524,10 +689,13 @@ function VariationWizard({
       }
     }
 
-    // Aplica teto de 4× Shopee se definido
+    // Aplica teto de 4× Shopee se definido (anula desconto progressivo nesse caso)
     if (priceOverrides[idx] != null) {
       price = priceOverrides[idx]!;
       minMarginAdjusted = false;
+    } else {
+      // Aplica desconto progressivo sobre o preço final
+      price = Math.max(price * factor, 0.01);
     }
 
     const { rate: commissionRate, fixed: commissionFixed } = shopeeCommission(price);
@@ -553,7 +721,7 @@ function VariationWizard({
       height = parseFloat((baseH * scaleF).toFixed(1));
     }
 
-    return { qty, price, totalProductCost, platformCost, commissionRate, commissionFixed, marginContribution, profitPct, weight, length, width, height, factor, minMarginAdjusted };
+    return { qty, price, totalProductCost, platformCost, commissionRate, commissionFixed, marginContribution, profitPct, weight, length, width, height, factor, effectiveDisc, minMarginAdjusted };
   }
 
   function profitBadge(pct: number) {
@@ -691,7 +859,7 @@ function VariationWizard({
           return isNaN(n) ? l : `${n} Unidades de ${baseName}`;
         })
       : filled;
-    const opts = transformed.map(label => emptyOption(label.slice(0, 20)));
+    const opts = transformed.map(label => emptyOption(truncateVariationName(label)));
     setOptionDetails(opts);
     setQtyFactors(opts.map(() => ""));
     setPerVarParam(opts.map(() => ""));
@@ -731,8 +899,8 @@ function VariationWizard({
   }
 
   // ── Etapa D ──
-  async function generateAdContent() {
-    setAdLoading(true);
+  async function generateAdSection(section: "all"|"title"|"desc"|"tags") {
+    setAdLoadingSection(section);
     try {
       const variations = optionDetails.map((opt, idx) => {
         const c = computePricing(opt, idx);
@@ -750,15 +918,39 @@ function VariationWizard({
         variationType: typeName,
         variations,
       });
-      setAdContent(result);
-      setAdTab("titulo");
-      setSelectedTitle(result.titulo_principal || "");
-      setEditedDesc(result.descricao || "");
-      setEditingDesc(false);
+      if (section === "all" || section === "title") {
+        setAdContent((prev: any) => prev
+          ? { ...prev, titulo_principal: result.titulo_principal, titulos_alternativos: result.titulos_alternativos }
+          : result);
+        setSelectedTitle(result.titulo_principal || "");
+        if (section === "all") setAdTab("titulo");
+      }
+      if (section === "all" || section === "desc") {
+        setAdContent((prev: any) => prev
+          ? { ...prev, descricao: result.descricao }
+          : result);
+        setEditedDesc(result.descricao || "");
+        setEditingDesc(false);
+        if (section === "desc") setAdTab("descricao");
+      }
+      if (section === "all" || section === "tags") {
+        setAdContent((prev: any) => prev
+          ? { ...prev, hashtags: result.hashtags, tags_seo: result.tags_seo, keywords_principais: result.keywords_principais, score: result.score }
+          : result);
+        if (section === "tags") setAdTab("tags");
+      }
+      // Para "all", inicializa tudo do resultado
+      if (section === "all" && !adContent) {
+        setAdContent(result);
+        setSelectedTitle(result.titulo_principal || "");
+        setEditedDesc(result.descricao || "");
+        setEditingDesc(false);
+        setAdTab("titulo");
+      }
     } catch {
       // erro silencioso — usuário pode tentar novamente
     } finally {
-      setAdLoading(false);
+      setAdLoadingSection(null);
     }
   }
 
@@ -767,6 +959,7 @@ function VariationWizard({
       const c = computePricing(o, i);
       return {
         ...o,
+        label:  inlineLabelEdits[o.id] ?? o.label,
         weight: o.weight || c.weight.toFixed(2),
         length: o.length || c.length.toFixed(1),
         width:  o.width  || c.width.toFixed(1),
@@ -786,7 +979,7 @@ function VariationWizard({
       const rawWidth  = o.width  || c.width.toFixed(1);
       const rawHeight = o.height || c.height.toFixed(1);
       return {
-        label:  o.label,
+        label:  inlineLabelEdits[o.id] ?? o.label,
         price:  Math.max(parseFloat(rawPrice)  || 0, 0.01),
         stock:  Math.max(parseInt(o.stock || "0", 10), 0),
         weight: Math.max(parseFloat(rawWeight) || 0.1, 0.01),
@@ -837,6 +1030,7 @@ function VariationWizard({
     setPerVarEnabled(e => e.filter((_, i) => i !== idx));
     setPriceOverrides(p => p.filter((_, i) => i !== idx));
     setInlinePriceEdits(edits => { const n = { ...edits }; delete n[id]; return n; });
+    setInlineLabelEdits(edits => { const n = { ...edits }; delete n[id]; return n; });
   }
 
   const rangeAlert   = step === "C" ? priceRangeAlert() : null;
@@ -1252,6 +1446,11 @@ function VariationWizard({
                         )}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        {c.effectiveDisc > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                            -{c.effectiveDisc.toFixed(1)}%
+                          </span>
+                        )}
                         {hasPricing && isNeg && (
                           <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white border border-red-700 animate-pulse">
                             PREJUÍZO
@@ -1419,11 +1618,44 @@ function VariationWizard({
                     const badge = profitBadge(c.profitPct);
                     return (
                       <div key={opt.id} className="bg-white rounded-lg border border-orange-100 p-2.5">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-semibold text-gray-800 truncate mr-2">
-                            <span className="text-orange-500">{idx + 1}.</span> {opt.label}
-                          </p>
-                          <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex items-start justify-between gap-2">
+                          {/* Label editável inline */}
+                          <div className="flex-1 min-w-0">
+                            {inlineLabelEdits[opt.id] !== undefined ? (
+                              <div className="flex items-center gap-1">
+                                <span className="text-orange-500 text-sm font-bold flex-shrink-0">{idx + 1}.</span>
+                                <input
+                                  type="text" maxLength={20}
+                                  value={inlineLabelEdits[opt.id]}
+                                  onChange={e => setInlineLabelEdits(p => ({ ...p, [opt.id]: e.target.value.slice(0, 20) }))}
+                                  onBlur={() => {
+                                    const v = inlineLabelEdits[opt.id].trim();
+                                    if (v) setOptionDetails(opts => opts.map(o => o.id === opt.id ? { ...o, label: v } : o));
+                                    setInlineLabelEdits(p => { const n = { ...p }; delete n[opt.id]; return n; });
+                                  }}
+                                  onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                  className="flex-1 min-w-0 text-sm font-semibold text-gray-800 border border-orange-400 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                  autoFocus
+                                />
+                                <span className="text-xs text-gray-400 font-mono">{inlineLabelEdits[opt.id].length}/20</span>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setInlineLabelEdits(p => ({ ...p, [opt.id]: opt.label }))}
+                                className="text-sm font-semibold text-gray-800 hover:text-orange-600 text-left truncate w-full"
+                                title="Clique para editar o nome"
+                              >
+                                <span className="text-orange-500">{idx + 1}.</span> {opt.label}
+                                <span className="ml-1 text-gray-300 text-xs">✏️</span>
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {c.effectiveDisc > 0 && (
+                              <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-semibold">
+                                -{c.effectiveDisc.toFixed(1)}%
+                              </span>
+                            )}
                             {hasPricing && (
                               <>
                                 {inlinePriceEdits[opt.id] !== undefined ? (
@@ -1460,7 +1692,7 @@ function VariationWizard({
                             </button>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-400">
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs text-gray-400">
                           <span>{opt.weight || c.weight.toFixed(2)} kg</span>
                           <span>{opt.length || c.length.toFixed(1)}×{opt.width || c.width.toFixed(1)}×{opt.height || c.height.toFixed(1)} cm</span>
                           {opt.stock && <span>Estoque: {opt.stock}</span>}
@@ -1472,17 +1704,32 @@ function VariationWizard({
                 </div>
               </div>
 
-              {/* Botão principal de geração */}
-              {!adContent && !adLoading && (
+              {/* Botões de geração IA */}
+              {!adContent && adLoadingSection === null && (
                 <div className="space-y-2">
-                  <button onClick={generateAdContent}
-                    className="w-full flex items-center justify-center gap-3 py-5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold text-base transition shadow-lg shadow-orange-200">
-                    <Sparkles className="w-6 h-6" /> ✨ Gerar Conteúdo do Anúncio com IA
+                  {/* Botão principal */}
+                  <button onClick={() => generateAdSection("all")}
+                    className="w-full flex items-center justify-center gap-3 py-4 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold text-base transition shadow-lg shadow-orange-200">
+                    <Sparkles className="w-5 h-5" /> ✨ Gerar Tudo com IA
                   </button>
+                  {/* Botões individuais */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { key: "title" as const, label: "✨ Gerar Título" },
+                      { key: "desc"  as const, label: "✨ Gerar Descrição" },
+                      { key: "tags"  as const, label: "✨ Gerar Tags" },
+                    ].map(b => (
+                      <button key={b.key} onClick={() => generateAdSection(b.key)}
+                        className="flex items-center justify-center gap-1 py-2 rounded-xl border border-orange-300 text-orange-600 bg-orange-50 hover:bg-orange-100 text-xs font-semibold transition">
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Publicar sem IA */}
                   <button
                     onClick={handlePublishToShopee}
                     disabled={publishStatus === "loading" || optionDetails.length === 0}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 text-sm font-semibold transition">
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 text-sm font-semibold transition">
                     {publishStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                     {publishStatus === "loading" ? "Publicando..." : "Publicar sem conteúdo IA"}
                   </button>
@@ -1512,16 +1759,22 @@ function VariationWizard({
               )}
 
               {/* Loading */}
-              {adLoading && (
+              {adLoadingSection === "all" && (
                 <div className="flex flex-col items-center justify-center py-12 gap-4 bg-orange-50 border border-orange-100 rounded-xl">
                   <Loader2 className="w-10 h-10 text-orange-500 animate-spin" />
                   <p className="text-sm font-semibold text-orange-700">✨ A IA está criando seu anúncio profissional...</p>
                   <p className="text-xs text-gray-400">Analisando produto e variações, aguarde alguns segundos</p>
                 </div>
               )}
+              {adLoadingSection !== null && adLoadingSection !== "all" && (
+                <div className="flex items-center justify-center gap-2 py-3 bg-orange-50 border border-orange-100 rounded-xl text-sm text-orange-700 font-medium">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Gerando {adLoadingSection === "title" ? "título" : adLoadingSection === "desc" ? "descrição" : "tags"}...
+                </div>
+              )}
 
               {/* Erro */}
-              {generateAdMutation.isError && !adLoading && (
+              {generateAdMutation.isError && adLoadingSection === null && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                   Erro ao gerar conteúdo. Tente novamente.
@@ -1529,7 +1782,7 @@ function VariationWizard({
               )}
 
               {/* Conteúdo gerado */}
-              {adContent && !adLoading && (
+              {adContent && adLoadingSection !== "all" && (
                 <div className="space-y-3">
 
                   {/* Abas */}
@@ -1720,20 +1973,40 @@ function VariationWizard({
                   })()}
 
                   {/* Botões globais */}
-                  <div className="flex gap-2 pt-1">
-                    <button onClick={generateAdContent}
-                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-orange-300 text-orange-600 text-sm font-semibold hover:bg-orange-50 transition">
-                      🔄 Regenerar tudo
-                    </button>
-                    <button
-                      onClick={handlePublishToShopee}
-                      disabled={publishStatus === "loading" || optionDetails.length === 0}
-                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition">
-                      {publishStatus === "loading"
-                        ? <Loader2 className="w-4 h-4 animate-spin" />
-                        : <CheckCircle2 className="w-4 h-4" />}
-                      {publishStatus === "loading" ? "Publicando..." : "Confirmar e Publicar"}
-                    </button>
+                  <div className="space-y-2 pt-1">
+                    {/* Regenerar por seção */}
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([
+                        { key: "title" as const, label: "✨ Título" },
+                        { key: "desc"  as const, label: "✨ Descrição" },
+                        { key: "tags"  as const, label: "✨ Tags" },
+                      ]).map(b => (
+                        <button key={b.key}
+                          onClick={() => generateAdSection(b.key)}
+                          disabled={adLoadingSection !== null}
+                          className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-orange-200 text-orange-600 bg-orange-50 hover:bg-orange-100 text-xs font-semibold disabled:opacity-50 transition">
+                          {adLoadingSection === b.key ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                          {b.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => generateAdSection("all")}
+                        disabled={adLoadingSection !== null}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-orange-300 text-orange-600 text-sm font-semibold hover:bg-orange-50 disabled:opacity-50 transition">
+                        {adLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                        🔄 Regenerar tudo
+                      </button>
+                      <button
+                        onClick={handlePublishToShopee}
+                        disabled={publishStatus === "loading" || optionDetails.length === 0}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition">
+                        {publishStatus === "loading"
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <CheckCircle2 className="w-4 h-4" />}
+                        {publishStatus === "loading" ? "Publicando..." : "Confirmar e Publicar"}
+                      </button>
+                    </div>
                   </div>
                   {publishStatus === "success" && publishResult && (
                     <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
