@@ -352,9 +352,9 @@ export async function createProduct(
   // Dimensions
   if (input.dimension) {
     body.dimension = {
-      package_length: input.dimension.packageLength,
-      package_width: input.dimension.packageWidth,
-      package_height: input.dimension.packageHeight,
+      package_length: Math.round(input.dimension.packageLength),
+      package_width: Math.round(input.dimension.packageWidth),
+      package_height: Math.round(input.dimension.packageHeight),
     };
   }
 

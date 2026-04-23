@@ -551,24 +551,30 @@ function VariationWizard({
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {[
-                      { field: "weight" as const, label: "Peso (kg)", placeholder: "0.50", step: "0.01" },
-                      { field: "length" as const, label: "Comprimento (cm)", placeholder: "20", step: "0.1" },
-                      { field: "width"  as const, label: "Largura (cm)",     placeholder: "15", step: "0.1" },
-                      { field: "height" as const, label: "Altura (cm)",      placeholder: "10", step: "0.1" },
-                      { field: "price"  as const, label: "Preço (R$)",       placeholder: "0.00", step: "0.01" },
-                      { field: "stock"  as const, label: "Estoque",          placeholder: "0", step: "1" },
-                    ].map(({ field, label, placeholder, step: stepVal }) => (
+                      { field: "weight" as const, label: "Peso (kg)",         placeholder: "0.50", step: "0.01", integer: false },
+                      { field: "length" as const, label: "Comprimento (cm)",  placeholder: "20",   step: "1",    integer: true  },
+                      { field: "width"  as const, label: "Largura (cm)",      placeholder: "15",   step: "1",    integer: true  },
+                      { field: "height" as const, label: "Altura (cm)",       placeholder: "10",   step: "1",    integer: true  },
+                      { field: "price"  as const, label: "Preço (R$)",        placeholder: "0.00", step: "0.01", integer: false },
+                      { field: "stock"  as const, label: "Estoque",           placeholder: "0",    step: "1",    integer: false },
+                    ].map(({ field, label, placeholder, step: stepVal, integer }) => (
                       <div key={field}>
                         <label className="block text-xs text-gray-500 mb-1">{label}</label>
                         <input
                           type="number"
-                          min="0"
+                          min={integer ? "1" : "0"}
                           step={stepVal}
                           placeholder={placeholder}
                           value={(opt as any)[field]}
-                          onChange={e => updateDetail(opt.id, field, e.target.value)}
+                          onKeyDown={integer ? (e) => { if (e.key === "." || e.key === ",") e.preventDefault(); } : undefined}
+                          onChange={e => {
+                            let v = e.target.value;
+                            if (integer && v !== "") v = String(Math.floor(Number(v) || 0));
+                            updateDetail(opt.id, field, v);
+                          }}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                         />
+                        {integer && <p className="text-[10px] text-gray-400 mt-0.5">Apenas números inteiros (cm)</p>}
                       </div>
                     ))}
                   </div>
