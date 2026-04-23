@@ -66,6 +66,40 @@ async function startServer() {
       });
     }
   });
+  // TEMP: expose shopee access_token (masked in body, full in stdout) for local testing.
+  // Gated: dev mode OR x-debug-secret header equal to DEBUG_SECRET env.
+  app.get("/api/debug-token", async (req, res) => {
+    const isDev = process.env.NODE_ENV !== "production";
+    const debugSecret = process.env.DEBUG_SECRET;
+    const providedSecret = req.header("x-debug-secret");
+    const secretOk = !!debugSecret && providedSecret === debugSecret;
+    if (!isDev && !secretOk) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    try {
+      const { pool } = await import("../db");
+      const [rows] = await pool.query(
+        "SELECT shopId, shopName, accessToken, tokenExpiresAt FROM shopee_accounts WHERE shopId = ? LIMIT 1",
+        [1311085163],
+      );
+      const row = (rows as any[])[0];
+      if (!row) return res.status(404).json({ error: "shop_not_found", shop_id: 1311085163 });
+      const token: string = row.accessToken;
+      const expiresAt: Date = row.tokenExpiresAt instanceof Date ? row.tokenExpiresAt : new Date(row.tokenExpiresAt);
+      process.stdout.write(`DEBUG_TOKEN_FOR_TEST: ${token}\n`);
+      return res.json({
+        shop_id: Number(row.shopId),
+        shop_name: row.shopName,
+        access_token_first_12_chars: token.slice(0, 12),
+        access_token_last_4_chars: token.slice(-4),
+        token_expires_at: expiresAt.toISOString(),
+        token_valid: expiresAt.getTime() > Date.now(),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message, code: err.code });
+    }
+  });
+
   // Shopee signature debug endpoint
   app.get("/api/debug-shopee", (req, res) => {
     const partnerId = process.env.SHOPEE_PARTNER_ID;

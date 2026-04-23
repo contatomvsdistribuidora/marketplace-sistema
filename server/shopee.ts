@@ -23,7 +23,7 @@ const SHOPEE_AUTH_BASE = "https://partner.shopeemobile.com";
  * Generate HMAC-SHA256 signature for Shopee API requests.
  * Shopee requires: partner_id + api_path + timestamp + access_token + shop_id
  */
-function generateSignature(
+export function generateSignature(
   path: string,
   timestamp: number,
   accessToken?: string,
