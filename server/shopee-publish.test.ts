@@ -158,7 +158,7 @@ describe("Shopee Publish Module", () => {
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body.item_name).toBe("Produto Teste");
       expect(body.original_price).toBe(29.9);
-      expect(body.normal_stock).toBe(100);
+      expect(body.seller_stock).toEqual([{ stock: 100 }]);
       expect(body.category_id).toBe(100001);
       expect(body.image.image_id_list).toEqual(["img_id_1", "img_id_2"]);
     });

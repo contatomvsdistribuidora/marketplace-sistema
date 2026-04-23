@@ -339,7 +339,7 @@ export async function createProduct(
     item_name: input.itemName.substring(0, 120), // Shopee max 120 chars
     description: input.description.substring(0, 5000), // Shopee max 5000 chars
     original_price: input.price,
-    normal_stock: input.stock,
+    seller_stock: [{ stock: input.stock }],
     weight: input.weight,
     category_id: input.categoryId,
     image: {
@@ -433,7 +433,7 @@ export async function initTierVariation(
     ],
     model: variation.models.map((m) => ({
       tier_index: m.tierIndex,
-      normal_stock: m.stock,
+      seller_stock: [{ stock: m.stock }],
       original_price: m.price,
       ...(m.sku ? { model_sku: m.sku } : {}),
     })),
