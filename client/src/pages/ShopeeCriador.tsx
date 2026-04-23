@@ -1992,6 +1992,8 @@ function VariationWizard({
                         const isEmpty = !current || current.originalValue.trim() === "";
                         const border  = attr.is_mandatory && isEmpty ? "border-orange-400" : "border-gray-200";
                         const bg      = attr.is_mandatory && isEmpty ? "bg-orange-50"      : "bg-white";
+                        const values: Array<{ value_id: number; display_value_name: string; original_value_name?: string }> =
+                          (attr.attribute_value_list as any) ?? (attr as any).options_list ?? [];
 
                         return (
                           <div key={attr.attribute_id} className="space-y-1">
@@ -1999,11 +2001,18 @@ function VariationWizard({
                               {attr.display_attribute_name}
                               {attr.is_mandatory && <span className="text-orange-500 ml-0.5">*</span>}
                             </label>
-                            {attr.input_type === "DROP_DOWN" ? (
+                            {attr.input_type === "BRAND" ? (
+                              <input
+                                type="text"
+                                readOnly
+                                value={values[0]?.display_value_name ?? values[0]?.original_value_name ?? ""}
+                                className={`w-full text-xs rounded-lg border ${border} bg-gray-50 px-2 py-1.5 text-gray-600`}
+                              />
+                            ) : attr.input_type === "DROP_DOWN" ? (
                               <select
                                 value={current?.valueId ?? ""}
                                 onChange={e => {
-                                  const opt = attr.attribute_value_list.find(o => o.value_id === Number(e.target.value));
+                                  const opt = values.find(o => o.value_id === Number(e.target.value));
                                   if (opt) {
                                     setAttributeValues(prev => ({ ...prev, [attr.attribute_id]: { valueId: opt.value_id, originalValue: opt.display_value_name } }));
                                   } else {
@@ -2013,7 +2022,7 @@ function VariationWizard({
                                 className={`w-full text-xs rounded-lg border ${border} ${bg} px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
                               >
                                 <option value="">Selecionar…</option>
-                                {attr.attribute_value_list.map(o => (
+                                {values.map(o => (
                                   <option key={o.value_id} value={o.value_id}>{o.display_value_name}</option>
                                 ))}
                               </select>
@@ -2384,6 +2393,8 @@ function VariationWizard({
                         const isEmpty = !current || current.originalValue.trim() === "";
                         const isMandatory = attr.is_mandatory;
                         const borderClass = isMandatory && isEmpty ? "border-red-400" : "border-gray-200";
+                        const values: Array<{ value_id: number; display_value_name: string; original_value_name?: string }> =
+                          (attr.attribute_value_list as any) ?? (attr as any).options_list ?? [];
 
                         return (
                           <div key={attr.attribute_id} className="space-y-1">
@@ -2392,11 +2403,18 @@ function VariationWizard({
                               {isMandatory && <span className="text-red-500 ml-0.5">*</span>}
                             </label>
 
-                            {attr.input_type === "DROP_DOWN" ? (
+                            {attr.input_type === "BRAND" ? (
+                              <input
+                                type="text"
+                                readOnly
+                                value={values[0]?.display_value_name ?? values[0]?.original_value_name ?? ""}
+                                className={`w-full text-xs rounded-lg border ${borderClass} bg-gray-50 px-2 py-1.5 text-gray-600`}
+                              />
+                            ) : attr.input_type === "DROP_DOWN" ? (
                               <select
                                 value={current?.valueId ?? ""}
                                 onChange={e => {
-                                  const opt = attr.attribute_value_list.find(o => o.value_id === Number(e.target.value));
+                                  const opt = values.find(o => o.value_id === Number(e.target.value));
                                   if (opt) {
                                     setAttributeValues(prev => ({
                                       ...prev,
@@ -2413,7 +2431,7 @@ function VariationWizard({
                                 className={`w-full text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
                               >
                                 <option value="">Selecionar…</option>
-                                {attr.attribute_value_list.map(opt => (
+                                {values.map(opt => (
                                   <option key={opt.value_id} value={opt.value_id}>{opt.display_value_name}</option>
                                 ))}
                               </select>
