@@ -381,6 +381,32 @@ export async function getItemExtraInfo(
 }
 
 /**
+ * Get the model list of an item (variations with model_id, price, stock).
+ * Required before calling update_price / update_stock for variations,
+ * since those endpoints need model_id — obtained from this response.
+ */
+export async function getModelList(
+  accessToken: string,
+  shopId: number,
+  itemId: number
+): Promise<Array<{
+  model_id: number;
+  tier_index: number[];
+  model_sku?: string;
+  price_info?: any[];
+  stock_info_v2?: any;
+}>> {
+  const path = "/api/v2/product/get_model_list";
+  const url = buildSignedUrl(path, { item_id: itemId }, accessToken, shopId);
+  const response = await fetch(url);
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(`Shopee get_model_list failed: ${data.error} - ${data.message}`);
+  }
+  return data.response?.model || [];
+}
+
+/**
  * Update one or more fields of an item via Shopee API (update_item).
  * Pass only the fields you want to change alongside item_id.
  */

@@ -9,6 +9,7 @@
 
 import crypto from "crypto";
 import { ENV } from "./_core/env";
+import { getItemBaseInfo, getModelList } from "./shopee";
 
 const SHOPEE_API_BASE = "https://partner.shopeemobile.com";
 
@@ -447,6 +448,131 @@ export async function initTierVariation(
   );
 }
 
+// ============ UPDATE ITEM ============
+
+export interface UpdateProductInput {
+  itemId: number;
+  itemName: string;
+  description: string;
+  weight: number;
+  imageIds: string[];
+  dimension?: {
+    packageLength: number;
+    packageWidth: number;
+    packageHeight: number;
+  };
+  attributes?: Array<{
+    attributeId: number;
+    attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
+  }>;
+  /** Only set when the item has no variations (simple product). */
+  price?: number;
+  /** Only set when the item has no variations (simple product). */
+  stock?: number;
+  /** Omit to preserve Shopee-side configuration. */
+  brand?: { brandId: number; originalBrandName?: string };
+  /** Omit to preserve Shopee-side configuration. */
+  logisticIds?: number[];
+}
+
+/**
+ * Update an existing Shopee product via update_item.
+ * Top-level fields only — for variation-level price/stock use
+ * updateModelPrice / updateModelStock separately.
+ */
+export async function updateProduct(
+  accessToken: string,
+  shopId: number,
+  input: UpdateProductInput
+): Promise<void> {
+  const body: Record<string, any> = {
+    item_id: input.itemId,
+    item_name: input.itemName.substring(0, 120),
+    description: input.description.substring(0, 5000),
+    weight: input.weight,
+    image: { image_id_list: input.imageIds },
+  };
+
+  if (input.dimension) {
+    body.dimension = {
+      package_length: Math.round(input.dimension.packageLength),
+      package_width: Math.round(input.dimension.packageWidth),
+      package_height: Math.round(input.dimension.packageHeight),
+    };
+  }
+
+  if (input.attributes && input.attributes.length > 0) {
+    body.attribute_list = input.attributes.map((a) => ({
+      attribute_id: a.attributeId,
+      attribute_value_list: a.attributeValueList.map((v) => ({
+        value_id: v.valueId,
+        ...(v.originalValueName ? { original_value_name: v.originalValueName } : {}),
+      })),
+    }));
+  }
+
+  if (input.price !== undefined) {
+    body.original_price = input.price;
+  }
+  if (input.stock !== undefined) {
+    body.seller_stock = [{ stock: input.stock }];
+  }
+  if (input.brand) {
+    body.brand = {
+      brand_id: Number(input.brand.brandId ?? 0),
+      original_brand_name: input.brand.originalBrandName || "No Brand",
+    };
+  }
+  if (input.logisticIds && input.logisticIds.length > 0) {
+    body.logistic_info = input.logisticIds.map((id) => ({ logistic_id: id, enabled: true }));
+  }
+
+  await shopeePost("/api/v2/product/update_item", body, accessToken, shopId);
+}
+
+/**
+ * Update price per model (variation). Used when the item has variations.
+ */
+export async function updateModelPrice(
+  accessToken: string,
+  shopId: number,
+  itemId: number,
+  priceList: Array<{ modelId: number; price: number }>
+): Promise<void> {
+  await shopeePost(
+    "/api/v2/product/update_price",
+    {
+      item_id: itemId,
+      price_list: priceList.map((p) => ({ model_id: p.modelId, original_price: p.price })),
+    },
+    accessToken,
+    shopId
+  );
+}
+
+/**
+ * Update stock per model (variation). Used when the item has variations.
+ */
+export async function updateModelStock(
+  accessToken: string,
+  shopId: number,
+  itemId: number,
+  stockList: Array<{ modelId: number; stock: number }>
+): Promise<void> {
+  await shopeePost(
+    "/api/v2/product/update_stock",
+    {
+      item_id: itemId,
+      stock_list: stockList.map((s) => ({
+        model_id: s.modelId,
+        seller_stock: [{ stock: s.stock }],
+      })),
+    },
+    accessToken,
+    shopId
+  );
+}
+
 // ============ BATCH PUBLISH ============
 
 export interface ProductToPublish {
@@ -498,6 +624,26 @@ export interface WizardPublishInput {
     attributeId: number;
     attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
   }>;
+  /** When present, publishProductFromWizard performs an UPDATE on this item
+   *  instead of creating a new listing. */
+  sourceItemId?: number;
+}
+
+export type PublishFromWizardError =
+  | { code: "CATEGORY_CHANGED"; userMessage: string }
+  | { code: "VARIATION_COUNT_CHANGED"; userMessage: string }
+  | { code: "VARIATION_LABEL_MISSING"; userMessage: string }
+  | { code: "VARIATIONS_ADDED_ON_SIMPLE"; userMessage: string };
+
+export class PublishValidationError extends Error {
+  code: PublishFromWizardError["code"];
+  userMessage: string;
+  constructor(err: PublishFromWizardError) {
+    super(err.userMessage);
+    this.name = "PublishValidationError";
+    this.code = err.code;
+    this.userMessage = err.userMessage;
+  }
 }
 
 export interface PublishResult {
@@ -612,27 +758,150 @@ export async function publishProduct(
 }
 
 /**
- * Publish a product created via the ShopeeCriador wizard.
- * Handles image upload, product creation, and tier variation setup with
- * correct labels, prices, stocks, and SKUs derived from the wizard input.
+ * Publish a product via the ShopeeCriador wizard.
+ * Branches on `input.sourceItemId`:
+ *   - undefined → CREATE (add_item + optional init_tier_variation)
+ *   - number    → UPDATE (validate, update_item [+ update_price / update_stock per model])
+ * Updates preserve category, logistic_info, brand, and item_status — v1 only
+ * touches simple fields (title, description, price, stock, dimensions, weight,
+ * images, attributes). Structural changes to variations are rejected.
  */
 export async function publishProductFromWizard(
   accessToken: string,
   shopId: number,
   input: WizardPublishInput,
   onProgress?: (step: string) => void
-): Promise<{ itemId: number; itemUrl: string; imagesUploaded: number }> {
-  // Step 1: Upload images
+): Promise<{ itemId: number; itemUrl: string; imagesUploaded: number; mode: "create" | "update" }> {
+  const firstVar = input.variations[0];
+  const baseSku = input.baseSku ?? "";
+
+  if (input.sourceItemId) {
+    // ─────────────────────────── UPDATE PATH ───────────────────────────
+    if (onProgress) onProgress("Lendo estado atual na Shopee...");
+    const [itemInfo] = await getItemBaseInfo(accessToken, shopId, [input.sourceItemId]);
+    if (!itemInfo) {
+      throw new Error(`Produto ${input.sourceItemId} não foi encontrado na Shopee.`);
+    }
+
+    // Q3 — category change is blocked
+    if (Number(itemInfo.category_id) !== Number(input.categoryId)) {
+      throw new PublishValidationError({
+        code: "CATEGORY_CHANGED",
+        userMessage:
+          "Mudança de categoria não é suportada no update. Para mudar a categoria, recrie o produto na Shopee.",
+      });
+    }
+
+    const remoteHasModel: boolean = !!itemInfo.has_model;
+    const remoteTierOptions: string[] = remoteHasModel
+      ? ((itemInfo.tier_variation?.[0]?.option_list ?? []).map((o: any) => o.option) as string[])
+      : [];
+
+    // Q1 — variation structure changes are blocked
+    if (remoteHasModel) {
+      if (input.variations.length !== remoteTierOptions.length) {
+        throw new PublishValidationError({
+          code: "VARIATION_COUNT_CHANGED",
+          userMessage: `Quantidade de variações diferente da Shopee (local: ${input.variations.length}, Shopee: ${remoteTierOptions.length}). Remova o produto na Shopee e publique como novo.`,
+        });
+      }
+      for (const v of input.variations) {
+        if (!remoteTierOptions.includes(v.label)) {
+          throw new PublishValidationError({
+            code: "VARIATION_LABEL_MISSING",
+            userMessage: `A variação "${v.label}" não existe no produto atual na Shopee. Para alterar a estrutura, remova e publique como novo.`,
+          });
+        }
+      }
+    } else if (input.variations.length > 1) {
+      throw new PublishValidationError({
+        code: "VARIATIONS_ADDED_ON_SIMPLE",
+        userMessage:
+          "Não é possível adicionar variações a um produto simples via update. Remova e publique como novo.",
+      });
+    }
+
+    // Q4 — image reuse when URLs unchanged
+    const remoteUrls: string[] = (itemInfo.image?.image_url_list ?? []) as string[];
+    const remoteIds: string[] = (itemInfo.image?.image_id_list ?? []) as string[];
+    const sameImages =
+      input.imageUrls.length === remoteUrls.length &&
+      input.imageUrls.every((u, i) => u === remoteUrls[i]);
+
+    let imageIds: string[];
+    let imagesUploaded = 0;
+    if (sameImages && remoteIds.length === input.imageUrls.length) {
+      imageIds = remoteIds;
+    } else {
+      if (onProgress) onProgress("Enviando imagens...");
+      imageIds = await uploadImages(accessToken, shopId, input.imageUrls);
+      imagesUploaded = imageIds.length;
+      if (imageIds.length === 0) {
+        throw new Error("Falha ao enviar imagens para a Shopee. Verifique se as URLs estão acessíveis.");
+      }
+    }
+
+    // update_item (top-level fields)
+    if (onProgress) onProgress("Atualizando produto...");
+    const updateInput: UpdateProductInput = {
+      itemId: input.sourceItemId,
+      itemName: input.title,
+      description: input.description,
+      weight: firstVar.weight,
+      imageIds,
+      dimension: firstVar.length && firstVar.width && firstVar.height
+        ? { packageLength: firstVar.length, packageWidth: firstVar.width, packageHeight: firstVar.height }
+        : undefined,
+      attributes: input.attributes,
+    };
+    // Q5 — logistic_info omitted unless explicitly provided.
+    //       brand kept out entirely (wizard doesn't expose it).
+    if (!remoteHasModel) {
+      updateInput.price = firstVar.price;
+      updateInput.stock = firstVar.stock;
+    }
+    await updateProduct(accessToken, shopId, updateInput);
+
+    // Per-model updates when the item has variations
+    if (remoteHasModel) {
+      if (onProgress) onProgress("Atualizando preço/estoque das variações...");
+      const models = await getModelList(accessToken, shopId, input.sourceItemId);
+      // Match local variation → remote model via tier_index → option label
+      const labelFor = (tierIndex: number[]): string => remoteTierOptions[tierIndex[0]] ?? "";
+      const modelByLabel = new Map<string, number>();
+      for (const m of models) {
+        const lbl = labelFor(m.tier_index);
+        if (lbl) modelByLabel.set(lbl, m.model_id);
+      }
+
+      const priceList: Array<{ modelId: number; price: number }> = [];
+      const stockList: Array<{ modelId: number; stock: number }> = [];
+      for (const v of input.variations) {
+        const modelId = modelByLabel.get(v.label);
+        if (modelId == null) {
+          throw new PublishValidationError({
+            code: "VARIATION_LABEL_MISSING",
+            userMessage: `A variação "${v.label}" não foi encontrada entre os models da Shopee. Remova e publique como novo.`,
+          });
+        }
+        priceList.push({ modelId, price: v.price });
+        stockList.push({ modelId, stock: v.stock });
+      }
+      await updateModelPrice(accessToken, shopId, input.sourceItemId, priceList);
+      await updateModelStock(accessToken, shopId, input.sourceItemId, stockList);
+    }
+
+    const itemUrl = `https://shopee.com.br/product/${shopId}/${input.sourceItemId}`;
+    return { itemId: input.sourceItemId, itemUrl, imagesUploaded, mode: "update" };
+  }
+
+  // ─────────────────────────── CREATE PATH ───────────────────────────
   if (onProgress) onProgress("Enviando imagens...");
   const imageIds = await uploadImages(accessToken, shopId, input.imageUrls);
   if (imageIds.length === 0) {
     throw new Error("Falha ao enviar imagens para a Shopee. Verifique se as URLs estão acessíveis.");
   }
 
-  const firstVar = input.variations[0];
-  const baseSku = input.baseSku ?? "";
-
-  // Step 2: Create product using first variation's physical attributes as base
   if (onProgress) onProgress("Criando produto...");
   const { itemId } = await createProduct(accessToken, shopId, {
     itemName: input.title.substring(0, 120),
@@ -651,7 +920,6 @@ export async function publishProductFromWizard(
     attributes: input.attributes,
   });
 
-  // Step 3: Add tier variations when there are multiple options
   if (input.variations.length > 1) {
     if (onProgress) onProgress(`Adicionando ${input.variations.length} variações...`);
     await initTierVariation(accessToken, shopId, itemId, {
@@ -667,7 +935,7 @@ export async function publishProductFromWizard(
   }
 
   const itemUrl = `https://shopee.com.br/product/${shopId}/${itemId}`;
-  return { itemId, itemUrl, imagesUploaded: imageIds.length };
+  return { itemId, itemUrl, imagesUploaded: imageIds.length, mode: "create" };
 }
 
 /**

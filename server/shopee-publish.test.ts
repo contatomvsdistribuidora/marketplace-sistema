@@ -22,7 +22,17 @@ import {
   publishProduct,
   publishProductFromWizard,
   batchPublish,
+  PublishValidationError,
 } from "./shopee-publish";
+
+// Mock getItemBaseInfo / getModelList so tests don't depend on ./shopee internals.
+vi.mock("./shopee", () => ({
+  getItemBaseInfo: vi.fn(),
+  getModelList: vi.fn(),
+}));
+import * as shopeeMod from "./shopee";
+const mockGetItemBaseInfo = shopeeMod.getItemBaseInfo as unknown as ReturnType<typeof vi.fn>;
+const mockGetModelList = shopeeMod.getModelList as unknown as ReturnType<typeof vi.fn>;
 
 describe("Shopee Publish Module", () => {
   beforeEach(() => {
@@ -403,6 +413,185 @@ describe("Shopee Publish Module", () => {
       expect(Number.isInteger(body.dimension.package_length)).toBe(true);
       expect(Number.isInteger(body.dimension.package_width)).toBe(true);
       expect(Number.isInteger(body.dimension.package_height)).toBe(true);
+    });
+  });
+
+  describe("publishProductFromWizard — update mode", () => {
+    beforeEach(() => {
+      mockGetItemBaseInfo.mockReset();
+      mockGetModelList.mockReset();
+    });
+
+    function baseInput(overrides: Partial<Parameters<typeof publishProductFromWizard>[2]> = {}) {
+      return {
+        title: "Produto Atualizado",
+        description: "Descrição longa suficiente para passar no filtro da Shopee no teste de update.",
+        categoryId: 101220,
+        imageUrls: ["https://example.com/a.jpg"],
+        variationTypeName: "Quantidade",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5, length: 29.2, width: 15.7, height: 10.9 },
+        ],
+        sourceItemId: 5555,
+        ...overrides,
+      } as Parameters<typeof publishProductFromWizard>[2];
+    }
+
+    it("should update a simple product (no variations) via update_item with price+seller_stock", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        { category_id: 101220, has_model: false, image: { image_url_list: ["https://example.com/a.jpg"], image_id_list: ["remote_id_1"] } },
+      ]);
+      // update_item
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: {} }),
+      });
+
+      const res = await publishProductFromWizard("tok", 12345, baseInput());
+      expect(res.mode).toBe("update");
+      expect(res.itemId).toBe(5555);
+      expect(res.imagesUploaded).toBe(0); // reused remote ids
+
+      const call = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_item"));
+      expect(call).toBeDefined();
+      const body = JSON.parse(call![1].body);
+      expect(body.item_id).toBe(5555);
+      expect(body.image.image_id_list).toEqual(["remote_id_1"]);
+      expect(body.original_price).toBe(29.9);
+      expect(body.seller_stock).toEqual([{ stock: 100 }]);
+      expect(body.dimension).toEqual({ package_length: 29, package_width: 16, package_height: 11 });
+      expect(body.logistic_info).toBeUndefined();
+      expect(body.brand).toBeUndefined();
+    });
+
+    it("should update a product with variations via update_item (no price/stock) + update_price + update_stock", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          category_id: 101220,
+          has_model: true,
+          tier_variation: [{ name: "Quantidade", option_list: [{ option: "1 Un" }, { option: "Kit 2" }] }],
+          image: { image_url_list: ["https://example.com/a.jpg"], image_id_list: ["rid"] },
+        },
+      ]);
+      // update_item
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+      // getModelList returns two models
+      mockGetModelList.mockResolvedValueOnce([
+        { model_id: 8001, tier_index: [0] },
+        { model_id: 8002, tier_index: [1] },
+      ]);
+      // update_price
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+      // update_stock
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+
+      const res = await publishProductFromWizard("tok", 12345, baseInput({
+        variations: [
+          { label: "1 Un",  price: 29.9,  stock: 100, weight: 0.5, length: 29, width: 15, height: 10 },
+          { label: "Kit 2", price: 56.81, stock: 50,  weight: 1.0, length: 29, width: 15, height: 10 },
+        ],
+      }));
+
+      expect(res.mode).toBe("update");
+
+      const updateItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_item"));
+      const itemBody = JSON.parse(updateItemCall![1].body);
+      expect(itemBody.original_price).toBeUndefined();
+      expect(itemBody.seller_stock).toBeUndefined();
+
+      const priceCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_price"));
+      const priceBody = JSON.parse(priceCall![1].body);
+      expect(priceBody.item_id).toBe(5555);
+      expect(priceBody.price_list).toEqual([
+        { model_id: 8001, original_price: 29.9 },
+        { model_id: 8002, original_price: 56.81 },
+      ]);
+
+      const stockCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_stock"));
+      const stockBody = JSON.parse(stockCall![1].body);
+      expect(stockBody.stock_list).toEqual([
+        { model_id: 8001, seller_stock: [{ stock: 100 }] },
+        { model_id: 8002, seller_stock: [{ stock: 50 }] },
+      ]);
+    });
+
+    it("should reject update when category changed", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([{ category_id: 999999, has_model: false, image: { image_url_list: [], image_id_list: [] } }]);
+      await expect(publishProductFromWizard("tok", 12345, baseInput())).rejects.toMatchObject({
+        code: "CATEGORY_CHANGED",
+      });
+    });
+
+    it("should reject update when variation count differs", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          category_id: 101220,
+          has_model: true,
+          tier_variation: [{ name: "Quantidade", option_list: [{ option: "1 Un" }, { option: "Kit 2" }, { option: "Kit 3" }] }],
+          image: { image_url_list: [], image_id_list: [] },
+        },
+      ]);
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+        ],
+      }))).rejects.toMatchObject({ code: "VARIATION_COUNT_CHANGED" });
+    });
+
+    it("should reject update when a variation label is missing on Shopee", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          category_id: 101220,
+          has_model: true,
+          tier_variation: [{ name: "Quantidade", option_list: [{ option: "1 Un" }, { option: "Kit 2" }] }],
+          image: { image_url_list: [], image_id_list: [] },
+        },
+      ]);
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 5", price: 99.0, stock: 10,  weight: 1.0 }, // label doesn't exist
+        ],
+      }))).rejects.toMatchObject({ code: "VARIATION_LABEL_MISSING" });
+    });
+
+    it("should reject update when trying to add variations to a simple product", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        { category_id: 101220, has_model: false, image: { image_url_list: [], image_id_list: [] } },
+      ]);
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+        ],
+      }))).rejects.toMatchObject({ code: "VARIATIONS_ADDED_ON_SIMPLE" });
+    });
+
+    it("should re-upload images when URLs differ from remote", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        { category_id: 101220, has_model: false, image: { image_url_list: ["https://example.com/OLD.jpg"], image_id_list: ["rid_old"] } },
+      ]);
+      // image download (url changed → new upload)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      // image upload
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "rid_new" } } }),
+      });
+      // update_item
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+
+      const res = await publishProductFromWizard("tok", 12345, baseInput({
+        imageUrls: ["https://example.com/NEW.jpg"],
+      }));
+
+      expect(res.imagesUploaded).toBe(1);
+      const call = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_item"));
+      const body = JSON.parse(call![1].body);
+      expect(body.image.image_id_list).toEqual(["rid_new"]);
     });
   });
 });

@@ -2468,16 +2468,20 @@ export const appRouter = router({
 
         const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
 
-        // Get enabled logistics channels
+        const mode: "create" | "update" = sourceProduct.itemId ? "update" : "create";
+
+        // Logistics: only fetched for CREATE; UPDATE preserves shop-side config (Q5)
         let logisticIds: number[] = [];
-        try {
-          const channels = await shopeePublish.getLogisticsChannels(accessToken, shopId);
-          logisticIds = (channels as any[])
-            .filter((c) => c.enabled)
-            .map((c) => c.logistics_channel_id)
-            .slice(0, 5);
-        } catch (e) {
-          console.warn("[Shopee Wizard] Could not fetch logistics channels:", e);
+        if (mode === "create") {
+          try {
+            const channels = await shopeePublish.getLogisticsChannels(accessToken, shopId);
+            logisticIds = (channels as any[])
+              .filter((c) => c.enabled)
+              .map((c) => c.logistics_channel_id)
+              .slice(0, 5);
+          } catch (e) {
+            console.warn("[Shopee Wizard] Could not fetch logistics channels:", e);
+          }
         }
 
         // Collect image URLs from source product (up to 9)
@@ -2496,21 +2500,56 @@ export const appRouter = router({
           fullDescription += "\n\n" + input.hashtags.slice(0, 20).join(" ");
         }
 
-        console.log(`[Shopee Wizard] Publishing "${input.title}" (${input.variations.length} variation(s), category ${categoryId})...`);
-        const result = await shopeePublish.publishProductFromWizard(accessToken, shopId, {
-          title: input.title,
-          description: fullDescription,
-          categoryId,
-          imageUrls,
-          logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
-          baseSku: sourceProduct.itemSku ?? undefined,
-          variationTypeName: input.variationTypeName,
-          variations: input.variations,
-          attributes: input.attributes,
-        });
+        console.log(`[Shopee Wizard] ${mode.toUpperCase()} "${input.title}" (${input.variations.length} variation(s), category ${categoryId})${mode === "update" ? ` — item ${sourceProduct.itemId}` : ""}`);
+        try {
+          const result = await shopeePublish.publishProductFromWizard(accessToken, shopId, {
+            title: input.title,
+            description: fullDescription,
+            categoryId,
+            imageUrls,
+            logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
+            baseSku: sourceProduct.itemSku ?? undefined,
+            variationTypeName: input.variationTypeName,
+            variations: input.variations,
+            attributes: input.attributes,
+            sourceItemId: mode === "update" ? Number(sourceProduct.itemId) : undefined,
+          });
 
-        console.log(`[Shopee Wizard] Published item ${result.itemId}: ${result.itemUrl}`);
-        return { success: true, itemId: result.itemId, itemUrl: result.itemUrl, shopId };
+          console.log(`[Shopee Wizard] ${result.mode} OK — item ${result.itemId}: ${result.itemUrl}`);
+          return { success: true, mode: result.mode, itemId: result.itemId, itemUrl: result.itemUrl, shopId };
+        } catch (e: any) {
+          if (e instanceof shopeePublish.PublishValidationError) {
+            // Bubble up structured validation errors with the user-friendly message
+            throw new Error(`[${e.code}] ${e.userMessage}`);
+          }
+          throw e;
+        }
+      }),
+
+    /** Tell the client whether publishing this product will CREATE or UPDATE on Shopee. */
+    getPublishMode: protectedProcedure
+      .input(z.object({ productId: z.number() }))
+      .query(async ({ input }) => {
+        const db = sharedDb;
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [p] = await db
+          .select({
+            itemId: shopeeProducts.itemId,
+            categoryId: shopeeProducts.categoryId,
+            variations: shopeeProducts.variations,
+          })
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.id, input.productId))
+          .limit(1);
+        if (!p) throw new Error("Produto não encontrado");
+        const mode: "create" | "update" = p.itemId ? "update" : "create";
+        return {
+          mode,
+          itemId: p.itemId ? Number(p.itemId) : null,
+          currentCategoryId: p.categoryId ? Number(p.categoryId) : null,
+          hasRemoteVariations: Array.isArray(p.variations) && (p.variations as any[]).length > 0,
+        };
       }),
   }),
 });
