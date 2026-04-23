@@ -20,6 +20,7 @@ import {
   createProduct,
   initTierVariation,
   publishProduct,
+  publishProductFromWizard,
   batchPublish,
 } from "./shopee-publish";
 
@@ -355,6 +356,53 @@ describe("Shopee Publish Module", () => {
       expect(results[0].success).toBe(true);
       expect(results[0].itemId).toBe(111);
       expect(results[1].success).toBe(false);
+    });
+  });
+
+  describe("publishProductFromWizard", () => {
+    it("should round decimal dimensions to integers in add_item payload", async () => {
+      // image download
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      // image upload
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img_id_1" } } }),
+      });
+      // add_item
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 777888999 } }),
+      });
+      // init_tier_variation
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: {} }),
+      });
+
+      await publishProductFromWizard("test_token", 12345, {
+        title: "Produto Wizard Dimensões Decimais",
+        description: "Descrição longa suficiente para passar no filtro da Shopee no teste de arredondamento.",
+        categoryId: 100001,
+        imageUrls: ["https://example.com/img1.jpg"],
+        variationTypeName: "Quantidade",
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5, length: 29.2, width: 15.7, height: 10.9 },
+          { label: "Kit 2", price: 56.81, stock: 50,  weight: 1.0, length: 29.2, width: 15.7, height: 10.9 },
+        ],
+      });
+
+      const addItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_item"));
+      expect(addItemCall).toBeDefined();
+      const body = JSON.parse(addItemCall![1].body);
+      expect(body.dimension).toEqual({
+        package_length: 29,  // 29.2 -> 29
+        package_width: 16,   // 15.7 -> 16
+        package_height: 11,  // 10.9 -> 11
+      });
+      expect(Number.isInteger(body.dimension.package_length)).toBe(true);
+      expect(Number.isInteger(body.dimension.package_width)).toBe(true);
+      expect(Number.isInteger(body.dimension.package_height)).toBe(true);
     });
   });
 });
