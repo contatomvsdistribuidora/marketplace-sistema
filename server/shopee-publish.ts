@@ -332,6 +332,9 @@ export async function createProduct(
   shopId: number,
   input: CreateProductInput
 ): Promise<{ itemId: number }> {
+  console.log('[SHOPEE DEBUG] Iniciando createProduct', { itemName: input.itemName, categoryId: input.categoryId, sku: input.sku });
+  console.log('[SHOPEE DEBUG] brand payload:', JSON.stringify(input.brand));
+
   const body: Record<string, any> = {
     item_name: input.itemName.substring(0, 120), // Shopee max 120 chars
     description: input.description.substring(0, 5000), // Shopee max 5000 chars
@@ -385,13 +388,14 @@ export async function createProduct(
     body.item_sku = input.sku;
   }
 
-  console.log("[Shopee] add_item payload:", JSON.stringify(body));
+  console.log('[SHOPEE DEBUG] payload completo:', JSON.stringify(body, null, 2));
   const res = await shopeePost(
     "/api/v2/product/add_item",
     body,
     accessToken,
     shopId
   );
+  console.log('[SHOPEE DEBUG] resposta da API:', JSON.stringify(res));
 
   return { itemId: res.item_id };
 }
