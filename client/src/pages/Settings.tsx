@@ -10,7 +10,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 const AI_PROVIDERS = [
-  { value: "anthropic", label: "Anthropic Claude",   model: "claude-sonnet-4-20250514", color: "bg-purple-100 text-purple-700 border-purple-300" },
+  { value: "anthropic", label: "Anthropic Claude",   model: "claude-sonnet-4-5", color: "bg-purple-100 text-purple-700 border-purple-300" },
   { value: "groq",      label: "Groq (Gratuito)",    model: "llama-3.3-70b-versatile",  color: "bg-green-100 text-green-700 border-green-300"   },
   { value: "openai",    label: "OpenAI GPT",         model: "gpt-4o-mini",              color: "bg-blue-100 text-blue-700 border-blue-300"       },
   { value: "gemini",    label: "Google Gemini",      model: "gemini-2.0-flash-lite",    color: "bg-yellow-100 text-yellow-700 border-yellow-300" },

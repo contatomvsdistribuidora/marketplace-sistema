@@ -320,7 +320,7 @@ const invokeGroq = async (params: InvokeParams): Promise<InvokeResult> => {
 
 // ============ ANTHROPIC ============
 
-const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+const ANTHROPIC_MODEL = "claude-sonnet-4-5";
 
 const invokeAnthropic = async (params: InvokeParams, apiKey: string): Promise<InvokeResult> => {
   const client = new Anthropic({ apiKey });

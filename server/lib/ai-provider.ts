@@ -3,7 +3,7 @@
  * Usa o provedor configurado nas Settings (banco) ou AI_PROVIDER env var.
  *
  * Provedores suportados:
- *   "anthropic" → ANTHROPIC_API_KEY + claude-sonnet-4-20250514
+ *   "anthropic" → ANTHROPIC_API_KEY + claude-sonnet-4-5
  *   "groq"      → GROQ_API_KEY + llama-3.3-70b-versatile
  *   "openai"    → OPENAI_API_KEY + gpt-4o-mini
  *   "gemini"    → GEMINI_API_KEY + gemini-2.0-flash-lite
