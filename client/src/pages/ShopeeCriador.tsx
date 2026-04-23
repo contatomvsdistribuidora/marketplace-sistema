@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import {
   Search, Package, ChevronRight, Star, Loader2,
@@ -287,6 +287,29 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
     trpc.shopee.getProductDiagnostic.useQuery({ productId: product.id }, { staleTime: 60_000 });
   const { data: urlData } =
     trpc.shopee.getProductUrls.useQuery({ accountId, productId: product.id }, { staleTime: 300_000 });
+  const { data: categoryAttrsForDisplay } = trpc.shopee.getCategoryAttributes.useQuery(
+    { accountId, categoryId: Number(product.categoryId) },
+    { enabled: !!product.categoryId, staleTime: 5 * 60 * 1000 }
+  );
+  const attrDefMap = useMemo(() => {
+    const map = new Map<number, { displayName: string; values: Map<number, string> }>();
+    if (Array.isArray(categoryAttrsForDisplay)) {
+      for (const def of categoryAttrsForDisplay as any[]) {
+        const vmap = new Map<number, string>();
+        const list = def.attribute_value_list ?? def.options_list ?? [];
+        for (const v of list) {
+          if (v?.value_id != null) {
+            vmap.set(Number(v.value_id), v.display_value_name ?? v.original_value_name ?? "");
+          }
+        }
+        map.set(Number(def.attribute_id), {
+          displayName: def.display_attribute_name ?? def.original_attribute_name ?? "",
+          values: vmap,
+        });
+      }
+    }
+    return map;
+  }, [categoryAttrsForDisplay]);
 
   // — mutations —
   const detailPublishMutation   = trpc.shopee.createProductFromWizard.useMutation();
@@ -609,10 +632,20 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
           <div className="divide-y divide-gray-100">
             {filledAttrs.map((attr: any) => {
               const attrId: number = attr.attribute_id;
-              const attrName: string = attr.display_attribute_name || attr.attribute_name || `Atributo ${attrId}`;
+              const attrDef = attrDefMap.get(attrId);
+              const attrName: string =
+                (attrDef?.displayName && attrDef.displayName.trim()) ||
+                attr.display_attribute_name ||
+                attr.original_attribute_name ||
+                attr.attribute_name ||
+                `Atributo ${attrId}`;
               const values: any[] = attr.attribute_value_list || [];
               const displayValue = values.map((v: any) => {
-                const name = v.original_value_name || v.display_value_name || "";
+                const mapped = v?.value_id != null ? attrDef?.values.get(Number(v.value_id)) : undefined;
+                const name = (mapped && mapped.trim())
+                  || v.display_value_name
+                  || v.original_value_name
+                  || "";
                 const unit = v.value_unit ? ` ${v.value_unit}` : "";
                 return `${name}${unit}`;
               }).filter(Boolean).join(", ");
