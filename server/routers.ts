@@ -2458,6 +2458,10 @@ export const appRouter = router({
          *  - "create" : abandon existing item_id, create a fresh listing
          *  - "promote": mutate the existing simple product into a variated one */
         overrideMode: z.enum(["create", "promote"]).optional(),
+        /** User-edited product name for the CREATE path. Validated 1..120 inside
+         *  publishProductFromWizard with a structured NAME_INVALID error so the
+         *  client can surface it in the modal instead of as a generic zod error. */
+        newItemName: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const db = sharedDb;
@@ -2521,6 +2525,7 @@ export const appRouter = router({
             attributes: input.attributes,
             sourceItemId: sourceProduct.itemId ? Number(sourceProduct.itemId) : undefined,
             overrideMode: input.overrideMode,
+            newItemName: input.newItemName,
           });
 
           console.log(`[Shopee Wizard] ${result.mode} OK — item ${result.itemId}: ${result.itemUrl}`);

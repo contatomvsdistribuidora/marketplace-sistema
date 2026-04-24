@@ -41,6 +41,20 @@ function emptyOption(label = ""): VariationOption {
   return { id: uid(), label, weight: "", length: "", width: "", height: "", price: "", stock: "" };
 }
 
+// Sugere um nome para a criação de um novo anúncio — incrementa o sufixo " - V<n>"
+// se já existir, senão adiciona " - V2". Shopee limita item_name a 120 chars,
+// então trunca o original se necessário. Mantido aqui pra ficar colado com
+// o DecisionModal que o usa.
+function suggestNewName(original: string): string {
+  const match = original.match(/^(.*?)\s*-\s*V(\d+)$/);
+  const suffix = match ? ` - V${parseInt(match[2], 10) + 1}` : " - V2";
+  const base = match ? match[1].trimEnd() : original;
+  const combined = base + suffix;
+  if (combined.length <= 120) return combined;
+  const maxBase = Math.max(0, 120 - suffix.length);
+  return base.slice(0, maxBase).trimEnd() + suffix;
+}
+
 // Abrevia nomes longos de variação para caber em 20 chars
 function truncateVariationName(name: string): string {
   const abbrevs: [RegExp, string][] = [
@@ -267,6 +281,10 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   // the mutation to disambiguate for the backend.
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [overrideMode, setOverrideMode] = useState<"create" | "promote" | undefined>(undefined);
+  // Name-editor sub-view inside DecisionModal (only for "create"): user tweaks
+  // the title to avoid duplicate-listing detection on Shopee.
+  const [showNameEditor, setShowNameEditor] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
 
   // — state —
   const allImages: string[] = Array.isArray(product.images) && product.images.length > 0
@@ -438,6 +456,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
         description: product.description || "",
         hashtags: [],
         overrideMode,
+        newItemName: overrideMode === "create" ? newItemName : undefined,
       });
       setPublishModalResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishModalStatus("success");
@@ -463,6 +482,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   function handlePublishClick() {
     if (isSimpleToVariatedCase && !overrideMode) {
       setShowDecisionModal(true);
+      setShowNameEditor(false);
       setPromoteConfirmed(false);
       return;
     }
@@ -475,6 +495,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   function pickDecision(mode: "create" | "promote") {
     setOverrideMode(mode);
     setShowDecisionModal(false);
+    setShowNameEditor(false);
     setShowPublishModal(true);
     setPublishModalStatus("idle");
     setPublishModalResult(null);
@@ -878,7 +899,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
       )}
 
       {/* ── Modal de decisão: criar novo vs. promover existente ─────────── */}
-      {showDecisionModal && (
+      {showDecisionModal && !showNameEditor && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -893,9 +914,12 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
               sem variações. Localmente você montou <b>{localOptionsCount} variações</b>. Escolha uma ação:
             </p>
 
-            {/* Opção 1: CRIAR NOVO (azul/emerald) */}
+            {/* Opção 1: CRIAR NOVO — abre editor de nome */}
             <button
-              onClick={() => pickDecision("create")}
+              onClick={() => {
+                setNewItemName(suggestNewName(product.itemName || ""));
+                setShowNameEditor(true);
+              }}
               className="w-full text-left border-2 border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded-xl p-4 transition"
             >
               <div className="flex items-start gap-3">
@@ -939,6 +963,59 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
           </div>
         </div>
       )}
+
+      {/* ── Editor de nome (sub-view do DecisionModal, opção "Criar novo") ─ */}
+      {showDecisionModal && showNameEditor && (() => {
+        const nameLen = newItemName.length;
+        const nameValid = nameLen >= 1 && nameLen <= 120;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-gray-900">Nome do novo produto na Shopee</h3>
+                <button onClick={() => { setShowDecisionModal(false); setShowNameEditor(false); }} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <input
+                  type="text"
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value.slice(0, 120))}
+                  maxLength={120}
+                  className="w-full px-3 py-2.5 border-2 border-gray-200 focus:border-blue-400 rounded-xl text-sm outline-none transition"
+                  placeholder="Nome do produto na Shopee"
+                />
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    Edite se quiser. O nome deve ser diferente do anúncio atual para evitar duplicata.
+                  </p>
+                  <span className={`text-xs font-mono flex-shrink-0 ${nameLen > 110 ? "text-amber-600" : nameLen < 1 ? "text-red-500" : "text-gray-400"}`}>
+                    {nameLen}/120
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setShowNameEditor(false)}
+                  className="flex-1 py-2.5 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition"
+                >
+                  Voltar
+                </button>
+                <button
+                  onClick={() => pickDecision("create")}
+                  disabled={!nameValid}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl disabled:opacity-50 transition"
+                >
+                  🆕 Confirmar Criação
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Modal de publicação ──────────────────────────────────────────── */}
       {showPublishModal && (() => {
@@ -1270,6 +1347,8 @@ function VariationWizard({
   // into the UI (see fix commit for grep guard).
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [overrideMode, setOverrideMode] = useState<"create" | "promote" | undefined>(undefined);
+  const [showNameEditor, setShowNameEditor] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
 
   const [adContent, setAdContent]       = useState<any>(null);
   const [adLoadingSection, setAdLoadingSection] = useState<"all"|"title"|"desc"|"tags"|null>(null);
@@ -1618,11 +1697,15 @@ function VariationWizard({
     onSave({ id: uid(), type: selectedType!, typeName, options: opts });
   }
 
-  async function handlePublishToShopee(overrideModeArg?: "create" | "promote") {
-    // overrideModeArg bypasses React's async setState — pickDecision uses it
-    // to fire the mutation with the freshly-chosen mode without waiting for
-    // a re-render.
+  async function handlePublishToShopee(
+    overrideModeArg?: "create" | "promote",
+    newItemNameArg?: string,
+  ) {
+    // overrideModeArg / newItemNameArg bypass React's async setState —
+    // pickDecision uses them to fire the mutation with the freshly-chosen
+    // values without waiting for a re-render.
     const effectiveOverrideMode = overrideModeArg ?? overrideMode;
+    const effectiveNewItemName = newItemNameArg ?? newItemName;
     const opts = optionDetails.map((o, i) => {
       const c = computePricing(o, i);
       const rawPrice = inlinePriceEdits[o.id] || o.price || (c.price > 0 ? c.price.toFixed(2) : "0");
@@ -1669,6 +1752,7 @@ function VariationWizard({
         hashtags,
         attributes: attributes.length > 0 ? attributes : undefined,
         overrideMode: effectiveOverrideMode,
+        newItemName: effectiveOverrideMode === "create" ? effectiveNewItemName : undefined,
       });
       setPublishResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishStatus("success");
@@ -1687,10 +1771,12 @@ function VariationWizard({
     }
   }
 
-  function pickDecision(mode: "create" | "promote") {
+  function pickDecision(mode: "create" | "promote", name?: string) {
     setOverrideMode(mode);
     setShowDecisionModal(false);
-    void handlePublishToShopee(mode);
+    setShowNameEditor(false);
+    if (mode === "create" && name) setNewItemName(name);
+    void handlePublishToShopee(mode, mode === "create" ? name : undefined);
   }
 
   function stepBack() {
@@ -3084,7 +3170,7 @@ function VariationWizard({
       </div>
 
       {/* ── Modal de decisão: criar novo vs. promover existente ─────────── */}
-      {showDecisionModal && (
+      {showDecisionModal && !showNameEditor && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -3100,7 +3186,10 @@ function VariationWizard({
             </p>
 
             <button
-              onClick={() => pickDecision("create")}
+              onClick={() => {
+                setNewItemName(suggestNewName(product.itemName || ""));
+                setShowNameEditor(true);
+              }}
               className="w-full text-left border-2 border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded-xl p-4 transition"
             >
               <div className="flex items-start gap-3">
@@ -3142,6 +3231,59 @@ function VariationWizard({
           </div>
         </div>
       )}
+
+      {/* ── Editor de nome (sub-view, opção "Criar novo") ───────────────── */}
+      {showDecisionModal && showNameEditor && (() => {
+        const nameLen = newItemName.length;
+        const nameValid = nameLen >= 1 && nameLen <= 120;
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-gray-900">Nome do novo produto na Shopee</h3>
+                <button onClick={() => { setShowDecisionModal(false); setShowNameEditor(false); }} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <input
+                  type="text"
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value.slice(0, 120))}
+                  maxLength={120}
+                  className="w-full px-3 py-2.5 border-2 border-gray-200 focus:border-blue-400 rounded-xl text-sm outline-none transition"
+                  placeholder="Nome do produto na Shopee"
+                />
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    Edite se quiser. O nome deve ser diferente do anúncio atual para evitar duplicata.
+                  </p>
+                  <span className={`text-xs font-mono flex-shrink-0 ${nameLen > 110 ? "text-amber-600" : nameLen < 1 ? "text-red-500" : "text-gray-400"}`}>
+                    {nameLen}/120
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setShowNameEditor(false)}
+                  className="flex-1 py-2.5 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition"
+                >
+                  Voltar
+                </button>
+                <button
+                  onClick={() => pickDecision("create", newItemName)}
+                  disabled={!nameValid}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl disabled:opacity-50 transition"
+                >
+                  🆕 Confirmar Criação
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

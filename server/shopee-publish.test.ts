@@ -665,6 +665,95 @@ describe("Shopee Publish Module", () => {
       expect(updCall).toBeUndefined();
     });
 
+    it("should use newItemName in add_item payload when provided with overrideMode='create'", async () => {
+      // image download + upload
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img1" } } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 42 } }),
+      });
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+
+      await publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        newItemName: "Produto Atualizado - V2",
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+        ],
+      }));
+
+      const addItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_item"));
+      const body = JSON.parse(addItemCall![1].body);
+      expect(body.item_name).toBe("Produto Atualizado - V2");
+    });
+
+    it("should append timestamp-based SKU suffix when overrideMode='create' with sourceItemId", async () => {
+      // image download + upload
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img1" } } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 43 } }),
+      });
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+
+      await publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        baseSku: "SAC-15L-100",
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+        ],
+      }));
+
+      const addItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_item"));
+      const addBody = JSON.parse(addItemCall![1].body);
+      // Top-level SKU is base + "-V<4 base36 chars>"
+      expect(addBody.item_sku).toMatch(/^SAC-15L-100-V[0-9A-Z]{4}$/);
+
+      // Per-model SKU reuses the suffixed base: "<prefix>-V<4>-<index>"
+      const initCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/init_tier_variation"));
+      const initBody = JSON.parse(initCall![1].body);
+      expect(initBody.model[0].model_sku).toMatch(/^SAC-15L-100-V[0-9A-Z]{4}-1$/);
+      expect(initBody.model[1].model_sku).toMatch(/^SAC-15L-100-V[0-9A-Z]{4}-2$/);
+      // Both models share the same suffix (derived from one Date.now() call).
+      const suffix0 = initBody.model[0].model_sku.slice(0, -2); // strip "-1"
+      const suffix1 = initBody.model[1].model_sku.slice(0, -2);
+      expect(suffix0).toBe(suffix1);
+    });
+
+    it("should reject NAME_INVALID when newItemName is empty", async () => {
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        newItemName: "",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5 },
+        ],
+      }))).rejects.toMatchObject({ code: "NAME_INVALID" });
+    });
+
+    it("should reject NAME_INVALID when newItemName exceeds 120 chars", async () => {
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        newItemName: "A".repeat(121),
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5 },
+        ],
+      }))).rejects.toMatchObject({ code: "NAME_INVALID" });
+    });
+
     it("should propagate shopee error during promote as PROMOTE_FAILED", async () => {
       mockGetItemBaseInfo.mockResolvedValueOnce([
         {

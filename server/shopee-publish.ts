@@ -697,6 +697,11 @@ export interface WizardPublishInput {
    *  - "promote" : mutate the existing simple product to have variations
    *  - undefined : ask the caller to pick — backend throws NEEDS_USER_DECISION */
   overrideMode?: "create" | "promote";
+  /** When creating a brand-new listing (especially via overrideMode="create"),
+   *  the user-facing name shown on Shopee. Overrides `title`. 1..120 chars
+   *  (validated against NAME_INVALID). Used to avoid duplicate listings when
+   *  "upgrading" a simple product to a new variated one. */
+  newItemName?: string;
 }
 
 export type PublishFromWizardError =
@@ -704,7 +709,8 @@ export type PublishFromWizardError =
   | { code: "VARIATION_COUNT_CHANGED"; userMessage: string }
   | { code: "VARIATION_LABEL_MISSING"; userMessage: string }
   | { code: "PROMOTE_FAILED"; userMessage: string }
-  | { code: "NEEDS_USER_DECISION"; userMessage: string; availableModes: Array<"create" | "promote"> };
+  | { code: "NEEDS_USER_DECISION"; userMessage: string; availableModes: Array<"create" | "promote"> }
+  | { code: "NAME_INVALID"; userMessage: string };
 
 export class PublishValidationError extends Error {
   code: PublishFromWizardError["code"];
@@ -1011,6 +1017,28 @@ export async function publishProductFromWizard(
   }
 
   // ─────────────────────────── CREATE PATH ───────────────────────────
+  // newItemName: caller-provided override for the product title (used when
+  // upgrading a simple listing to a new variated one — the user picks a name
+  // that differs from the old listing to avoid duplicate detection).
+  if (input.newItemName !== undefined) {
+    const len = input.newItemName.length;
+    if (len < 1 || len > 120) {
+      throw new PublishValidationError({
+        code: "NAME_INVALID",
+        userMessage: `Nome do produto deve ter entre 1 e 120 caracteres (atual: ${len}).`,
+      });
+    }
+  }
+  const effectiveItemName = input.newItemName ?? input.title;
+
+  // SKU suffix: when the caller is abandoning an existing item_id (overrideMode=
+  // "create" with a sourceItemId), append a short base36 timestamp to keep the
+  // local SKU unique vs. the old listing's SKU. Transparent to the user.
+  const effectiveBaseSku =
+    input.sourceItemId && input.overrideMode === "create" && baseSku
+      ? `${baseSku}-V${Date.now().toString(36).slice(-4).toUpperCase()}`
+      : baseSku;
+
   if (onProgress) onProgress("Enviando imagens...");
   const imageIds = await uploadImages(accessToken, shopId, input.imageUrls);
   if (imageIds.length === 0) {
@@ -1019,14 +1047,14 @@ export async function publishProductFromWizard(
 
   if (onProgress) onProgress("Criando produto...");
   const { itemId } = await createProduct(accessToken, shopId, {
-    itemName: input.title.substring(0, 120),
+    itemName: effectiveItemName.substring(0, 120),
     description: input.description.substring(0, 5000),
     categoryId: input.categoryId,
     price: firstVar.price,
     stock: input.variations.length === 1 ? firstVar.stock : 0,
     weight: firstVar.weight,
     imageIds,
-    sku: baseSku || undefined,
+    sku: effectiveBaseSku || undefined,
     condition: "NEW",
     dimension: firstVar.length && firstVar.width && firstVar.height
       ? { packageLength: firstVar.length, packageWidth: firstVar.width, packageHeight: firstVar.height }
@@ -1044,7 +1072,7 @@ export async function publishProductFromWizard(
         tierIndex: [i],
         price: v.price,
         stock: v.stock,
-        sku: baseSku ? `${baseSku}-${i + 1}` : undefined,
+        sku: effectiveBaseSku ? `${effectiveBaseSku}-${i + 1}` : undefined,
       })),
     });
   }
