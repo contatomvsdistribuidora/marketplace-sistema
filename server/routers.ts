@@ -2560,6 +2560,12 @@ export const appRouter = router({
           length: z.number().positive().optional().transform((v) => (v !== undefined ? Math.round(v) : v)),
           width: z.number().positive().optional().transform((v) => (v !== undefined ? Math.round(v) : v)),
           height: z.number().positive().optional().transform((v) => (v !== undefined ? Math.round(v) : v)),
+          /** Optional per-model SKU. Overrides the auto-suffixed baseSku. */
+          sku: z.string().max(64).optional(),
+          /** Optional EAN/GTIN. Only sent to Shopee as gtin_code when the
+           *  product has exactly one variation; otherwise ignored. Format
+           *  (8/12/13/14 digits) is validated downstream. */
+          ean: z.string().optional(),
         })).min(1),
         title: z.string().min(1).max(120),
         description: z.string(),

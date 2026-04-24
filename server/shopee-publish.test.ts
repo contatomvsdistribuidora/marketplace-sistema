@@ -692,6 +692,77 @@ describe("Shopee Publish Module", () => {
       expect(updCall).toBeUndefined();
     });
 
+    it("should forward per-variation sku as model_sku in init_tier_variation", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img1" } } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 1000 } }),
+      });
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+
+      await publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5, sku: "CUSTOM-SKU-A" },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0, sku: "CUSTOM-SKU-B" },
+        ],
+      }));
+
+      const initCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/init_tier_variation"));
+      const body = JSON.parse(initCall![1].body);
+      expect(body.model[0].model_sku).toBe("CUSTOM-SKU-A");
+      expect(body.model[1].model_sku).toBe("CUSTOM-SKU-B");
+    });
+
+    it("should pass EAN as gtin_code when the product has a single variation", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img1" } } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 1001 } }),
+      });
+
+      await publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5, ean: "7891234567890" },
+        ],
+      }));
+
+      const addItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_item"));
+      const body = JSON.parse(addItemCall![1].body);
+      expect(body.gtin_code).toBe("7891234567890");
+    });
+
+    it("should reject publish when an EAN has the wrong number of digits", async () => {
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5, ean: "123456" }, // 6 digits → invalid
+        ],
+      }))).rejects.toThrow(/EAN.*8, 12, 13 ou 14 dígitos/);
+    });
+
+    it("should reject publish when an EAN has non-numeric characters", async () => {
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        overrideMode: "create",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5, ean: "789ABC1234567" },
+        ],
+      }))).rejects.toThrow(/não numéricos/);
+    });
+
     it("should use newItemName in add_item payload when provided with overrideMode='create'", async () => {
       // image download + upload
       mockFetch.mockResolvedValueOnce({

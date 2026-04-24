@@ -469,6 +469,10 @@ export interface CreateProductInput {
     attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
   }>;
   brand?: { brandId: number; originalBrandName?: string };
+  /** GTIN/EAN code at the item level. Shopee does NOT support per-model
+   *  GTIN in init_tier_variation, so the wizard only exposes this when the
+   *  product has a single variation. 8/12/13/14 digits. */
+  gtinCode?: string;
 }
 
 /**
@@ -534,6 +538,13 @@ export async function createProduct(
   // SKU
   if (input.sku) {
     body.item_sku = input.sku;
+  }
+
+  // Item-level GTIN (EAN/UPC). Per-model GTIN is not supported by Shopee's
+  // init_tier_variation, so this only makes sense for single-variation
+  // products — the wizard enforces that constraint on the client side.
+  if (input.gtinCode) {
+    body.gtin_code = input.gtinCode;
   }
 
   console.log('[SHOPEE DEBUG] payload completo:', JSON.stringify(body, null, 2));
@@ -829,6 +840,12 @@ export interface WizardPublishInput {
     length?: number;
     width?: number;
     height?: number;
+    /** Per-model SKU (Shopee `model_sku`). Overrides the auto-suffixed baseSku. */
+    sku?: string;
+    /** Shopee only stores GTIN at item level (`gtin_code`). When the product
+     *  has exactly one variation we use this as the item-level gtin_code;
+     *  otherwise it's ignored (wizard hides the field in that case). */
+    ean?: string;
   }>;
   baseSku?: string;
   logisticIds?: number[];
@@ -1196,6 +1213,24 @@ export async function publishProductFromWizard(
       ? `${baseSku}-V${Date.now().toString(36).slice(-4).toUpperCase()}`
       : baseSku;
 
+  // Validate any EAN (GTIN) codes provided per variation. 8/12/13/14 digits
+  // are the only sanctioned lengths (GTIN-8, UPC-A, EAN-13, GTIN-14).
+  // Shopee's API will reject malformed codes anyway, but we surface a
+  // friendlier error to the user here.
+  for (const v of input.variations) {
+    if (v.ean && !/^\d+$/.test(v.ean)) {
+      throw new Error(`EAN "${v.ean}" contém caracteres não numéricos.`);
+    }
+    if (v.ean && ![8, 12, 13, 14].includes(v.ean.length)) {
+      throw new Error(`EAN "${v.ean}" deve ter 8, 12, 13 ou 14 dígitos (tem ${v.ean.length}).`);
+    }
+  }
+  // Only single-variation products can carry a GTIN in the Shopee model.
+  const singleVariationGtin =
+    input.variations.length === 1 && input.variations[0].ean
+      ? input.variations[0].ean
+      : undefined;
+
   if (onProgress) onProgress("Enviando imagens...");
   const imageIds = await uploadImages(accessToken, shopId, input.imageUrls);
   if (imageIds.length === 0) {
@@ -1221,6 +1256,7 @@ export async function publishProductFromWizard(
     brand: input.brand
       ? { brandId: input.brand.brandId, originalBrandName: input.brand.brandName }
       : undefined,
+    gtinCode: singleVariationGtin,
   });
 
   if (input.variations.length > 1) {
@@ -1232,7 +1268,9 @@ export async function publishProductFromWizard(
         tierIndex: [i],
         price: v.price,
         stock: v.stock,
-        sku: effectiveBaseSku ? `${effectiveBaseSku}-${i + 1}` : undefined,
+        // Per-model SKU: caller-provided takes precedence over the auto-suffix
+        // (which is derived from the item-level baseSku + index).
+        sku: v.sku || (effectiveBaseSku ? `${effectiveBaseSku}-${i + 1}` : undefined),
       })),
     });
   }

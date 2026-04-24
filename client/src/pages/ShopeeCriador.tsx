@@ -26,6 +26,8 @@ interface VariationOption {
   height: string;
   price: string;
   stock: string;
+  sku: string;
+  ean: string;
 }
 
 interface VariationGroup {
@@ -40,7 +42,19 @@ function uid() {
 }
 
 function emptyOption(label = ""): VariationOption {
-  return { id: uid(), label, weight: "", length: "", width: "", height: "", price: "", stock: "" };
+  return { id: uid(), label, weight: "", length: "", width: "", height: "", price: "", stock: "", sku: "", ean: "" };
+}
+
+/**
+ * Validates an EAN/GTIN/UPC code. Only 8, 12, 13 or 14 digits are accepted
+ * (GTIN-8, UPC-A, EAN-13, GTIN-14). Empty string is considered valid —
+ * callers should treat it as "not provided".
+ */
+export function isValidEan(ean: string): boolean {
+  const trimmed = ean.trim();
+  if (!trimmed) return true;
+  if (!/^\d+$/.test(trimmed)) return false;
+  return [8, 12, 13, 14].includes(trimmed.length);
 }
 
 // Sugere um nome para a criação de um novo anúncio — incrementa o sufixo " - V<n>"
@@ -1858,8 +1872,20 @@ function VariationWizard({
         length: parseFloat(rawLength) > 0 ? parseFloat(rawLength) : undefined,
         width:  parseFloat(rawWidth)  > 0 ? parseFloat(rawWidth)  : undefined,
         height: parseFloat(rawHeight) > 0 ? parseFloat(rawHeight) : undefined,
+        sku:    o.sku.trim() || undefined,
+        ean:    o.ean.trim() || undefined,
       };
     });
+
+    // Client-side EAN validation. Server validates too, but we want a nicer
+    // message than the raw "EAN inválido" thrown from the publish module.
+    for (const v of opts) {
+      if (v.ean && !isValidEan(v.ean)) {
+        setPublishError(`EAN "${v.ean}" inválido: deve ter 8, 12, 13 ou 14 dígitos.`);
+        setPublishStatus("error");
+        return;
+      }
+    }
 
     const validOpts = opts.filter(v => v.price > 0);
     if (validOpts.length === 0) return;
@@ -2636,6 +2662,62 @@ function VariationWizard({
                               value={qtyFactors[idx] ?? ""}
                               onChange={e => setQtyFactors(f => { const n = [...f]; n[idx] = e.target.value; return n; })}
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Identificação (SKU, EAN) + preço manual por variação */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">SKU <span className="text-gray-400 font-normal">(opcional)</span></label>
+                          <input
+                            type="text"
+                            maxLength={64}
+                            placeholder={product.itemSku ? `${product.itemSku}-${idx + 1}` : "Ex: SAC-15L-100"}
+                            value={opt.sku}
+                            onChange={(e) => updateDetail(opt.id, "sku", e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">
+                            Preço manual (R$) <span className="text-gray-400 font-normal">(sobrescreve calculado)</span>
+                          </label>
+                          <input
+                            type="number" min="0.01" step="0.01"
+                            placeholder={c.price > 0 ? c.price.toFixed(2) : "0.00"}
+                            value={opt.price}
+                            onChange={(e) => updateDetail(opt.id, "price", e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                          />
+                        </div>
+                        {/* EAN: Shopee só aceita GTIN a nível de produto, não por model.
+                            Mostra só quando há uma única variação. */}
+                        {optionDetails.length === 1 ? (
+                          <div className="sm:col-span-2">
+                            <label className="block text-xs text-gray-500 mb-1">
+                              EAN / GTIN <span className="text-gray-400 font-normal">(8, 12, 13 ou 14 dígitos)</span>
+                            </label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={14}
+                              placeholder="7891234567890"
+                              value={opt.ean}
+                              onChange={(e) => updateDetail(opt.id, "ean", e.target.value.replace(/\D/g, ""))}
+                              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 font-mono ${
+                                opt.ean && !isValidEan(opt.ean) ? "border-red-400" : "border-gray-300"
+                              }`}
+                            />
+                            {opt.ean && !isValidEan(opt.ean) && (
+                              <p className="text-[10px] text-red-500 mt-0.5">
+                                EAN inválido: deve ter 8, 12, 13 ou 14 dígitos.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="sm:col-span-2 bg-gray-50 border border-dashed border-gray-300 rounded-lg p-2 text-[11px] text-gray-500">
+                            💡 A Shopee só permite EAN a nível de produto, não por variação. Com {optionDetails.length} variações, o EAN fica desabilitado.
                           </div>
                         )}
                       </div>
