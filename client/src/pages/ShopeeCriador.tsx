@@ -1458,6 +1458,16 @@ function VariationWizard({
     { productId: product.id },
     { staleTime: 60_000 },
   );
+  // Pre-flight: does the Shopee listing already carry tier_variation? If so,
+  // we lack a UI for editing existing variations (init_tier_variation rejects
+  // with "tier-variation not change"), so we block the publish button and
+  // show a banner directing the user to the Shopee seller dashboard.
+  const { data: existingVariation, isLoading: variationCheckLoading } =
+    trpc.shopee.checkExistingVariation.useQuery(
+      { productId: product.id },
+      { staleTime: 30_000 },
+    );
+  const hasExistingVariation = existingVariation?.hasVariation === true;
   const { data: categoryAttributes, isLoading: attrLoading, error: attrError } =
     trpc.shopee.getCategoryAttributes.useQuery(
       { accountId, categoryId: categoryId! },
@@ -2877,6 +2887,36 @@ function VariationWizard({
           {step === "D" && (
             <div className="space-y-4">
 
+              {/* Banner: produto já tem variação na Shopee (modo edição não disponível) */}
+              {hasExistingVariation && existingVariation && (
+                <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex gap-3 items-start">
+                  <span className="text-2xl flex-shrink-0">⚠️</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-amber-900 mb-1">
+                      Este produto já tem variação na Shopee
+                    </p>
+                    <p className="text-xs text-amber-800 leading-relaxed">
+                      Variação atual:&nbsp;
+                      <b>{existingVariation.tierVariation?.[0]?.name || "—"}</b>
+                      &nbsp;com&nbsp;
+                      <b>{existingVariation.modelCount ?? 0} opção(ões)</b>.
+                      O modo de edição de variações existentes ainda não está implementado.
+                      Pra alterar variações deste produto, use o painel oficial da Shopee.
+                    </p>
+                    {existingVariation.itemId && (
+                      <a
+                        href={`https://seller.shopee.com.br/portal/product/${existingVariation.itemId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-700 hover:text-amber-900 underline"
+                      >
+                        Abrir na Shopee →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Resumo das variações */}
               <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -3159,10 +3199,17 @@ function VariationWizard({
                   {/* Publicar sem IA */}
                   <button
                     onClick={() => handlePublishToShopee()}
-                    disabled={publishStatus === "loading" || optionDetails.length === 0}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 text-sm font-semibold transition">
-                    {publishStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    {publishStatus === "loading" ? "Publicando..." : "Publicar sem conteúdo IA"}
+                    disabled={publishStatus === "loading" || optionDetails.length === 0 || variationCheckLoading || hasExistingVariation}
+                    title={hasExistingVariation ? "Produto já tem variação na Shopee — edição não disponível ainda." : ""}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition">
+                    {publishStatus === "loading" || variationCheckLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {publishStatus === "loading"
+                      ? "Publicando..."
+                      : variationCheckLoading
+                      ? "Verificando..."
+                      : hasExistingVariation
+                      ? "Bloqueado (já tem variação)"
+                      : "Publicar sem conteúdo IA"}
                   </button>
                   {publishStatus === "success" && publishResult && (
                     <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
@@ -3431,12 +3478,19 @@ function VariationWizard({
                       </button>
                       <button
                         onClick={() => handlePublishToShopee()}
-                        disabled={publishStatus === "loading" || optionDetails.length === 0}
-                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition">
-                        {publishStatus === "loading"
+                        disabled={publishStatus === "loading" || optionDetails.length === 0 || variationCheckLoading || hasExistingVariation}
+                        title={hasExistingVariation ? "Produto já tem variação na Shopee — edição não disponível ainda." : ""}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition">
+                        {publishStatus === "loading" || variationCheckLoading
                           ? <Loader2 className="w-4 h-4 animate-spin" />
                           : <CheckCircle2 className="w-4 h-4" />}
-                        {publishStatus === "loading" ? "Publicando..." : "Confirmar e Publicar"}
+                        {publishStatus === "loading"
+                          ? "Publicando..."
+                          : variationCheckLoading
+                          ? "Verificando..."
+                          : hasExistingVariation
+                          ? "Bloqueado (já tem variação)"
+                          : "Confirmar e Publicar"}
                       </button>
                     </div>
                   </div>

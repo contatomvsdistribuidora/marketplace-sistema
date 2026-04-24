@@ -22,6 +22,7 @@ import {
   publishProduct,
   publishProductFromWizard,
   batchPublish,
+  promoteSimpleToVariated,
   PublishValidationError,
 } from "./shopee-publish";
 
@@ -960,6 +961,59 @@ describe("Shopee Publish Module", () => {
       const call = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_item"));
       const body = JSON.parse(call![1].body);
       expect(body.image.image_id_list).toEqual(["rid_new"]);
+    });
+  });
+
+  // Pre-flight guard added 2026-04 to surface a clearer error when the
+  // wizard tries to promote a product that ALREADY has tier_variation
+  // (Shopee responds with the unhelpful "tier-variation not change").
+  describe("promoteSimpleToVariated — pre-flight has_model guard", () => {
+    it("throws PRECONDITION_FAILED when get_item_base_info reports has_model=true", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          item_id: 999,
+          has_model: true,
+          tier_variation: [{ name: "Cor", option_list: [{ option: "Vermelho" }] }],
+        },
+      ]);
+
+      await expect(promoteSimpleToVariated("tok", 12345, {
+        itemId: 999,
+        variationTypeName: "Quantidade",
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100 },
+          { label: "Kit 2", price: 56.0, stock: 50 },
+        ],
+      })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+
+      // init_tier_variation MUST NOT be called when the guard fires.
+      const initCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/init_tier_variation"));
+      expect(initCall).toBeUndefined();
+    });
+
+    it("proceeds with init_tier_variation when has_model=false (no remote variations)", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        { item_id: 1000, has_model: false, tier_variation: [] },
+      ]);
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: {} }),
+      });
+
+      const res = await promoteSimpleToVariated("tok", 12345, {
+        itemId: 1000,
+        variationTypeName: "Quantidade",
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100 },
+          { label: "Kit 2", price: 56.0, stock: 50 },
+        ],
+      });
+
+      expect(res.modelsCreated).toBe(2);
+      const initCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/init_tier_variation"));
+      expect(initCall).toBeDefined();
+      const body = JSON.parse(initCall![1].body);
+      expect(body.item_id).toBe(1000);
+      expect(body.tier_variation[0].option_list).toHaveLength(2);
     });
   });
 });

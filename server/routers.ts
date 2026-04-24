@@ -1911,6 +1911,72 @@ export const appRouter = router({
         return row.product;
       }),
 
+    /**
+     * Pre-flight check: does this product already have variations on Shopee?
+     * The wizard uses this to disable the "Publish" button + show a banner
+     * when has_model=true, since we don't yet support editing existing
+     * variations (init_tier_variation rejects with "tier-variation not
+     * change" in that case).
+     *
+     * Fail-open by design: any Shopee API error returns hasVariation=false
+     * with the error message, so the user can still attempt to publish
+     * (the deeper guard in promoteSimpleToVariated will catch the rare race).
+     */
+    checkExistingVariation: protectedProcedure
+      .input(z.object({ productId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const db = sharedDb;
+        const { shopeeProducts, shopeeAccounts } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+
+        const [row] = await db
+          .select({ product: shopeeProducts, accountId: shopeeAccounts.id })
+          .from(shopeeProducts)
+          .innerJoin(shopeeAccounts, eq(shopeeAccounts.id, shopeeProducts.shopeeAccountId))
+          .where(and(eq(shopeeProducts.id, input.productId), eq(shopeeAccounts.userId, ctx.user.id)))
+          .limit(1);
+
+        if (!row || !row.product.itemId) {
+          return { hasVariation: false as const };
+        }
+
+        const itemId = Number(row.product.itemId);
+        try {
+          const { accessToken, shopId } = await shopee.getValidToken(row.accountId);
+          const [item] = await shopee.getItemBaseInfo(accessToken, shopId, [itemId]);
+          if (!item) {
+            console.warn(`[Shopee VariationCheck] item ${itemId}: not returned by API, treating as no-variation`);
+            return { hasVariation: false as const };
+          }
+          const hasModel: boolean = !!item.has_model;
+          const tierVariation: any[] = Array.isArray(item.tier_variation) ? item.tier_variation : [];
+          const optionsCount = tierVariation[0]?.option_list?.length ?? 0;
+          const hasVariation = hasModel || optionsCount > 0;
+
+          console.log(`[Shopee VariationCheck] item ${itemId}: has_model=${hasModel} tiers=${tierVariation.length} options=${optionsCount} → hasVariation=${hasVariation}`);
+
+          if (hasVariation) {
+            return {
+              hasVariation: true as const,
+              itemId,
+              tierVariation: tierVariation.map((t: any) => ({
+                name: String(t?.name ?? ""),
+                options: Array.isArray(t?.option_list)
+                  ? t.option_list.map((o: any) => String(o?.option ?? ""))
+                  : [],
+              })),
+              modelCount: optionsCount,
+            };
+          }
+          return { hasVariation: false as const, itemId };
+        } catch (e: any) {
+          // Fail-open: log and let the user proceed. The promote path has its
+          // own guard that will surface a clear error if we missed something.
+          console.error(`[Shopee VariationCheck] item ${itemId}: error → ${e.message}`);
+          return { hasVariation: false as const, itemId, error: e.message };
+        }
+      }),
+
     // Get product quality stats
     getQualityStats: protectedProcedure
       .input(z.object({ accountId: z.number() }))

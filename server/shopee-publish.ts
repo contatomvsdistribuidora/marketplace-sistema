@@ -766,6 +766,31 @@ export async function promoteSimpleToVariated(
   console.log(`[Shopee Promote] → item ${input.itemId}: creating ${input.variations.length} models via init_tier_variation`);
   console.warn(`[Shopee Promote] WARNING item ${input.itemId}: original simple-product price/stock is NOT migrated — new models use wizard values only`);
 
+  // Defense in depth: re-check has_model right before calling init_tier_variation.
+  // The wizard's pre-flight checkExistingVariation already gates the UI, but a
+  // race (or a stale upstream check) could still slip through; calling the
+  // endpoint when has_model=true returns a confusing "tier-variation not change"
+  // error. Surface a clearer code instead.
+  try {
+    const [preItem] = await getItemBaseInfo(accessToken, shopId, [input.itemId]);
+    const remoteHasModel = !!preItem?.has_model;
+    const remoteTierCount = Array.isArray(preItem?.tier_variation)
+      ? (preItem.tier_variation[0]?.option_list?.length ?? 0)
+      : 0;
+    if (remoteHasModel || remoteTierCount > 0) {
+      console.warn(`[Shopee Promote] BLOCKED item ${input.itemId}: already has variation (has_model=${remoteHasModel}, options=${remoteTierCount}), skipping init_tier_variation`);
+      throw new PublishValidationError({
+        code: "PRECONDITION_FAILED",
+        userMessage: "Produto já tem variação na Shopee. Use o modo edição (não disponível ainda).",
+      });
+    }
+  } catch (e: any) {
+    if (e instanceof PublishValidationError) throw e;
+    // get_item_base_info itself failing isn't fatal — we proceed and let
+    // init_tier_variation surface whatever error Shopee returns.
+    console.warn(`[Shopee Promote] item ${input.itemId}: pre-check failed, proceeding anyway — ${e.message}`);
+  }
+
   const body = {
     item_id: input.itemId,
     tier_variation: [
@@ -882,7 +907,8 @@ export type PublishFromWizardError =
   | { code: "VARIATION_LABEL_MISSING"; userMessage: string }
   | { code: "PROMOTE_FAILED"; userMessage: string }
   | { code: "NEEDS_USER_DECISION"; userMessage: string; availableModes: Array<"create" | "promote"> }
-  | { code: "NAME_INVALID"; userMessage: string };
+  | { code: "NAME_INVALID"; userMessage: string }
+  | { code: "PRECONDITION_FAILED"; userMessage: string };
 
 export class PublishValidationError extends Error {
   code: PublishFromWizardError["code"];
