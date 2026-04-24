@@ -262,6 +262,11 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   const [publishModalResult, setPublishModalResult] = useState<{ itemId: number; itemUrl: string; mode?: "create" | "update" | "promote" } | null>(null);
   const [publishModalError, setPublishModalError] = useState("");
   const [promoteConfirmed, setPromoteConfirmed] = useState(false);
+  // Decision modal: user picks "create" or "promote" when local variations
+  // don't match the remote (simple) product. `overrideMode` then flows into
+  // the mutation to disambiguate for the backend.
+  const [showDecisionModal, setShowDecisionModal] = useState(false);
+  const [overrideMode, setOverrideMode] = useState<"create" | "promote" | undefined>(undefined);
 
   // — state —
   const allImages: string[] = Array.isArray(product.images) && product.images.length > 0
@@ -297,11 +302,16 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
     { staleTime: 60_000 },
   );
   const localOptionsCount = savedVariations[savedVariations.length - 1]?.options.length ?? 0;
-  const isPromoteMode =
+  // Ambiguous: remote is simple, local has >1 variations. User picks via DecisionModal.
+  const isSimpleToVariatedCase =
     publishMode?.mode === "update" &&
     publishMode?.hasRemoteVariations === false &&
     localOptionsCount > 1;
-  const isUpdateMode = publishMode?.mode === "update" && !isPromoteMode;
+  // Publish modal styling: driven by the user's explicit overrideMode (from
+  // DecisionModal) or, when there's no ambiguity, by the natural mode.
+  const isPromoteMode = overrideMode === "promote";
+  const isForcedCreate = overrideMode === "create" && !!publishMode?.itemId;
+  const isUpdateMode = publishMode?.mode === "update" && !isPromoteMode && !isForcedCreate;
   const attrDefMap = useMemo(() => {
     const map = new Map<number, { displayName: string; values: Map<number, string> }>();
     if (Array.isArray(categoryAttrsForDisplay)) {
@@ -427,13 +437,47 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
         title: product.itemName || "",
         description: product.description || "",
         hashtags: [],
+        overrideMode,
       });
       setPublishModalResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishModalStatus("success");
     } catch (e: any) {
-      setPublishModalError(e.message || "Erro desconhecido ao publicar");
+      const msg: string = e?.message || "";
+      // Safety net: if the client-side heuristic missed the ambiguous case,
+      // the backend throws NEEDS_USER_DECISION. Surface the decision modal
+      // instead of showing a raw error.
+      if (msg.includes("[NEEDS_USER_DECISION]")) {
+        setShowPublishModal(false);
+        setPublishModalStatus("idle");
+        setOverrideMode(undefined);
+        setPromoteConfirmed(false);
+        setShowDecisionModal(true);
+        return;
+      }
+      setPublishModalError(msg || "Erro desconhecido ao publicar");
       setPublishModalStatus("error");
     }
+  }
+
+  function handlePublishClick() {
+    if (isSimpleToVariatedCase && !overrideMode) {
+      setShowDecisionModal(true);
+      setPromoteConfirmed(false);
+      return;
+    }
+    setShowPublishModal(true);
+    setPublishModalStatus("idle");
+    setPublishModalResult(null);
+    setPromoteConfirmed(false);
+  }
+
+  function pickDecision(mode: "create" | "promote") {
+    setOverrideMode(mode);
+    setShowDecisionModal(false);
+    setShowPublishModal(true);
+    setPublishModalStatus("idle");
+    setPublishModalResult(null);
+    setPromoteConfirmed(false);
   }
 
   return (
@@ -754,7 +798,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
       {/* Publicar / Criar variação */}
       {savedVariations.length > 0 && (
         <button
-          onClick={() => { setShowPublishModal(true); setPublishModalStatus("idle"); setPublishModalResult(null); setPromoteConfirmed(false); }}
+          onClick={handlePublishClick}
           className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-base transition shadow-md shadow-orange-200">
           🚀 Publicar na Shopee
         </button>
@@ -832,6 +876,69 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
         </div>
       )}
 
+      {/* ── Modal de decisão: criar novo vs. promover existente ─────────── */}
+      {showDecisionModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900">Como publicar este produto?</h3>
+              <button onClick={() => setShowDecisionModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              O produto na Shopee (<span className="font-mono">item_id: {publishMode?.itemId ?? "—"}</span>) é <b>simples</b>,
+              sem variações. Localmente você montou <b>{localOptionsCount} variações</b>. Escolha uma ação:
+            </p>
+
+            {/* Opção 1: CRIAR NOVO (azul/emerald) */}
+            <button
+              onClick={() => pickDecision("create")}
+              className="w-full text-left border-2 border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded-xl p-4 transition"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center flex-shrink-0 text-lg">🆕</div>
+                <div className="flex-1">
+                  <p className="font-semibold text-blue-900 text-sm">Criar novo produto na Shopee</p>
+                  <p className="text-xs text-blue-700 mt-1 leading-relaxed">
+                    Mantém o produto antigo intocado. Cria um novo anúncio com as variações.
+                    Recomendado se você quer migrar pra um novo listing sem perder o antigo.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* Opção 2: ADICIONAR VARIAÇÕES (amber, irreversível) */}
+            <button
+              onClick={() => pickDecision("promote")}
+              className="w-full text-left border-2 border-amber-300 hover:border-amber-500 bg-amber-50 hover:bg-amber-100 rounded-xl p-4 transition"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center flex-shrink-0 text-lg">⚠️</div>
+                <div className="flex-1">
+                  <p className="font-semibold text-amber-900 text-sm">
+                    Adicionar variações ao produto existente <span className="text-[10px] bg-amber-600 text-white px-1.5 py-0.5 rounded ml-1">IRREVERSÍVEL</span>
+                  </p>
+                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                    O produto simples vai passar a ter {localOptionsCount} variações. Histórico de vendas e avaliações são preservados,
+                    mas <b>não dá pra voltar pra produto simples</b>.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* Opção 3: CANCELAR */}
+            <button
+              onClick={() => setShowDecisionModal(false)}
+              className="w-full py-2.5 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Modal de publicação ──────────────────────────────────────────── */}
       {showPublishModal && (() => {
         const modeColor = isPromoteMode
@@ -841,6 +948,13 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
               subtitle: `ATENÇÃO: Esta ação é IRREVERSÍVEL. O produto simples (item_id: ${publishMode?.itemId ?? "—"}) vai passar a ter ${localOptionsCount} variações. O histórico de vendas e avaliações é preservado, mas não dá pra voltar pra produto simples.`,
               emoji: "⚠️",
               needsExtraConfirm: true as boolean }
+          : isForcedCreate
+          ? { tintBg: "bg-blue-50", tintBorder: "border-blue-200", accent: "text-blue-800",
+              btnBg: "bg-blue-600 hover:bg-blue-700", btnLabel: "Criar novo anúncio",
+              title: "Criar novo produto (descartar antigo)",
+              subtitle: `Um novo anúncio com variações será criado. O produto antigo (item_id: ${publishMode?.itemId ?? "—"}) permanece na Shopee, mas o registro local será reapontado para o novo item.`,
+              emoji: "🆕",
+              needsExtraConfirm: false as boolean }
           : isUpdateMode
           ? { tintBg: "bg-red-50", tintBorder: "border-red-200", accent: "text-red-700",
               btnBg: "bg-red-600 hover:bg-red-700", btnLabel: "Atualizar produto",

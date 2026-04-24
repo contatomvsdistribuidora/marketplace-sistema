@@ -2453,6 +2453,11 @@ export const appRouter = router({
             originalValueName: z.string().optional(),
           })),
         })).optional(),
+        /** User's explicit choice for the simple→variated ambiguous case.
+         *  - absent   : backend may reject with NEEDS_USER_DECISION, asking the UI to prompt
+         *  - "create" : abandon existing item_id, create a fresh listing
+         *  - "promote": mutate the existing simple product into a variated one */
+        overrideMode: z.enum(["create", "promote"]).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = sharedDb;
@@ -2468,7 +2473,9 @@ export const appRouter = router({
 
         const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
 
-        const mode: "create" | "update" = sourceProduct.itemId ? "update" : "create";
+        // UPDATE unless user asked to force a new listing via overrideMode="create".
+        const mode: "create" | "update" =
+          sourceProduct.itemId && input.overrideMode !== "create" ? "update" : "create";
 
         // Logistics: only fetched for CREATE; UPDATE preserves shop-side config (Q5)
         let logisticIds: number[] = [];
@@ -2512,14 +2519,32 @@ export const appRouter = router({
             variationTypeName: input.variationTypeName,
             variations: input.variations,
             attributes: input.attributes,
-            sourceItemId: mode === "update" ? Number(sourceProduct.itemId) : undefined,
+            sourceItemId: sourceProduct.itemId ? Number(sourceProduct.itemId) : undefined,
+            overrideMode: input.overrideMode,
           });
 
           console.log(`[Shopee Wizard] ${result.mode} OK — item ${result.itemId}: ${result.itemUrl}`);
+
+          // overrideMode="create" on a product that already had a Shopee item_id
+          // means the local row is now pointing at the wrong listing. Rewrite it
+          // so future UPDATE calls target the new item.
+          if (input.overrideMode === "create" && sourceProduct.itemId && result.itemId !== Number(sourceProduct.itemId)) {
+            await db.update(shopeeProducts)
+              .set({ itemId: result.itemId, variations: null, itemStatus: "NORMAL" })
+              .where(eq(shopeeProducts.id, input.sourceProductId));
+            console.log(`[Shopee Wizard] Rewrote local item_id ${sourceProduct.itemId} → ${result.itemId} after forced CREATE`);
+          }
+
           return { success: true, mode: result.mode, itemId: result.itemId, itemUrl: result.itemUrl, shopId };
         } catch (e: any) {
           if (e instanceof shopeePublish.PublishValidationError) {
-            // Bubble up structured validation errors with the user-friendly message
+            // NEEDS_USER_DECISION needs structured data on the client (to decide
+            // which modes to offer); other codes just need the code + message.
+            if (e.code === "NEEDS_USER_DECISION") {
+              throw new Error(
+                `[NEEDS_USER_DECISION] ${e.userMessage} :: modes=${(e.availableModes ?? []).join(",")}`
+              );
+            }
             throw new Error(`[${e.code}] ${e.userMessage}`);
           }
           throw e;

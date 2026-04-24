@@ -587,7 +587,7 @@ export interface PromoteInput {
 }
 
 /**
- * Promote a SIMPLE product to a VARIATED product by calling add_tier_variation.
+ * Promote a SIMPLE product to a VARIATED product by calling init_tier_variation.
  *
  * ⚠️ Irreversible on Shopee's side. Caller MUST confirm `has_model=false` before
  * invoking this. Races (product becomes variated between check and call) are
@@ -601,7 +601,11 @@ export async function promoteSimpleToVariated(
   shopId: number,
   input: PromoteInput
 ): Promise<{ modelsCreated: number }> {
-  console.log(`[Shopee Promote] → item ${input.itemId}: creating ${input.variations.length} models via add_tier_variation`);
+  // init_tier_variation (not add_tier_variation): Shopee's API for setting
+  // up the FIRST tier_variation on an item. add_tier_variation only works on
+  // items that already have tier_variation — it returns error_not_found on
+  // simple products. Validated against a live UNLIST product 2026-04-24.
+  console.log(`[Shopee Promote] → item ${input.itemId}: creating ${input.variations.length} models via init_tier_variation`);
   console.warn(`[Shopee Promote] WARNING item ${input.itemId}: original simple-product price/stock is NOT migrated — new models use wizard values only`);
 
   const body = {
@@ -621,9 +625,9 @@ export async function promoteSimpleToVariated(
   };
 
   try {
-    await shopeePost("/api/v2/product/add_tier_variation", body, accessToken, shopId);
+    await shopeePost("/api/v2/product/init_tier_variation", body, accessToken, shopId);
   } catch (e: any) {
-    console.error(`[Shopee Promote] ✗ item ${input.itemId}: add_tier_variation failed — ${e.message}`);
+    console.error(`[Shopee Promote] ✗ item ${input.itemId}: init_tier_variation failed — ${e.message}`);
     throw new PublishValidationError({
       code: "PROMOTE_FAILED",
       userMessage: `Falha ao promover produto para variações: ${e.message}`,
@@ -688,22 +692,32 @@ export interface WizardPublishInput {
   /** When present, publishProductFromWizard performs an UPDATE on this item
    *  instead of creating a new listing. */
   sourceItemId?: number;
+  /** Caller's explicit choice for the simple→variated ambiguous case.
+   *  - "create"  : ignore sourceItemId, create a new listing
+   *  - "promote" : mutate the existing simple product to have variations
+   *  - undefined : ask the caller to pick — backend throws NEEDS_USER_DECISION */
+  overrideMode?: "create" | "promote";
 }
 
 export type PublishFromWizardError =
   | { code: "CATEGORY_CHANGED"; userMessage: string }
   | { code: "VARIATION_COUNT_CHANGED"; userMessage: string }
   | { code: "VARIATION_LABEL_MISSING"; userMessage: string }
-  | { code: "PROMOTE_FAILED"; userMessage: string };
+  | { code: "PROMOTE_FAILED"; userMessage: string }
+  | { code: "NEEDS_USER_DECISION"; userMessage: string; availableModes: Array<"create" | "promote"> };
 
 export class PublishValidationError extends Error {
   code: PublishFromWizardError["code"];
   userMessage: string;
+  availableModes?: Array<"create" | "promote">;
   constructor(err: PublishFromWizardError) {
     super(err.userMessage);
     this.name = "PublishValidationError";
     this.code = err.code;
     this.userMessage = err.userMessage;
+    if (err.code === "NEEDS_USER_DECISION") {
+      this.availableModes = err.availableModes;
+    }
   }
 }
 
@@ -836,7 +850,9 @@ export async function publishProductFromWizard(
   const firstVar = input.variations[0];
   const baseSku = input.baseSku ?? "";
 
-  if (input.sourceItemId) {
+  // overrideMode="create" bypasses UPDATE entirely — caller has decided to
+  // abandon the existing item_id and create a fresh listing.
+  if (input.sourceItemId && input.overrideMode !== "create") {
     // ─────────────────────────── UPDATE PATH ───────────────────────────
     if (onProgress) onProgress("Lendo estado atual na Shopee...");
     const [itemInfo] = await getItemBaseInfo(accessToken, shopId, [input.sourceItemId]);
@@ -879,6 +895,23 @@ export async function publishProductFromWizard(
     // remoteHasModel=false + local =1 → regular simple-to-simple update
 
     const needsPromotion = !remoteHasModel && input.variations.length > 1;
+
+    // Ambiguous case: product is simple on Shopee but user built multiple
+    // variations locally. Two reasonable actions (create new listing vs.
+    // promote in place) — we don't pick for the user. Backend throws so the
+    // frontend can surface a decision modal; caller re-submits with
+    // overrideMode set.
+    if (needsPromotion && !input.overrideMode) {
+      throw new PublishValidationError({
+        code: "NEEDS_USER_DECISION",
+        userMessage:
+          "O produto na Shopee é simples (sem variações) e localmente você montou " +
+          `${input.variations.length} variações. Escolha: criar um novo anúncio ` +
+          "na Shopee (mantém o antigo) ou adicionar as variações ao produto " +
+          "existente (irreversível).",
+        availableModes: ["create", "promote"],
+      });
+    }
 
     // Q4 — image reuse when URLs unchanged
     const remoteUrls: string[] = (itemInfo.image?.image_url_list ?? []) as string[];
