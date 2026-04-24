@@ -2009,6 +2009,51 @@ export const appRouter = router({
         return shopeePublish.searchCategory(accessToken, shopId, input.keyword);
       }),
 
+    /**
+     * Cached, breadcrumb-aware category search. First hit pulls the whole
+     * tree from Shopee and persists it (shared across all sellers — the tree
+     * is identical for every BR shop); subsequent searches run in-memory.
+     * TTL: 7 days.
+     */
+    searchCategories: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        query: z.string().min(1),
+        limit: z.number().int().min(1).max(50).optional(),
+      }))
+      .query(async ({ input }) => {
+        const db = sharedDb;
+        const { shopeeCategoryCache } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const REGION = "BR";
+        const TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+        const [cached] = await db.select().from(shopeeCategoryCache)
+          .where(eq(shopeeCategoryCache.region, REGION)).limit(1);
+
+        const isFresh = cached
+          && cached.updatedAt
+          && Date.now() - new Date(cached.updatedAt).getTime() < TTL_MS
+          && Array.isArray(cached.categoryTree)
+          && cached.categoryTree.length > 0;
+
+        let tree = isFresh ? (cached!.categoryTree as any[]) : null;
+        if (!tree) {
+          const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+          tree = await shopeePublish.getCategories(accessToken, shopId);
+          if (cached) {
+            await db.update(shopeeCategoryCache)
+              .set({ categoryTree: tree })
+              .where(eq(shopeeCategoryCache.region, REGION));
+          } else {
+            await db.insert(shopeeCategoryCache).values({ region: REGION, categoryTree: tree });
+          }
+        }
+
+        const indexed = shopeePublish.buildCategoryIndex(tree as any);
+        return shopeePublish.fuzzyMatchCategories(indexed, input.query, input.limit ?? 20);
+      }),
+
     // Get logistics channels
     getLogisticsChannels: protectedProcedure
       .input(z.object({ accountId: z.number() }))
@@ -2490,6 +2535,10 @@ export const appRouter = router({
          *  publishProductFromWizard with a structured NAME_INVALID error so the
          *  client can surface it in the modal instead of as a generic zod error. */
         newItemName: z.string().optional(),
+        /** Category override — used when the user picks a different category
+         *  in the wizard's metadata block. Only honored on CREATE; on update/
+         *  promote the Shopee API rejects with CATEGORY_CHANGED if differs. */
+        categoryId: z.number().int().positive().optional(),
       }))
       .mutation(async ({ input }) => {
         const db = sharedDb;
@@ -2500,7 +2549,10 @@ export const appRouter = router({
           .where(eq(shopeeProducts.id, input.sourceProductId)).limit(1);
         if (!sourceProduct) throw new Error("Produto base não encontrado no banco de dados");
 
-        const categoryId = sourceProduct.categoryId;
+        // Override precedence: user-picked categoryId > synced product categoryId.
+        // Wizard only exposes the override on the CREATE flow (update/promote
+        // paths keep the picker disabled), so no extra guard needed here.
+        const categoryId = input.categoryId ?? sourceProduct.categoryId;
         if (!categoryId) throw new Error("Produto base não possui categoria Shopee. Sincronize os produtos antes de publicar.");
 
         const { accessToken, shopId } = await shopee.getValidToken(input.accountId);

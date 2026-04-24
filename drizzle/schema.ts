@@ -472,3 +472,17 @@ export const shopeeCategoryAttributes = mysqlTable("shopee_category_attributes",
 });
 
 export type ShopeeCategoryAttribute = typeof shopeeCategoryAttributes.$inferSelect;
+
+/**
+ * Global cache of the Shopee category tree. The tree is identical for every
+ * seller in a given region (BR/MX/etc.) so we key by `region` and use 1 row
+ * per region, not per shopId.
+ */
+export const shopeeCategoryCache = mysqlTable("shopee_category_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  region: varchar("region", { length: 10 }).default("BR").notNull().unique(),
+  categoryTree: json("categoryTree").$type<any[]>(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeCategoryCache = typeof shopeeCategoryCache.$inferSelect;

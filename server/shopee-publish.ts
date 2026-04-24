@@ -173,6 +173,85 @@ export async function searchCategory(
   return res?.category_list || [];
 }
 
+// ============ CACHED CATEGORY SEARCH (tree + breadcrumbs + fuzzy) ============
+
+export interface CategoryWithBreadcrumb {
+  category_id: number;
+  display_category_name: string;
+  breadcrumb: string;
+  has_children: boolean;
+}
+
+/**
+ * Builds a breadcrumb ("Indústria > Embalagens > Descartáveis") for each
+ * category in the tree by walking parent_category_id links. Only leaf-ish
+ * entries (has_children=false) are typically useful for publishing, but we
+ * keep everything and let the caller filter.
+ */
+export function buildCategoryIndex(tree: ShopeeCategory[]): CategoryWithBreadcrumb[] {
+  const byId = new Map<number, ShopeeCategory>();
+  for (const c of tree) byId.set(c.category_id, c);
+
+  const breadcrumbCache = new Map<number, string>();
+  const breadcrumbOf = (id: number): string => {
+    const cached = breadcrumbCache.get(id);
+    if (cached !== undefined) return cached;
+    const node = byId.get(id);
+    if (!node) return "";
+    const parentId = node.parent_category_id;
+    const parentCrumb = parentId && parentId !== 0 ? breadcrumbOf(parentId) : "";
+    const crumb = parentCrumb
+      ? `${parentCrumb} > ${node.display_category_name}`
+      : node.display_category_name;
+    breadcrumbCache.set(id, crumb);
+    return crumb;
+  };
+
+  return tree.map((c) => ({
+    category_id: c.category_id,
+    display_category_name: c.display_category_name,
+    breadcrumb: breadcrumbOf(c.category_id),
+    has_children: c.has_children,
+  }));
+}
+
+/**
+ * Simple fuzzy matcher: splits query into tokens, requires every token to
+ * appear (case-insensitive, accent-insensitive) somewhere in the breadcrumb.
+ * Good enough for 20k-ish Shopee categories without pulling in Fuse.js.
+ */
+function normalizeForSearch(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+export function fuzzyMatchCategories(
+  index: CategoryWithBreadcrumb[],
+  query: string,
+  limit = 20,
+): CategoryWithBreadcrumb[] {
+  const tokens = normalizeForSearch(query)
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return [];
+
+  const scored: Array<{ entry: CategoryWithBreadcrumb; score: number }> = [];
+  for (const entry of index) {
+    const hay = normalizeForSearch(entry.breadcrumb);
+    if (!tokens.every((t) => hay.includes(t))) continue;
+    // Score: prefer leaves + shorter breadcrumb (more specific) + name match
+    const nameHay = normalizeForSearch(entry.display_category_name);
+    const nameHits = tokens.filter((t) => nameHay.includes(t)).length;
+    const score =
+      (entry.has_children ? 0 : 10) +
+      nameHits * 5 -
+      entry.breadcrumb.length * 0.01;
+    scored.push({ entry, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((s) => s.entry);
+}
+
 // ============ LOGISTICS ============
 
 /**

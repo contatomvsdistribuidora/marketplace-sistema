@@ -92,6 +92,13 @@
       "when": 1745450000000,
       "tag": "0012_good_ultimo",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1777062089821,
+      "tag": "0013_shopee_category_cache",
+      "breakpoints": true
     }
   ]
 }

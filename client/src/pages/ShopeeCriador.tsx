@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { trpc } from "../lib/trpc";
+import { CategoryPicker } from "../components/shopee/CategoryPicker";
 import {
   Search, Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
@@ -1332,8 +1333,21 @@ function VariationWizard({
   const publishMutation      = trpc.shopee.createProductFromWizard.useMutation();
   const fillAttrsMutation    = trpc.ai.fillAttributes.useMutation();
 
-  // Busca atributos da categoria do produto para a Ficha Técnica
-  const categoryId = product.categoryId ? Number(product.categoryId) : null;
+  // Categoria efetiva: começa do produto e fica editável no fluxo CREATE.
+  // Em UPDATE/PROMOTE a Shopee bloqueia mudança (CATEGORY_CHANGED), então o
+  // picker aparece desabilitado com tooltip explicativo.
+  const initialCategoryId = product.categoryId ? Number(product.categoryId) : null;
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(initialCategoryId);
+  const [selectedCategoryBreadcrumb, setSelectedCategoryBreadcrumb] = useState<string>(product.categoryName || "");
+  const categoryId = selectedCategoryId;
+  // Whether this publish will CREATE (vs update/promote). `publishMode` is
+  // resolved by the backend from product.itemId; when the wizard picks
+  // "Criar novo" in the decision modal, overrideMode="create" also makes
+  // this a CREATE — category becomes editable in both cases.
+  const { data: publishModeData } = trpc.shopee.getPublishMode.useQuery(
+    { productId: product.id },
+    { staleTime: 60_000 },
+  );
   const { data: categoryAttributes, isLoading: attrLoading, error: attrError } =
     trpc.shopee.getCategoryAttributes.useQuery(
       { accountId, categoryId: categoryId! },
@@ -1871,6 +1885,12 @@ function VariationWizard({
         attributes: attributes.length > 0 ? attributes : undefined,
         overrideMode: effectiveOverrideMode,
         newItemName: effectiveOverrideMode === "create" ? effectiveNewItemName : undefined,
+        // Only forward categoryId if the user actually changed it — avoids
+        // no-op overrides on the happy-path update.
+        categoryId:
+          selectedCategoryId && selectedCategoryId !== initialCategoryId
+            ? selectedCategoryId
+            : undefined,
       });
       setPublishResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishStatus("success");
@@ -2779,13 +2799,42 @@ function VariationWizard({
                 </div>
               </div>
 
+              {/* ── Metadados do anúncio (categoria, marca futura) ──────────── */}
+              {(() => {
+                // CREATE when: product has no item_id OR user picked "Criar novo".
+                const isCreateFlow =
+                  !publishModeData?.itemId || overrideMode === "create";
+                const categoryDisabledReason = !isCreateFlow
+                  ? "Para mudar a categoria, recrie o produto na Shopee (a API bloqueia mudança de categoria em update)."
+                  : undefined;
+                return (
+                  <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50">
+                    <p className="text-sm font-semibold text-gray-700">🏷️ Metadados do anúncio</p>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Categoria Shopee</label>
+                      <CategoryPicker
+                        accountId={accountId}
+                        value={selectedCategoryId}
+                        valueBreadcrumb={selectedCategoryBreadcrumb}
+                        disabled={!isCreateFlow}
+                        disabledReason={categoryDisabledReason}
+                        onChange={(id, crumb) => {
+                          setSelectedCategoryId(id);
+                          setSelectedCategoryBreadcrumb(crumb);
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Ficha Técnica dinâmica */}
               {categoryId && (
                 <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-gray-700">📋 Ficha Técnica</span>
-                    {product.categoryName && (
-                      <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{product.categoryName}</span>
+                    {selectedCategoryBreadcrumb && (
+                      <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full truncate max-w-[60%]">{selectedCategoryBreadcrumb}</span>
                     )}
                     {attrLoading && <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin ml-auto" />}
                     {attrError && <span className="text-xs text-red-500 ml-auto">Erro ao carregar atributos</span>}
