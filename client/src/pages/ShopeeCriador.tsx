@@ -259,8 +259,9 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
   const [savedVariations, setSavedVariations] = useState<VariationGroup[]>([]);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishModalStatus, setPublishModalStatus] = useState<"idle"|"loading"|"success"|"error">("idle");
-  const [publishModalResult, setPublishModalResult] = useState<{ itemId: number; itemUrl: string; mode?: "create" | "update" } | null>(null);
+  const [publishModalResult, setPublishModalResult] = useState<{ itemId: number; itemUrl: string; mode?: "create" | "update" | "promote" } | null>(null);
   const [publishModalError, setPublishModalError] = useState("");
+  const [promoteConfirmed, setPromoteConfirmed] = useState(false);
 
   // — state —
   const allImages: string[] = Array.isArray(product.images) && product.images.length > 0
@@ -295,7 +296,12 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
     { productId: product.id },
     { staleTime: 60_000 },
   );
-  const isUpdateMode = publishMode?.mode === "update";
+  const localOptionsCount = savedVariations[savedVariations.length - 1]?.options.length ?? 0;
+  const isPromoteMode =
+    publishMode?.mode === "update" &&
+    publishMode?.hasRemoteVariations === false &&
+    localOptionsCount > 1;
+  const isUpdateMode = publishMode?.mode === "update" && !isPromoteMode;
   const attrDefMap = useMemo(() => {
     const map = new Map<number, { displayName: string; values: Map<number, string> }>();
     if (Array.isArray(categoryAttrsForDisplay)) {
@@ -748,7 +754,7 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
       {/* Publicar / Criar variação */}
       {savedVariations.length > 0 && (
         <button
-          onClick={() => { setShowPublishModal(true); setPublishModalStatus("idle"); setPublishModalResult(null); }}
+          onClick={() => { setShowPublishModal(true); setPublishModalStatus("idle"); setPublishModalResult(null); setPromoteConfirmed(false); }}
           className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-base transition shadow-md shadow-orange-200">
           🚀 Publicar na Shopee
         </button>
@@ -828,17 +834,26 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
 
       {/* ── Modal de publicação ──────────────────────────────────────────── */}
       {showPublishModal && (() => {
-        const modeColor = isUpdateMode
+        const modeColor = isPromoteMode
+          ? { tintBg: "bg-amber-50", tintBorder: "border-amber-300", accent: "text-amber-800",
+              btnBg: "bg-amber-600 hover:bg-amber-700", btnLabel: "Confirmar promoção",
+              title: "Promover para produto com variações",
+              subtitle: `ATENÇÃO: Esta ação é IRREVERSÍVEL. O produto simples (item_id: ${publishMode?.itemId ?? "—"}) vai passar a ter ${localOptionsCount} variações. O histórico de vendas e avaliações é preservado, mas não dá pra voltar pra produto simples.`,
+              emoji: "⚠️",
+              needsExtraConfirm: true as boolean }
+          : isUpdateMode
           ? { tintBg: "bg-red-50", tintBorder: "border-red-200", accent: "text-red-700",
               btnBg: "bg-red-600 hover:bg-red-700", btnLabel: "Atualizar produto",
               title: "Atualizar produto existente",
               subtitle: `Isso vai sobrescrever o produto que já está na Shopee (item_id: ${publishMode?.itemId ?? "—"}). Preço, estoque, imagens, descrição, atributos e dimensões serão substituídos pelos valores atuais.`,
-              emoji: "⚠️" }
+              emoji: "⚠️",
+              needsExtraConfirm: false as boolean }
           : { tintBg: "bg-emerald-50", tintBorder: "border-emerald-200", accent: "text-emerald-700",
               btnBg: "bg-emerald-600 hover:bg-emerald-700", btnLabel: "Criar produto",
               title: "Criar novo produto na Shopee",
               subtitle: "Esse produto ainda não existe na Shopee. Um novo anúncio será criado.",
-              emoji: "🆕" };
+              emoji: "🆕",
+              needsExtraConfirm: false as boolean };
 
         return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
@@ -881,10 +896,23 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
                     </div>
                   );
                 })()}
-                {isUpdateMode && (
+                {(isUpdateMode || isPromoteMode) && (
                   <p className="text-xs text-gray-400 text-center">
                     Categoria permanece <b>{publishMode?.currentCategoryId ?? "—"}</b> — para mudar, recrie o produto na Shopee.
                   </p>
+                )}
+                {modeColor.needsExtraConfirm && (
+                  <label className="flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-xl p-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={promoteConfirmed}
+                      onChange={e => setPromoteConfirmed(e.target.checked)}
+                      className="mt-0.5 accent-amber-600"
+                    />
+                    <span className="text-xs text-amber-900">
+                      Entendo que esta operação é <b>irreversível</b>.
+                    </span>
+                  </label>
                 )}
               </div>
             )}
@@ -903,7 +931,10 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
               <div className="bg-green-50 border border-green-300 rounded-xl p-5 mb-4 text-center">
                 <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
                 <p className="font-bold text-green-800 text-base">
-                  Produto {(publishModalResult.mode ?? (isUpdateMode ? "update" : "create")) === "update" ? "atualizado" : "publicado"}!
+                  Produto {(() => {
+                    const m = publishModalResult.mode ?? (isPromoteMode ? "promote" : isUpdateMode ? "update" : "create");
+                    return m === "promote" ? "promovido" : m === "update" ? "atualizado" : "publicado";
+                  })()}!
                 </p>
                 <a href={publishModalResult.itemUrl} target="_blank" rel="noopener noreferrer"
                   className="text-green-700 underline flex items-center justify-center gap-1 mt-2 text-sm hover:text-green-900">
@@ -920,11 +951,11 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
                 </button>
                 <button
                   onClick={handlePublishFromDetail}
-                  disabled={publishModalStatus === "loading"}
+                  disabled={publishModalStatus === "loading" || (modeColor.needsExtraConfirm && !promoteConfirmed)}
                   className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold text-white rounded-xl disabled:opacity-50 transition ${modeColor.btnBg}`}>
                   {publishModalStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : "🚀"}
                   {publishModalStatus === "loading"
-                    ? (isUpdateMode ? "Atualizando..." : "Publicando...")
+                    ? (isPromoteMode ? "Promovendo..." : isUpdateMode ? "Atualizando..." : "Publicando...")
                     : modeColor.btnLabel}
                 </button>
               </div>
@@ -1116,7 +1147,7 @@ function VariationWizard({
       { enabled: !!categoryId, staleTime: 5 * 60 * 1000 }
     );
   const [publishStatus, setPublishStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [publishResult, setPublishResult] = useState<{ itemId: number; itemUrl: string; mode?: "create" | "update" } | null>(null);
+  const [publishResult, setPublishResult] = useState<{ itemId: number; itemUrl: string; mode?: "create" | "update" | "promote" } | null>(null);
   const [publishError, setPublishError]   = useState<string>("");
 
   const [adContent, setAdContent]       = useState<any>(null);
@@ -2552,7 +2583,7 @@ function VariationWizard({
                     <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
                       <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
                       <div className="text-sm text-green-800">
-                        <p className="font-semibold">Produto {publishResult.mode === "update" ? "atualizado" : "publicado"} com sucesso!</p>
+                        <p className="font-semibold">Produto {publishResult.mode === "promote" ? "promovido" : publishResult.mode === "update" ? "atualizado" : "publicado"} com sucesso!</p>
                         <a href={publishResult.itemUrl} target="_blank" rel="noopener noreferrer"
                           className="text-green-700 underline hover:text-green-900 flex items-center gap-1 mt-1">
                           Ver produto na Shopee <ExternalLink className="w-3 h-3" />
@@ -2827,7 +2858,7 @@ function VariationWizard({
                     <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
                       <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
                       <div className="text-sm text-green-800">
-                        <p className="font-semibold">Produto {publishResult.mode === "update" ? "atualizado" : "publicado"} com sucesso!</p>
+                        <p className="font-semibold">Produto {publishResult.mode === "promote" ? "promovido" : publishResult.mode === "update" ? "atualizado" : "publicado"} com sucesso!</p>
                         <a href={publishResult.itemUrl} target="_blank" rel="noopener noreferrer"
                           className="text-green-700 underline hover:text-green-900 flex items-center gap-1 mt-1">
                           Ver produto na Shopee <ExternalLink className="w-3 h-3" />

@@ -555,16 +555,126 @@ describe("Shopee Publish Module", () => {
       }))).rejects.toMatchObject({ code: "VARIATION_LABEL_MISSING" });
     });
 
-    it("should reject update when trying to add variations to a simple product", async () => {
+    it("should promote simple product to variated when wizard has multiple variations", async () => {
       mockGetItemBaseInfo.mockResolvedValueOnce([
-        { category_id: 101220, has_model: false, image: { image_url_list: [], image_id_list: [] } },
+        {
+          category_id: 101220,
+          has_model: false,
+          image: { image_url_list: ["https://example.com/a.jpg"], image_id_list: ["rid"] },
+        },
       ]);
+      // add_tier_variation
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+      // update_item (post-promote)
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+
+      const res = await publishProductFromWizard("tok", 12345, baseInput({
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+        ],
+      }));
+
+      expect(res.mode).toBe("promote");
+      expect(res.itemId).toBe(5555);
+
+      const addTierCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_tier_variation"));
+      expect(addTierCall).toBeDefined();
+      const addBody = JSON.parse(addTierCall![1].body);
+      expect(addBody.item_id).toBe(5555);
+      expect(addBody.tier_variation).toEqual([
+        { name: "Quantidade", option_list: [{ option: "1 Un" }, { option: "Kit 2" }] },
+      ]);
+      expect(addBody.model).toHaveLength(2);
+      expect(addBody.model[0]).toMatchObject({ tier_index: [0], original_price: 29.9, seller_stock: [{ stock: 100 }] });
+      expect(addBody.model[1]).toMatchObject({ tier_index: [1], original_price: 56.0, seller_stock: [{ stock: 50 }] });
+
+      // update_item must be called without price/seller_stock (product is now variated)
+      const updCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_item"));
+      expect(updCall).toBeDefined();
+      const updBody = JSON.parse(updCall![1].body);
+      expect(updBody.original_price).toBeUndefined();
+      expect(updBody.seller_stock).toBeUndefined();
+    });
+
+    it("should propagate shopee error during promote as PROMOTE_FAILED", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          category_id: 101220,
+          has_model: false,
+          image: { image_url_list: ["https://example.com/a.jpg"], image_id_list: ["rid"] },
+        },
+      ]);
+      // add_tier_variation fails
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "invalid_option", message: "duplicate option name" }),
+      });
+
       await expect(publishProductFromWizard("tok", 12345, baseInput({
         variations: [
           { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
           { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
         ],
-      }))).rejects.toMatchObject({ code: "VARIATIONS_ADDED_ON_SIMPLE" });
+      }))).rejects.toMatchObject({ code: "PROMOTE_FAILED" });
+    });
+
+    it("should treat race ('item already has variations') as PROMOTE_FAILED and skip update_item", async () => {
+      // We read the product as simple (has_model=false)...
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          category_id: 101220,
+          has_model: false,
+          image: { image_url_list: ["https://example.com/a.jpg"], image_id_list: ["rid"] },
+        },
+      ]);
+      // ...but by the time add_tier_variation is called, Shopee already sees it as variated.
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({
+          error: "error_param",
+          message: "item already has variations",
+        }),
+      });
+
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+        ],
+      }))).rejects.toMatchObject({
+        code: "PROMOTE_FAILED",
+        userMessage: expect.stringContaining("item already has variations"),
+      });
+
+      // update_item MUST NOT be called when promote fails — otherwise we'd
+      // overwrite top-level fields on a product whose variation state we
+      // misread.
+      const updCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/update_item"));
+      expect(updCall).toBeUndefined();
+    });
+
+    it("should apply SKU suffix by index to models during promote", async () => {
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          category_id: 101220,
+          has_model: false,
+          image: { image_url_list: ["https://example.com/a.jpg"], image_id_list: ["rid"] },
+        },
+      ]);
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ error: "", response: {} }) });
+
+      await publishProductFromWizard("tok", 12345, baseInput({
+        baseSku: "SKU-BASE",
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+        ],
+      }));
+
+      const addTierCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_tier_variation"));
+      const body = JSON.parse(addTierCall![1].body);
+      expect(body.model[0].model_sku).toBe("SKU-BASE-1");
+      expect(body.model[1].model_sku).toBe("SKU-BASE-2");
     });
 
     it("should re-upload images when URLs differ from remote", async () => {

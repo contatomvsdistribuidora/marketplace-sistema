@@ -573,6 +573,67 @@ export async function updateModelStock(
   );
 }
 
+// ============ PROMOTE (simple → variated) ============
+
+export interface PromoteInput {
+  itemId: number;
+  variationTypeName: string;
+  variations: Array<{
+    label: string;
+    price: number;
+    stock: number;
+    sku?: string;
+  }>;
+}
+
+/**
+ * Promote a SIMPLE product to a VARIATED product by calling add_tier_variation.
+ *
+ * ⚠️ Irreversible on Shopee's side. Caller MUST confirm `has_model=false` before
+ * invoking this. Races (product becomes variated between check and call) are
+ * caught by Shopee itself and surfaced as PROMOTE_FAILED.
+ *
+ * ⚠️ The simple product's original price/stock is NOT migrated to the new models.
+ * Models use the prices/stocks given in `variations`. Caller should warn user.
+ */
+export async function promoteSimpleToVariated(
+  accessToken: string,
+  shopId: number,
+  input: PromoteInput
+): Promise<{ modelsCreated: number }> {
+  console.log(`[Shopee Promote] → item ${input.itemId}: creating ${input.variations.length} models via add_tier_variation`);
+  console.warn(`[Shopee Promote] WARNING item ${input.itemId}: original simple-product price/stock is NOT migrated — new models use wizard values only`);
+
+  const body = {
+    item_id: input.itemId,
+    tier_variation: [
+      {
+        name: input.variationTypeName,
+        option_list: input.variations.map((v) => ({ option: v.label })),
+      },
+    ],
+    model: input.variations.map((v, i) => ({
+      tier_index: [i],
+      original_price: v.price,
+      seller_stock: [{ stock: v.stock }],
+      ...(v.sku ? { model_sku: v.sku } : {}),
+    })),
+  };
+
+  try {
+    await shopeePost("/api/v2/product/add_tier_variation", body, accessToken, shopId);
+  } catch (e: any) {
+    console.error(`[Shopee Promote] ✗ item ${input.itemId}: add_tier_variation failed — ${e.message}`);
+    throw new PublishValidationError({
+      code: "PROMOTE_FAILED",
+      userMessage: `Falha ao promover produto para variações: ${e.message}`,
+    });
+  }
+
+  console.log(`[Shopee Promote] ✓ item ${input.itemId}: ${input.variations.length} models created (irreversible)`);
+  return { modelsCreated: input.variations.length };
+}
+
 // ============ BATCH PUBLISH ============
 
 export interface ProductToPublish {
@@ -633,7 +694,7 @@ export type PublishFromWizardError =
   | { code: "CATEGORY_CHANGED"; userMessage: string }
   | { code: "VARIATION_COUNT_CHANGED"; userMessage: string }
   | { code: "VARIATION_LABEL_MISSING"; userMessage: string }
-  | { code: "VARIATIONS_ADDED_ON_SIMPLE"; userMessage: string };
+  | { code: "PROMOTE_FAILED"; userMessage: string };
 
 export class PublishValidationError extends Error {
   code: PublishFromWizardError["code"];
@@ -771,7 +832,7 @@ export async function publishProductFromWizard(
   shopId: number,
   input: WizardPublishInput,
   onProgress?: (step: string) => void
-): Promise<{ itemId: number; itemUrl: string; imagesUploaded: number; mode: "create" | "update" }> {
+): Promise<{ itemId: number; itemUrl: string; imagesUploaded: number; mode: "create" | "update" | "promote" }> {
   const firstVar = input.variations[0];
   const baseSku = input.baseSku ?? "";
 
@@ -797,7 +858,7 @@ export async function publishProductFromWizard(
       ? ((itemInfo.tier_variation?.[0]?.option_list ?? []).map((o: any) => o.option) as string[])
       : [];
 
-    // Q1 — variation structure changes are blocked
+    // Q1 — variation structure changes on already-variated products are blocked
     if (remoteHasModel) {
       if (input.variations.length !== remoteTierOptions.length) {
         throw new PublishValidationError({
@@ -813,13 +874,11 @@ export async function publishProductFromWizard(
           });
         }
       }
-    } else if (input.variations.length > 1) {
-      throw new PublishValidationError({
-        code: "VARIATIONS_ADDED_ON_SIMPLE",
-        userMessage:
-          "Não é possível adicionar variações a um produto simples via update. Remova e publique como novo.",
-      });
     }
+    // remoteHasModel=false + local >1 → PROMOTE path (handled below, no throw)
+    // remoteHasModel=false + local =1 → regular simple-to-simple update
+
+    const needsPromotion = !remoteHasModel && input.variations.length > 1;
 
     // Q4 — image reuse when URLs unchanged
     const remoteUrls: string[] = (itemInfo.image?.image_url_list ?? []) as string[];
@@ -841,6 +900,21 @@ export async function publishProductFromWizard(
       }
     }
 
+    // Promote simple → variated BEFORE update_item (so update_item sees has_model=true)
+    if (needsPromotion) {
+      if (onProgress) onProgress(`Promovendo para variações (${input.variations.length})...`);
+      await promoteSimpleToVariated(accessToken, shopId, {
+        itemId: input.sourceItemId,
+        variationTypeName: input.variationTypeName,
+        variations: input.variations.map((v, i) => ({
+          label: v.label,
+          price: v.price,
+          stock: v.stock,
+          sku: baseSku ? `${baseSku}-${i + 1}` : undefined,
+        })),
+      });
+    }
+
     // update_item (top-level fields)
     if (onProgress) onProgress("Atualizando produto...");
     const updateInput: UpdateProductInput = {
@@ -856,13 +930,16 @@ export async function publishProductFromWizard(
     };
     // Q5 — logistic_info omitted unless explicitly provided.
     //       brand kept out entirely (wizard doesn't expose it).
-    if (!remoteHasModel) {
+    // price/stock at item level only valid when the product is simple (pre and post).
+    const isNowVariated = remoteHasModel || needsPromotion;
+    if (!isNowVariated) {
       updateInput.price = firstVar.price;
       updateInput.stock = firstVar.stock;
     }
     await updateProduct(accessToken, shopId, updateInput);
 
-    // Per-model updates when the item has variations
+    // Per-model updates for PRE-EXISTING variated products only.
+    // (When `needsPromotion`, prices/stocks were already set inside add_tier_variation.)
     if (remoteHasModel) {
       if (onProgress) onProgress("Atualizando preço/estoque das variações...");
       const models = await getModelList(accessToken, shopId, input.sourceItemId);
@@ -892,7 +969,12 @@ export async function publishProductFromWizard(
     }
 
     const itemUrl = `https://shopee.com.br/product/${shopId}/${input.sourceItemId}`;
-    return { itemId: input.sourceItemId, itemUrl, imagesUploaded, mode: "update" };
+    return {
+      itemId: input.sourceItemId,
+      itemUrl,
+      imagesUploaded,
+      mode: needsPromotion ? "promote" : "update",
+    };
   }
 
   // ─────────────────────────── CREATE PATH ───────────────────────────
