@@ -445,8 +445,9 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
       const msg: string = e?.message || "";
       // Safety net: if the client-side heuristic missed the ambiguous case,
       // the backend throws NEEDS_USER_DECISION. Surface the decision modal
-      // instead of showing a raw error.
-      if (msg.includes("[NEEDS_USER_DECISION]")) {
+      // instead of showing a raw error. Match the bare code (no brackets) so
+      // the check survives any formatter/wrapper stripping punctuation.
+      if (msg.includes("NEEDS_USER_DECISION")) {
         setShowPublishModal(false);
         setPublishModalStatus("idle");
         setOverrideMode(undefined);
@@ -1263,6 +1264,12 @@ function VariationWizard({
   const [publishStatus, setPublishStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [publishResult, setPublishResult] = useState<{ itemId: number; itemUrl: string; mode?: "create" | "update" | "promote" } | null>(null);
   const [publishError, setPublishError]   = useState<string>("");
+  // Decision modal for the simple→variated ambiguous case. Mirrors the
+  // ProductDetail logic — if any new callsite of createProductFromWizard is
+  // added, it MUST also handle NEEDS_USER_DECISION or the raw error leaks
+  // into the UI (see fix commit for grep guard).
+  const [showDecisionModal, setShowDecisionModal] = useState(false);
+  const [overrideMode, setOverrideMode] = useState<"create" | "promote" | undefined>(undefined);
 
   const [adContent, setAdContent]       = useState<any>(null);
   const [adLoadingSection, setAdLoadingSection] = useState<"all"|"title"|"desc"|"tags"|null>(null);
@@ -1611,7 +1618,11 @@ function VariationWizard({
     onSave({ id: uid(), type: selectedType!, typeName, options: opts });
   }
 
-  async function handlePublishToShopee() {
+  async function handlePublishToShopee(overrideModeArg?: "create" | "promote") {
+    // overrideModeArg bypasses React's async setState — pickDecision uses it
+    // to fire the mutation with the freshly-chosen mode without waiting for
+    // a re-render.
+    const effectiveOverrideMode = overrideModeArg ?? overrideMode;
     const opts = optionDetails.map((o, i) => {
       const c = computePricing(o, i);
       const rawPrice = inlinePriceEdits[o.id] || o.price || (c.price > 0 ? c.price.toFixed(2) : "0");
@@ -1657,13 +1668,29 @@ function VariationWizard({
         description,
         hashtags,
         attributes: attributes.length > 0 ? attributes : undefined,
+        overrideMode: effectiveOverrideMode,
       });
       setPublishResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishStatus("success");
     } catch (e: any) {
-      setPublishError(e.message || "Erro desconhecido ao publicar");
+      const msg: string = e?.message || "";
+      // Tolerant substring match: the server may or may not keep the [brackets]
+      // across error formatters/wrappers, so we match the bare code.
+      if (msg.includes("NEEDS_USER_DECISION")) {
+        setPublishStatus("idle");
+        setOverrideMode(undefined);
+        setShowDecisionModal(true);
+        return;
+      }
+      setPublishError(msg || "Erro desconhecido ao publicar");
       setPublishStatus("error");
     }
+  }
+
+  function pickDecision(mode: "create" | "promote") {
+    setOverrideMode(mode);
+    setShowDecisionModal(false);
+    void handlePublishToShopee(mode);
   }
 
   function stepBack() {
@@ -2687,7 +2714,7 @@ function VariationWizard({
                   </div>
                   {/* Publicar sem IA */}
                   <button
-                    onClick={handlePublishToShopee}
+                    onClick={() => handlePublishToShopee()}
                     disabled={publishStatus === "loading" || optionDetails.length === 0}
                     className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 text-sm font-semibold transition">
                     {publishStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
@@ -2958,7 +2985,7 @@ function VariationWizard({
                         🔄 Regenerar tudo
                       </button>
                       <button
-                        onClick={handlePublishToShopee}
+                        onClick={() => handlePublishToShopee()}
                         disabled={publishStatus === "loading" || optionDetails.length === 0}
                         className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition">
                         {publishStatus === "loading"
@@ -3055,6 +3082,66 @@ function VariationWizard({
           )}
         </div>
       </div>
+
+      {/* ── Modal de decisão: criar novo vs. promover existente ─────────── */}
+      {showDecisionModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900">Como publicar este produto?</h3>
+              <button onClick={() => setShowDecisionModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              O produto na Shopee é <b>simples</b> (sem variações) e localmente você montou <b>{optionDetails.length} variações</b>.
+              Escolha uma ação:
+            </p>
+
+            <button
+              onClick={() => pickDecision("create")}
+              className="w-full text-left border-2 border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded-xl p-4 transition"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center flex-shrink-0 text-lg">🆕</div>
+                <div className="flex-1">
+                  <p className="font-semibold text-blue-900 text-sm">Criar novo produto na Shopee</p>
+                  <p className="text-xs text-blue-700 mt-1 leading-relaxed">
+                    Mantém o produto antigo intocado. Cria um novo anúncio com as variações.
+                    Recomendado se você quer migrar pra um novo listing sem perder o antigo.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => pickDecision("promote")}
+              className="w-full text-left border-2 border-amber-300 hover:border-amber-500 bg-amber-50 hover:bg-amber-100 rounded-xl p-4 transition"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center flex-shrink-0 text-lg">⚠️</div>
+                <div className="flex-1">
+                  <p className="font-semibold text-amber-900 text-sm">
+                    Adicionar variações ao produto existente <span className="text-[10px] bg-amber-600 text-white px-1.5 py-0.5 rounded ml-1">IRREVERSÍVEL</span>
+                  </p>
+                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                    O produto simples vai passar a ter {optionDetails.length} variações. Histórico de vendas e avaliações são preservados,
+                    mas <b>não dá pra voltar pra produto simples</b>.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setShowDecisionModal(false)}
+              className="w-full py-2.5 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
