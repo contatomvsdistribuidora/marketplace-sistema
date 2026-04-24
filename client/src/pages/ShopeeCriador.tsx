@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { CategoryPicker } from "../components/shopee/CategoryPicker";
+import { BrandPicker, type BrandValue } from "../components/shopee/BrandPicker";
 import {
   Search, Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
@@ -1339,6 +1340,10 @@ function VariationWizard({
   const initialCategoryId = product.categoryId ? Number(product.categoryId) : null;
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(initialCategoryId);
   const [selectedCategoryBreadcrumb, setSelectedCategoryBreadcrumb] = useState<string>(product.categoryName || "");
+  // Brand picked in the wizard. Starts empty ("No Brand" sentinel) so the
+  // user is forced to acknowledge the choice — Shopee requires a brand
+  // object on add_item even if brand_id=0.
+  const [selectedBrand, setSelectedBrand] = useState<BrandValue>({ brandId: 0, brandName: "No Brand" });
   const categoryId = selectedCategoryId;
   // Whether this publish will CREATE (vs update/promote). `publishMode` is
   // resolved by the backend from product.itemId; when the wizard picks
@@ -1891,6 +1896,10 @@ function VariationWizard({
           selectedCategoryId && selectedCategoryId !== initialCategoryId
             ? selectedCategoryId
             : undefined,
+        // Brand is only consumed by the CREATE path on the backend.
+        brand: effectiveOverrideMode === "create" || !publishModeData?.itemId
+          ? selectedBrand
+          : undefined,
       });
       setPublishResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishStatus("success");
@@ -2821,7 +2830,19 @@ function VariationWizard({
                         onChange={(id, crumb) => {
                           setSelectedCategoryId(id);
                           setSelectedCategoryBreadcrumb(crumb);
+                          // Brand list is scoped to category; reset so the
+                          // user re-picks against the new category's brands.
+                          setSelectedBrand({ brandId: 0, brandName: "No Brand" });
                         }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Marca</label>
+                      <BrandPicker
+                        accountId={accountId}
+                        categoryId={selectedCategoryId}
+                        value={selectedBrand}
+                        onChange={setSelectedBrand}
                       />
                     </div>
                   </div>

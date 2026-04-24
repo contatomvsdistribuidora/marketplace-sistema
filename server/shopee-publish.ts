@@ -252,6 +252,74 @@ export function fuzzyMatchCategories(
   return scored.slice(0, limit).map((s) => s.entry);
 }
 
+// ============ BRAND LIST (per category) ============
+
+export interface ShopeeBrand {
+  brand_id: number;
+  original_brand_name: string;
+  display_brand_name?: string;
+}
+
+/**
+ * Fetch the full brand list for a category. Shopee paginates this
+ * endpoint (page_size max 30), so we loop until is_end or we hit a
+ * cap — 300 pages (~9k brands) is plenty for any real category.
+ */
+export async function getBrandList(
+  accessToken: string,
+  shopId: number,
+  categoryId: number,
+  language: string = "pt-BR",
+): Promise<ShopeeBrand[]> {
+  const all: ShopeeBrand[] = [];
+  let offset = 0;
+  const pageSize = 30;
+  for (let i = 0; i < 300; i++) {
+    const res = await shopeeGet(
+      "/api/v2/product/get_brand_list",
+      {
+        category_id: categoryId,
+        status: 1, // 1 = approved brands only
+        offset,
+        page_size: pageSize,
+        language,
+      },
+      accessToken,
+      shopId,
+    );
+    const page: ShopeeBrand[] = res?.brand_list ?? [];
+    all.push(...page);
+    if (res?.is_end || page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
+export function fuzzyMatchBrands(
+  brands: ShopeeBrand[],
+  query: string,
+  limit = 20,
+): ShopeeBrand[] {
+  const tokens = normalizeForSearch(query)
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return brands.slice(0, limit);
+
+  const scored: Array<{ entry: ShopeeBrand; score: number }> = [];
+  for (const b of brands) {
+    const displayHay = normalizeForSearch(b.display_brand_name ?? b.original_brand_name);
+    const originalHay = normalizeForSearch(b.original_brand_name);
+    const allHay = `${displayHay} ${originalHay}`;
+    if (!tokens.every((t) => allHay.includes(t))) continue;
+    // Prefer exact-prefix matches in the primary display name
+    const prefixHit = displayHay.startsWith(tokens.join(" ")) ? 5 : 0;
+    scored.push({ entry: b, score: prefixHit - displayHay.length * 0.01 });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((s) => s.entry);
+}
+
 // ============ LOGISTICS ============
 
 /**
@@ -781,6 +849,10 @@ export interface WizardPublishInput {
    *  (validated against NAME_INVALID). Used to avoid duplicate listings when
    *  "upgrading" a simple product to a new variated one. */
   newItemName?: string;
+  /** Brand to apply on the Shopee listing. Only consumed in the CREATE path
+   *  — update/promote preserves the shop-side brand configuration. brandId=0
+   *  is the Shopee sentinel for "No Brand" / free-text fallback. */
+  brand?: { brandId: number; brandName: string };
 }
 
 export type PublishFromWizardError =
@@ -1146,6 +1218,9 @@ export async function publishProductFromWizard(
       : undefined,
     logisticIds: input.logisticIds,
     attributes: input.attributes,
+    brand: input.brand
+      ? { brandId: input.brand.brandId, originalBrandName: input.brand.brandName }
+      : undefined,
   });
 
   if (input.variations.length > 1) {

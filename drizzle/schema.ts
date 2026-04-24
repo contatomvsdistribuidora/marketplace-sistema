@@ -486,3 +486,17 @@ export const shopeeCategoryCache = mysqlTable("shopee_category_cache", {
 });
 
 export type ShopeeCategoryCache = typeof shopeeCategoryCache.$inferSelect;
+
+/**
+ * Cache of Shopee's brand list per category (shared across sellers in a
+ * region — same as category tree). TTL: 7 days, enforced by the caller.
+ */
+export const shopeeBrandCache = mysqlTable("shopee_brand_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  region: varchar("region", { length: 10 }).default("BR").notNull(),
+  categoryId: bigint("categoryId", { mode: "number" }).notNull(),
+  brandList: json("brandList").$type<any[]>(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeBrandCache = typeof shopeeBrandCache.$inferSelect;

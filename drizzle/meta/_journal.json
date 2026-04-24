@@ -99,6 +99,13 @@
       "when": 1777062089821,
       "tag": "0013_shopee_category_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1777062965193,
+      "tag": "0014_shopee_brand_cache",
+      "breakpoints": true
     }
   ]
 }

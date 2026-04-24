@@ -2054,6 +2054,51 @@ export const appRouter = router({
         return shopeePublish.fuzzyMatchCategories(indexed, input.query, input.limit ?? 20);
       }),
 
+    /**
+     * Cached brand search scoped to a category. Shopee requires category_id
+     * to list brands, and the set is stable enough to cache for 7 days.
+     * Empty query returns the top-N brands alphabetically (useful as the
+     * initial dropdown content).
+     */
+    searchBrands: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        categoryId: z.number().int().positive(),
+        query: z.string().default(""),
+        limit: z.number().int().min(1).max(50).optional(),
+      }))
+      .query(async ({ input }) => {
+        const db = sharedDb;
+        const { shopeeBrandCache } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        const REGION = "BR";
+        const TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+        const [cached] = await db.select().from(shopeeBrandCache)
+          .where(and(eq(shopeeBrandCache.region, REGION), eq(shopeeBrandCache.categoryId, input.categoryId)))
+          .limit(1);
+
+        const isFresh = cached
+          && cached.updatedAt
+          && Date.now() - new Date(cached.updatedAt).getTime() < TTL_MS
+          && Array.isArray(cached.brandList);
+
+        let brands = isFresh ? (cached!.brandList as any[]) : null;
+        if (!brands) {
+          const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+          brands = await shopeePublish.getBrandList(accessToken, shopId, input.categoryId);
+          if (cached) {
+            await db.update(shopeeBrandCache)
+              .set({ brandList: brands })
+              .where(and(eq(shopeeBrandCache.region, REGION), eq(shopeeBrandCache.categoryId, input.categoryId)));
+          } else {
+            await db.insert(shopeeBrandCache).values({ region: REGION, categoryId: input.categoryId, brandList: brands });
+          }
+        }
+
+        return shopeePublish.fuzzyMatchBrands(brands as any, input.query, input.limit ?? 20);
+      }),
+
     // Get logistics channels
     getLogisticsChannels: protectedProcedure
       .input(z.object({ accountId: z.number() }))
@@ -2539,6 +2584,14 @@ export const appRouter = router({
          *  in the wizard's metadata block. Only honored on CREATE; on update/
          *  promote the Shopee API rejects with CATEGORY_CHANGED if differs. */
         categoryId: z.number().int().positive().optional(),
+        /** Brand picked by the user in the wizard's metadata block.
+         *  brandId=0 means "No Brand" (or free-text, in which case brandName
+         *  carries the raw user input). Only applied on CREATE — update
+         *  preserves the existing brand on Shopee's side. */
+        brand: z.object({
+          brandId: z.number().int().min(0),
+          brandName: z.string().min(1).max(128),
+        }).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = sharedDb;
@@ -2606,6 +2659,7 @@ export const appRouter = router({
             sourceItemId: sourceProduct.itemId ? Number(sourceProduct.itemId) : undefined,
             overrideMode: input.overrideMode,
             newItemName: input.newItemName,
+            brand: input.brand,
           });
 
           console.log(`[Shopee Wizard] ${result.mode} OK — item ${result.itemId}: ${result.itemUrl}`);
