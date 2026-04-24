@@ -879,9 +879,36 @@ export async function publishProductFromWizard(
     const remoteTierOptions: string[] = remoteHasModel
       ? ((itemInfo.tier_variation?.[0]?.option_list ?? []).map((o: any) => o.option) as string[])
       : [];
+    // "Effectively simple" covers two shapes:
+    //  - has_model=false (no variation structure at all), and
+    //  - has_model=true but tier_variation empty/missing (observed on some
+    //    Shopee listings — we must not treat these as variated, otherwise the
+    //    count check below fires VARIATION_COUNT_CHANGED with "Shopee: 0",
+    //    hiding the real ambiguous case from the user.
+    const remoteIsEffectivelySimple = !remoteHasModel || remoteTierOptions.length === 0;
 
-    // Q1 — variation structure changes on already-variated products are blocked
-    if (remoteHasModel) {
+    const needsPromotion = remoteIsEffectivelySimple && input.variations.length > 1;
+
+    // Ambiguous case FIRST — before count/label divergence checks. Otherwise
+    // users hitting "simple on Shopee + multiple locally" get a confusing
+    // VARIATION_COUNT_CHANGED instead of the decision modal that's meant for
+    // exactly this scenario.
+    if (needsPromotion && !input.overrideMode) {
+      throw new PublishValidationError({
+        code: "NEEDS_USER_DECISION",
+        userMessage:
+          "O produto na Shopee é simples (sem variações) e localmente você montou " +
+          `${input.variations.length} variações. Escolha: criar um novo anúncio ` +
+          "na Shopee (mantém o antigo) ou adicionar as variações ao produto " +
+          "existente (irreversível).",
+        availableModes: ["create", "promote"],
+      });
+    }
+
+    // Q1 — variation structure changes on ALREADY-variated products are blocked.
+    // Only gate on real variated state (not has_model flag alone) — otherwise
+    // the edge case above (has_model=true, tier empty) would falsely trip here.
+    if (!remoteIsEffectivelySimple) {
       if (input.variations.length !== remoteTierOptions.length) {
         throw new PublishValidationError({
           code: "VARIATION_COUNT_CHANGED",
@@ -896,27 +923,6 @@ export async function publishProductFromWizard(
           });
         }
       }
-    }
-    // remoteHasModel=false + local >1 → PROMOTE path (handled below, no throw)
-    // remoteHasModel=false + local =1 → regular simple-to-simple update
-
-    const needsPromotion = !remoteHasModel && input.variations.length > 1;
-
-    // Ambiguous case: product is simple on Shopee but user built multiple
-    // variations locally. Two reasonable actions (create new listing vs.
-    // promote in place) — we don't pick for the user. Backend throws so the
-    // frontend can surface a decision modal; caller re-submits with
-    // overrideMode set.
-    if (needsPromotion && !input.overrideMode) {
-      throw new PublishValidationError({
-        code: "NEEDS_USER_DECISION",
-        userMessage:
-          "O produto na Shopee é simples (sem variações) e localmente você montou " +
-          `${input.variations.length} variações. Escolha: criar um novo anúncio ` +
-          "na Shopee (mantém o antigo) ou adicionar as variações ao produto " +
-          "existente (irreversível).",
-        availableModes: ["create", "promote"],
-      });
     }
 
     // Q4 — image reuse when URLs unchanged
@@ -970,7 +976,7 @@ export async function publishProductFromWizard(
     // Q5 — logistic_info omitted unless explicitly provided.
     //       brand kept out entirely (wizard doesn't expose it).
     // price/stock at item level only valid when the product is simple (pre and post).
-    const isNowVariated = remoteHasModel || needsPromotion;
+    const isNowVariated = !remoteIsEffectivelySimple || needsPromotion;
     if (!isNowVariated) {
       updateInput.price = firstVar.price;
       updateInput.stock = firstVar.stock;
@@ -979,7 +985,7 @@ export async function publishProductFromWizard(
 
     // Per-model updates for PRE-EXISTING variated products only.
     // (When `needsPromotion`, prices/stocks were already set inside add_tier_variation.)
-    if (remoteHasModel) {
+    if (!remoteIsEffectivelySimple) {
       if (onProgress) onProgress("Atualizando preço/estoque das variações...");
       const models = await getModelList(accessToken, shopId, input.sourceItemId);
       // Match local variation → remote model via tier_index → option label

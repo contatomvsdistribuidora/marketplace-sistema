@@ -555,6 +555,33 @@ describe("Shopee Publish Module", () => {
       }))).rejects.toMatchObject({ code: "VARIATION_LABEL_MISSING" });
     });
 
+    it("should prefer NEEDS_USER_DECISION over VARIATION_COUNT_CHANGED when remote tier_variation is empty", async () => {
+      // Edge case observed in production: Shopee returns has_model=true but with
+      // no actual tier options. Must be treated as "effectively simple" so the
+      // decision modal fires instead of the misleading "Shopee: 0" count error.
+      mockGetItemBaseInfo.mockResolvedValueOnce([
+        {
+          category_id: 101220,
+          has_model: true,
+          tier_variation: [{ name: "Quantidade", option_list: [] }],
+          image: { image_url_list: [], image_id_list: [] },
+        },
+      ]);
+
+      await expect(publishProductFromWizard("tok", 12345, baseInput({
+        variations: [
+          { label: "1 Un",  price: 29.9, stock: 100, weight: 0.5 },
+          { label: "Kit 2", price: 56.0, stock: 50,  weight: 1.0 },
+          { label: "Kit 3", price: 80.0, stock: 30,  weight: 1.5 },
+          { label: "Kit 4", price: 100,  stock: 20,  weight: 2.0 },
+        ],
+        // no overrideMode — must prompt the user, not fire VARIATION_COUNT_CHANGED
+      }))).rejects.toMatchObject({
+        code: "NEEDS_USER_DECISION",
+        availableModes: ["create", "promote"],
+      });
+    });
+
     it("should require user decision when simple product has local variations (NEEDS_USER_DECISION)", async () => {
       mockGetItemBaseInfo.mockResolvedValueOnce([
         {
