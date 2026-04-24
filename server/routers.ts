@@ -1846,6 +1846,37 @@ export const appRouter = router({
         return { products, total };
       }),
 
+    /**
+     * Fetch a single Shopee product by its local DB id. Used by ShopeeCriador
+     * when arriving via a deep-link like /shopee-criador?productId=123 from
+     * the product grid. Enforces ownership: the product's account must belong
+     * to the current user.
+     */
+    getProductById: protectedProcedure
+      .input(z.object({ productId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const db = sharedDb;
+        const { shopeeProducts, shopeeAccounts } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+
+        const [row] = await db
+          .select({
+            product: shopeeProducts,
+            accountUserId: shopeeAccounts.userId,
+          })
+          .from(shopeeProducts)
+          .innerJoin(shopeeAccounts, eq(shopeeAccounts.id, shopeeProducts.shopeeAccountId))
+          .where(and(eq(shopeeProducts.id, input.productId), eq(shopeeAccounts.userId, ctx.user.id)))
+          .limit(1);
+
+        if (!row) {
+          // Same error whether the product doesn't exist OR belongs to another
+          // user — avoids leaking existence to unauthorized callers.
+          throw new Error("Produto não encontrado.");
+        }
+        return row.product;
+      }),
+
     // Get product quality stats
     getQualityStats: protectedProcedure
       .input(z.object({ accountId: z.number() }))

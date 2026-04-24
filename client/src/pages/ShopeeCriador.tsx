@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useSearch, useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
 import { CategoryPicker } from "../components/shopee/CategoryPicker";
 import { BrandPicker, type BrandValue } from "../components/shopee/BrandPicker";
@@ -105,11 +106,35 @@ const VARIATION_TYPES: { type: VariationType; label: string; icon: React.ReactNo
 // ─── Tela 1 – Lista de produtos ───────────────────────────────────────────────
 
 export default function ShopeeCriador() {
+  const urlSearch = useSearch();
+  const [, setLocation] = useLocation();
+  // Deep-link from the Shopee products grid: /shopee-criador?productId=N
+  // auto-selects the product and skips the picker.
+  const urlProductId = useMemo(() => {
+    const p = new URLSearchParams(urlSearch).get("productId");
+    const n = p ? Number(p) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [urlSearch]);
+
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+
+  const { data: urlProduct, error: urlProductError } = trpc.shopee.getProductById.useQuery(
+    { productId: urlProductId! },
+    { enabled: urlProductId !== null, staleTime: 60_000, retry: false },
+  );
+
+  // Hydrate selectedAccountId + selectedProduct from the deep-link row once
+  // the tRPC query resolves.
+  useEffect(() => {
+    if (urlProduct && selectedProduct?.id !== urlProduct.id) {
+      setSelectedAccountId(Number(urlProduct.shopeeAccountId));
+      setSelectedProduct(urlProduct);
+    }
+  }, [urlProduct, selectedProduct?.id]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 400);
@@ -138,7 +163,45 @@ export default function ShopeeCriador() {
   }
 
   if (selectedProduct) {
-    return <ProductDetail product={selectedProduct} accountId={selectedAccountId!} onBack={() => setSelectedProduct(null)} />;
+    // When arrived via deep-link, "Voltar" goes back to the products page.
+    // Otherwise it clears state and shows the internal picker again.
+    const handleBack = urlProductId
+      ? () => setLocation("/shopee-products")
+      : () => setSelectedProduct(null);
+    return (
+      <ProductDetail
+        product={selectedProduct}
+        accountId={selectedAccountId!}
+        onBack={handleBack}
+        showBreadcrumb={!!urlProductId}
+      />
+    );
+  }
+
+  // Deep-link with invalid / unauthorized productId → show friendly error.
+  if (urlProductId && urlProductError) {
+    return (
+      <div className="p-6 max-w-xl mx-auto text-center space-y-3">
+        <p className="text-lg font-semibold text-gray-800">Produto não disponível</p>
+        <p className="text-sm text-gray-500">{urlProductError.message}</p>
+        <button
+          onClick={() => setLocation("/shopee-products")}
+          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-xl transition"
+        >
+          Voltar para Produtos Shopee
+        </button>
+      </div>
+    );
+  }
+
+  // Deep-link pending (query still loading) — avoid flashing the picker.
+  if (urlProductId && !urlProduct) {
+    return (
+      <div className="flex items-center justify-center py-24 gap-3 text-gray-500">
+        <Loader2 className="w-6 h-6 animate-spin" />
+        <span>Carregando produto...</span>
+      </div>
+    );
   }
 
   return (
@@ -283,7 +346,7 @@ function ScoreBar({ score, max }: { score: number; max: number }) {
   );
 }
 
-function ProductDetail({ product, accountId, onBack }: { product: any; accountId: number; onBack: () => void }) {
+function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: { product: any; accountId: number; onBack: () => void; showBreadcrumb?: boolean }) {
   // — existing wizard/publish state —
   const [wizardOpen, setWizardOpen] = useState(false);
   const [savedVariations, setSavedVariations] = useState<VariationGroup[]>([]);
@@ -520,8 +583,19 @@ function ProductDetail({ product, accountId, onBack }: { product: any; accountId
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4">
+      {showBreadcrumb && (
+        <nav className="text-xs text-gray-500 flex items-center gap-1 flex-wrap">
+          <button onClick={onBack} className="hover:text-gray-700 underline">
+            Produtos Shopee
+          </button>
+          <span>›</span>
+          <span className="text-gray-700 font-medium truncate max-w-[40ch]">{displayName || product.itemName}</span>
+          <span>›</span>
+          <span className="text-orange-600 font-semibold">Criar Anúncio</span>
+        </nav>
+      )}
       <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 text-sm transition">
-        <ArrowLeft className="w-4 h-4" /> Voltar para lista
+        <ArrowLeft className="w-4 h-4" /> {showBreadcrumb ? "Voltar para Produtos Shopee" : "Voltar para lista"}
       </button>
 
       {/* ── 1. HEADER ─────────────────────────────────────────────────────── */}

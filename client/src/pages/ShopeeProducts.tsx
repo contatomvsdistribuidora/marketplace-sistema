@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useState, useMemo } from "react";
-import { useSearch } from "wouter";
+import { useSearch, useLocation } from "wouter";
 import {
   Select,
   SelectContent,
@@ -79,6 +79,7 @@ function formatDate(d: string | Date | null | undefined) {
 
 export default function ShopeeProducts() {
   const search = useSearch();
+  const [, setLocation] = useLocation();
   const params = new URLSearchParams(search);
   const initialAccountId = params.get("accountId");
 
@@ -334,7 +335,16 @@ export default function ShopeeProducts() {
               return (
                 <Card
                   key={product.id}
-                  className={`hover:shadow-sm transition-shadow ${
+                  onClick={() => setLocation(`/shopee-criador?productId=${product.id}`)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setLocation(`/shopee-criador?productId=${product.id}`);
+                    }
+                  }}
+                  className={`cursor-pointer hover:shadow-md hover:border-orange-300 transition-all ${
                     syncStatus === "outdated" ? "border-yellow-200" :
                     syncStatus === "not_found" ? "border-red-200" : ""
                   }`}
@@ -411,7 +421,10 @@ export default function ShopeeProducts() {
                             variant="outline"
                             className="h-7 gap-1 text-xs"
                             disabled={isSyncingThis}
-                            onClick={() => handleSyncSingle(product.id, product.itemName)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // don't trigger the Card's navigate-to-wizard
+                              handleSyncSingle(product.id, product.itemName);
+                            }}
                           >
                             {isSyncingThis
                               ? <Loader2 className="h-3 w-3 animate-spin" />
