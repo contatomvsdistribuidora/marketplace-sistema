@@ -1427,11 +1427,45 @@ function VariationWizard({
   // picker aparece desabilitado com tooltip explicativo.
   const initialCategoryId = product.categoryId ? Number(product.categoryId) : null;
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(initialCategoryId);
+  // product.categoryName é o nome da folha (sem hierarquia) ou null pra
+  // produtos sincronizados antes do cache de árvore. Resolvemos o
+  // breadcrumb completo via tRPC abaixo quando há ID mas falta breadcrumb.
   const [selectedCategoryBreadcrumb, setSelectedCategoryBreadcrumb] = useState<string>(product.categoryName || "");
-  // Brand picked in the wizard. Starts empty ("No Brand" sentinel) so the
-  // user is forced to acknowledge the choice — Shopee requires a brand
-  // object on add_item even if brand_id=0.
-  const [selectedBrand, setSelectedBrand] = useState<BrandValue>({ brandId: 0, brandName: "No Brand" });
+  const { data: resolvedBreadcrumb } = trpc.shopee.resolveCategoryBreadcrumb.useQuery(
+    { accountId, categoryId: selectedCategoryId! },
+    {
+      enabled: !!selectedCategoryId && !selectedCategoryBreadcrumb.includes(" > "),
+      staleTime: 24 * 60 * 60 * 1000, // 1d — tree is shared/rarely changes
+    },
+  );
+  useEffect(() => {
+    if (resolvedBreadcrumb && resolvedBreadcrumb.breadcrumb) {
+      setSelectedCategoryBreadcrumb(resolvedBreadcrumb.breadcrumb);
+    }
+  }, [resolvedBreadcrumb]);
+  // Brand picked in the wizard. Hydrated from the product's synced
+  // attributes (Ficha Técnica) — Shopee returns brand as a regular
+  // attribute with input_type=BRAND. Falls back to "No Brand" sentinel.
+  // TODO: if too many synced products end up brand-less here, evolve to
+  // option (B) — a dedicated `shopeeProducts.brandId / brandName` column +
+  // backfill script in sync. Today we lean on attributes only.
+  const initialBrand = useMemo<BrandValue>(() => {
+    const attrs: any[] = Array.isArray(product.attributes) ? product.attributes : [];
+    const brandAttr = attrs.find((a: any) =>
+      a?.input_type === "BRAND" ||
+      a?.original_attribute_name === "Brand" ||
+      a?.display_attribute_name === "Marca",
+    );
+    const v = brandAttr?.attribute_value_list?.[0];
+    if (v && (v.value_id || v.original_value_name || v.display_value_name)) {
+      return {
+        brandId: Number(v.value_id ?? 0),
+        brandName: String(v.display_value_name ?? v.original_value_name ?? "No Brand"),
+      };
+    }
+    return { brandId: 0, brandName: "No Brand" };
+  }, [product.attributes]);
+  const [selectedBrand, setSelectedBrand] = useState<BrandValue>(initialBrand);
   const categoryId = selectedCategoryId;
   // Whether this publish will CREATE (vs update/promote). `publishMode` is
   // resolved by the backend from product.itemId; when the wizard picks

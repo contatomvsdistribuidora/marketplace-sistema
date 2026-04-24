@@ -29,10 +29,22 @@ interface Props {
 }
 
 export function CategoryPicker({ accountId, value, valueBreadcrumb, disabled, disabledReason, onChange }: Props) {
-  const [query, setQuery] = useState("");
+  // Initialize the input with the resolved breadcrumb so the user sees the
+  // current selection without having to focus the field. Cleared on focus
+  // so typing a new search isn't blocked by the previous value.
+  const [query, setQuery] = useState(valueBreadcrumb || "");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // When the parent resolves the breadcrumb asynchronously (e.g. via
+  // resolveCategoryBreadcrumb tRPC query), reflect it in the visible input
+  // — but only when the user isn't actively searching.
+  useEffect(() => {
+    if (!open && valueBreadcrumb && !query) {
+      setQuery(valueBreadcrumb);
+    }
+  }, [valueBreadcrumb, open, query]);
 
   // Debounce: 300ms after user stops typing.
   useEffect(() => {
@@ -72,7 +84,18 @@ export function CategoryPicker({ accountId, value, valueBreadcrumb, disabled, di
           type="text"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            // Clear the pre-populated breadcrumb so the user can type freely
+            // without having to delete it manually. State is restored from
+            // valueBreadcrumb if they close without picking anything.
+            if (query && query === valueBreadcrumb) setQuery("");
+            setOpen(true);
+          }}
+          onBlur={() => {
+            // Re-show the selected breadcrumb after blur if the user didn't
+            // type anything new.
+            if (!query && valueBreadcrumb) setQuery(valueBreadcrumb);
+          }}
           disabled={disabled}
           placeholder={
             value
@@ -104,7 +127,8 @@ export function CategoryPicker({ accountId, value, valueBreadcrumb, disabled, di
               key={r.category_id}
               onClick={() => {
                 onChange(r.category_id, r.breadcrumb);
-                setQuery("");
+                // Show the picked breadcrumb in the input post-selection.
+                setQuery(r.breadcrumb);
                 setDebounced("");
                 setOpen(false);
               }}

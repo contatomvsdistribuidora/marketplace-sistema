@@ -2086,6 +2086,51 @@ export const appRouter = router({
       }),
 
     /**
+     * Resolve a single category id to its breadcrumb (e.g. "Indústria >
+     * Embalagens > Sacos de Lixo"). Reuses the cached tree from
+     * shopee_category_cache; bootstraps it with one shop's token if absent.
+     * Used by the wizard to pre-populate CategoryPicker with the resolved
+     * name when the user opens a product whose categoryId is known but
+     * whose synced categoryName is missing or just the leaf.
+     */
+    resolveCategoryBreadcrumb: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        categoryId: z.number().int().positive(),
+      }))
+      .query(async ({ input }) => {
+        const db = sharedDb;
+        const { shopeeCategoryCache } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const REGION = "BR";
+        const TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+        const [cached] = await db.select().from(shopeeCategoryCache)
+          .where(eq(shopeeCategoryCache.region, REGION)).limit(1);
+        const isFresh = cached
+          && cached.updatedAt
+          && Date.now() - new Date(cached.updatedAt).getTime() < TTL_MS
+          && Array.isArray(cached.categoryTree)
+          && cached.categoryTree.length > 0;
+
+        let tree = isFresh ? (cached!.categoryTree as any[]) : null;
+        if (!tree) {
+          const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+          tree = await shopeePublish.getCategories(accessToken, shopId);
+          if (cached) {
+            await db.update(shopeeCategoryCache)
+              .set({ categoryTree: tree })
+              .where(eq(shopeeCategoryCache.region, REGION));
+          } else {
+            await db.insert(shopeeCategoryCache).values({ region: REGION, categoryTree: tree });
+          }
+        }
+
+        const indexed = shopeePublish.buildCategoryIndex(tree as any);
+        return indexed.find((c) => c.category_id === input.categoryId) ?? null;
+      }),
+
+    /**
      * Cached brand search scoped to a category. Shopee requires category_id
      * to list brands, and the set is stable enough to cache for 7 days.
      * Empty query returns the top-N brands alphabetically (useful as the

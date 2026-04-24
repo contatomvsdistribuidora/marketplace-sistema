@@ -32,10 +32,22 @@ interface Props {
 const NO_BRAND: BrandValue = { brandId: 0, brandName: "No Brand" };
 
 export function BrandPicker({ accountId, categoryId, value, onChange }: Props) {
-  const [query, setQuery] = useState("");
+  // Pre-populate with the current selection (unless it's the "No Brand"
+  // sentinel, which we leave blank so the placeholder hint shows).
+  const initialDisplay =
+    value.brandId !== 0 || value.brandName !== "No Brand" ? value.brandName : "";
+  const [query, setQuery] = useState(initialDisplay);
   const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Reflect parent updates to `value` (e.g. picked from initial product
+  // attributes after async hydration) into the visible input.
+  useEffect(() => {
+    if (!open && !query && (value.brandId !== 0 || value.brandName !== "No Brand")) {
+      setQuery(value.brandName);
+    }
+  }, [value.brandId, value.brandName, open, query]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query), 300);
@@ -75,7 +87,7 @@ export function BrandPicker({ accountId, categoryId, value, onChange }: Props) {
     // types a known brand that we failed to match, Shopee will use the
     // sentinel too and the seller can correct later in their dashboard.
     onChange({ brandId: 0, brandName: trimmed });
-    setQuery("");
+    setQuery(trimmed); // keep visible so user sees what was applied
     setDebounced("");
     setOpen(false);
   }
@@ -93,7 +105,18 @@ export function BrandPicker({ accountId, categoryId, value, onChange }: Props) {
           type="text"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            // Clear the pre-populated brand name so the user can type a new
+            // search without having to delete first.
+            if (query && query === value.brandName) setQuery("");
+            setOpen(true);
+          }}
+          onBlur={() => {
+            // Restore the brand name on blur if user didn't type anything new.
+            if (!query && (value.brandId !== 0 || value.brandName !== "No Brand")) {
+              setQuery(value.brandName);
+            }
+          }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyFreeText(); } }}
           disabled={disabled}
           placeholder={
@@ -124,7 +147,9 @@ export function BrandPicker({ accountId, categoryId, value, onChange }: Props) {
               key={`${b.brandId}-${i}`}
               onClick={() => {
                 onChange(b);
-                setQuery("");
+                // Reflect the pick in the input — except for "No Brand"
+                // which reads cleaner as an empty field with placeholder.
+                setQuery(b.brandId === 0 ? "" : b.brandName);
                 setDebounced("");
                 setOpen(false);
               }}

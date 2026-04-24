@@ -782,6 +782,10 @@ export async function promoteSimpleToVariated(
     })),
   };
 
+  // Diagnostic dump: Shopee's "The level of tier-variation not change" error
+  // is thin — having the exact payload makes future incident triage trivial.
+  console.log(`[Shopee Promote DEBUG] item ${input.itemId} payload:`, JSON.stringify(body, null, 2));
+
   try {
     await shopeePost("/api/v2/product/init_tier_variation", body, accessToken, shopId);
   } catch (e: any) {
