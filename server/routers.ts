@@ -1950,25 +1950,82 @@ export const appRouter = router({
           }
           const hasModel: boolean = !!item.has_model;
           const tierVariation: any[] = Array.isArray(item.tier_variation) ? item.tier_variation : [];
-          const optionsCount = tierVariation[0]?.option_list?.length ?? 0;
-          const hasVariation = hasModel || optionsCount > 0;
+          // tierVariation may carry option_list per tier; flatten the FIRST tier
+          // for the headline count. Real model count comes from get_model_list
+          // below (more authoritative — handles multi-tier products correctly).
+          const headlineOptionsCount = tierVariation[0]?.option_list?.length ?? 0;
+          const hasVariation = hasModel || headlineOptionsCount > 0;
 
-          console.log(`[Shopee VariationCheck] item ${itemId}: has_model=${hasModel} tiers=${tierVariation.length} options=${optionsCount} → hasVariation=${hasVariation}`);
-
-          if (hasVariation) {
-            return {
-              hasVariation: true as const,
-              itemId,
-              tierVariation: tierVariation.map((t: any) => ({
-                name: String(t?.name ?? ""),
-                options: Array.isArray(t?.option_list)
-                  ? t.option_list.map((o: any) => String(o?.option ?? ""))
-                  : [],
-              })),
-              modelCount: optionsCount,
-            };
+          if (!hasVariation) {
+            console.log(`[Shopee VariationCheck] item ${itemId}: has_model=${hasModel} tiers=0 → hasVariation=false`);
+            return { hasVariation: false as const, itemId };
           }
-          return { hasVariation: false as const, itemId };
+
+          // Build the read-only tier shape (name + full option entries with image).
+          const tierVariationOut = tierVariation.map((t: any) => ({
+            name: String(t?.name ?? ""),
+            optionList: Array.isArray(t?.option_list)
+              ? t.option_list.map((o: any) => ({
+                  option: String(o?.option ?? ""),
+                  image: o?.image?.image_url ? String(o.image.image_url) : null,
+                }))
+              : [],
+          }));
+
+          // Fetch the model list (authoritative SKU/price/stock per variation).
+          // Fail-soft: if Shopee returns an error we still surface the tier
+          // names so the banner can render — just without the model table.
+          let modelsOut: Array<{
+            modelId: number;
+            modelSku: string;
+            modelName: string;
+            tierIndex: number[];
+            currentPrice: number | null;
+            originalPrice: number | null;
+            currentStock: number | null;
+            normalStock: number | null;
+          }> = [];
+          try {
+            const rawModels = await shopee.getModelList(accessToken, shopId, itemId);
+            modelsOut = rawModels.map((m: any) => {
+              const tierIndex: number[] = Array.isArray(m?.tier_index) ? m.tier_index : [];
+              // Resolve "tierIndex → option name" by looking up each tier's option_list.
+              const modelName = tierIndex
+                .map((idx, ti) => tierVariationOut[ti]?.optionList[idx]?.option ?? "")
+                .filter(Boolean)
+                .join(" / ");
+              const priceInfo = Array.isArray(m?.price_info) ? m.price_info[0] : null;
+              const sellerStock = Array.isArray(m?.stock_info_v2?.seller_stock)
+                ? m.stock_info_v2.seller_stock[0]
+                : null;
+              return {
+                modelId: Number(m?.model_id ?? 0),
+                modelSku: String(m?.model_sku ?? ""),
+                modelName: modelName || `Variação ${tierIndex.join(",")}`,
+                tierIndex,
+                currentPrice: priceInfo?.current_price != null ? Number(priceInfo.current_price) : null,
+                originalPrice: priceInfo?.original_price != null ? Number(priceInfo.original_price) : null,
+                currentStock: sellerStock?.stock != null ? Number(sellerStock.stock) : null,
+                normalStock: m?.stock_info_v2?.summary_info?.total_available_stock != null
+                  ? Number(m.stock_info_v2.summary_info.total_available_stock)
+                  : null,
+              };
+            });
+          } catch (mlErr: any) {
+            console.warn(`[Shopee VariationCheck] item ${itemId}: get_model_list error → ${mlErr.message} (proceeding with tier names only)`);
+          }
+
+          console.log(`[Shopee VariationCheck] item ${itemId}: found ${tierVariationOut.length} tier(s), ${modelsOut.length} model(s)`);
+
+          return {
+            hasVariation: true as const,
+            itemId,
+            tierVariation: tierVariationOut,
+            // Authoritative count comes from get_model_list when available;
+            // falls back to the option_list count of the first tier.
+            modelCount: modelsOut.length || headlineOptionsCount,
+            models: modelsOut,
+          };
         } catch (e: any) {
           // Fail-open: log and let the user proceed. The promote path has its
           // own guard that will surface a clear error if we missed something.

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useSearch, useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
 import { CategoryPicker } from "../components/shopee/CategoryPicker";
+import { VariationsReadOnly } from "../components/shopee/VariationsReadOnly";
 // BrandPicker NÃO é usado na Etapa 4 (Revisão). Brand é atributo de categoria
 // na Shopee — renderizado dentro de Especificações na Etapa 3 quando o
 // backend devolve um attribute com input_type=BRAND. O componente fica
@@ -2888,34 +2889,51 @@ function VariationWizard({
             <div className="space-y-4">
 
               {/* Banner: produto já tem variação na Shopee (modo edição não disponível) */}
-              {hasExistingVariation && existingVariation && (
-                <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex gap-3 items-start">
-                  <span className="text-2xl flex-shrink-0">⚠️</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-amber-900 mb-1">
-                      Este produto já tem variação na Shopee
-                    </p>
-                    <p className="text-xs text-amber-800 leading-relaxed">
-                      Variação atual:&nbsp;
-                      <b>{existingVariation.tierVariation?.[0]?.name || "—"}</b>
-                      &nbsp;com&nbsp;
-                      <b>{existingVariation.modelCount ?? 0} opção(ões)</b>.
-                      O modo de edição de variações existentes ainda não está implementado.
-                      Pra alterar variações deste produto, use o painel oficial da Shopee.
-                    </p>
-                    {existingVariation.itemId && (
-                      <a
-                        href={`https://seller.shopee.com.br/portal/product/${existingVariation.itemId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-700 hover:text-amber-900 underline"
-                      >
-                        Abrir na Shopee →
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
+              {hasExistingVariation && existingVariation && (() => {
+                // modelCount agora é authoritative (vem do get_model_list).
+                // Para o headline pegamos o maior entre modelCount e a soma
+                // das opções por tier — defensa contra resposta crua estranha.
+                const tiers = existingVariation.tierVariation ?? [];
+                const optionsSum = tiers.reduce((sum, t) => sum + (t.optionList?.length ?? 0), 0);
+                const displayCount = Math.max(existingVariation.modelCount ?? 0, optionsSum);
+                const firstTierName = tiers[0]?.name || "Variação";
+                return (
+                  <>
+                    <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex gap-3 items-start">
+                      <span className="text-2xl flex-shrink-0">⚠️</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-amber-900 mb-1">
+                          Este produto já tem variação na Shopee
+                        </p>
+                        <p className="text-xs text-amber-800 leading-relaxed">
+                          Variação atual:&nbsp;
+                          <b>{firstTierName}</b>
+                          &nbsp;com&nbsp;
+                          <b>{displayCount} opção(ões)</b>.
+                          O modo de edição de variações existentes ainda não está implementado.
+                          Pra alterar variações deste produto, use o painel oficial da Shopee.
+                        </p>
+                        {existingVariation.itemId && (
+                          <a
+                            href={`https://seller.shopee.com.br/portal/product/${existingVariation.itemId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-700 hover:text-amber-900 underline"
+                          >
+                            Abrir na Shopee →
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {/* Read-only block com tiers + tabela de models */}
+                    <VariationsReadOnly
+                      itemId={existingVariation.itemId!}
+                      tierVariation={existingVariation.tierVariation ?? []}
+                      models={existingVariation.models ?? []}
+                    />
+                  </>
+                );
+              })()}
 
               {/* Resumo das variações */}
               <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
