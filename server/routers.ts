@@ -19,6 +19,40 @@ import * as shopeeExport from "./shopee-export";
 import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
 
+/**
+ * Brand is a per-category attribute on Shopee, but it's missing from our
+ * local DB fallback (the synthetic seed used when /api/v2/product/get_attributes
+ * is suspended for the partner). We splice it in at read time so the wizard's
+ * Especificações step always renders a brand field — same surface as the
+ * official seller dashboard. Idempotent: skips if a BRAND-typed entry is
+ * already present.
+ */
+export function ensureBrandAttribute(list: any[]): any[] {
+  const arr = Array.isArray(list) ? list : [];
+  const hasBrand = arr.some((a) =>
+    a?.input_type === "BRAND" ||
+    a?.original_attribute_name === "Brand" ||
+    a?.display_attribute_name === "Marca",
+  );
+  if (hasBrand) return arr;
+  const brandEntry = {
+    // TODO: real Shopee brand attribute_id varies per category. Once
+    // /api/v2/product/get_attributes is unsuspended for the partner, this
+    // synthetic id gets replaced by the API-supplied one. The frontend
+    // dispatches on input_type=BRAND, not on attribute_id, so this is safe.
+    attribute_id: -1,
+    input_type: "BRAND",
+    original_attribute_name: "Brand",
+    display_attribute_name: "Marca",
+    is_mandatory: false,
+    attribute_value_list: [
+      { value_id: 0, original_value_name: "Sem marca", display_value_name: "Sem marca" },
+    ],
+  };
+  // Brand goes first — matches Shopee's seller dashboard ordering.
+  return [brandEntry, ...arr];
+}
+
 export const appRouter = router({
   system: systemRouter,
 
@@ -1971,7 +2005,7 @@ export const appRouter = router({
         try {
           const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
           const attrs = await shopeePublish.getCategoryAttributes(accessToken, shopId, input.categoryId);
-          if (attrs.length > 0) return attrs;
+          if (attrs.length > 0) return ensureBrandAttribute(attrs);
           // API returned empty (likely suspended) — try local DB fallback
           const db = sharedDb;
           const { shopeeCategoryAttributes } = await import("../drizzle/schema");
@@ -1979,13 +2013,14 @@ export const appRouter = router({
           const [row] = await db.select().from(shopeeCategoryAttributes)
             .where(eq(shopeeCategoryAttributes.categoryId, input.categoryId)).limit(1);
           if (row?.attributeList && (row.attributeList as any[]).length > 0) {
-            console.log(`[Router] getCategoryAttributes(${input.categoryId}): usando fallback local (${(row.attributeList as any[]).length} atributos)`);
-            return row.attributeList as any[];
+            const list = ensureBrandAttribute(row.attributeList as any[]);
+            console.log(`[Router] getCategoryAttributes(${input.categoryId}): usando fallback local (${list.length} atributos)`);
+            return list;
           }
-          return [];
+          return ensureBrandAttribute([]);
         } catch (e: any) {
           console.error(`[Router] getCategoryAttributes(${input.categoryId}):`, e.message);
-          return [];
+          return ensureBrandAttribute([]);
         }
       }),
 

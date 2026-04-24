@@ -2,7 +2,10 @@ import { useState, useEffect, useMemo } from "react";
 import { useSearch, useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
 import { CategoryPicker } from "../components/shopee/CategoryPicker";
-import { BrandPicker, type BrandValue } from "../components/shopee/BrandPicker";
+// BrandPicker NÃO é usado na Etapa 4 (Revisão). Brand é atributo de categoria
+// na Shopee — renderizado dentro de Especificações na Etapa 3 quando o
+// backend devolve um attribute com input_type=BRAND. O componente fica
+// disponível pra ser usado lá no próximo passo.
 import {
   Search, Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
@@ -1443,29 +1446,9 @@ function VariationWizard({
       setSelectedCategoryBreadcrumb(resolvedBreadcrumb.breadcrumb);
     }
   }, [resolvedBreadcrumb]);
-  // Brand picked in the wizard. Hydrated from the product's synced
-  // attributes (Ficha Técnica) — Shopee returns brand as a regular
-  // attribute with input_type=BRAND. Falls back to "No Brand" sentinel.
-  // TODO: if too many synced products end up brand-less here, evolve to
-  // option (B) — a dedicated `shopeeProducts.brandId / brandName` column +
-  // backfill script in sync. Today we lean on attributes only.
-  const initialBrand = useMemo<BrandValue>(() => {
-    const attrs: any[] = Array.isArray(product.attributes) ? product.attributes : [];
-    const brandAttr = attrs.find((a: any) =>
-      a?.input_type === "BRAND" ||
-      a?.original_attribute_name === "Brand" ||
-      a?.display_attribute_name === "Marca",
-    );
-    const v = brandAttr?.attribute_value_list?.[0];
-    if (v && (v.value_id || v.original_value_name || v.display_value_name)) {
-      return {
-        brandId: Number(v.value_id ?? 0),
-        brandName: String(v.display_value_name ?? v.original_value_name ?? "No Brand"),
-      };
-    }
-    return { brandId: 0, brandName: "No Brand" };
-  }, [product.attributes]);
-  const [selectedBrand, setSelectedBrand] = useState<BrandValue>(initialBrand);
+  // Brand é renderizado como atributo de categoria na Etapa 3 (Especificações),
+  // quando o backend devolve um item com input_type=BRAND. NÃO mais um picker
+  // separado na Etapa 4. Veja routers.ts → ensureBrandAttribute.
   const categoryId = selectedCategoryId;
   // Whether this publish will CREATE (vs update/promote). `publishMode` is
   // resolved by the backend from product.itemId; when the wizard picks
@@ -2030,10 +2013,8 @@ function VariationWizard({
           selectedCategoryId && selectedCategoryId !== initialCategoryId
             ? selectedCategoryId
             : undefined,
-        // Brand is only consumed by the CREATE path on the backend.
-        brand: effectiveOverrideMode === "create" || !publishModeData?.itemId
-          ? selectedBrand
-          : undefined,
+        // Brand: extraído dos attributes da Etapa 3 (input_type=BRAND), não
+        // mais de um picker separado. O backend já lê brand via attribute_list.
       });
       setPublishResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishStatus("success");
@@ -3020,21 +3001,11 @@ function VariationWizard({
                         onChange={(id, crumb) => {
                           setSelectedCategoryId(id);
                           setSelectedCategoryBreadcrumb(crumb);
-                          // Brand list is scoped to category; reset so the
-                          // user re-picks against the new category's brands.
-                          setSelectedBrand({ brandId: 0, brandName: "No Brand" });
                         }}
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Marca</label>
-                      <BrandPicker
-                        accountId={accountId}
-                        categoryId={selectedCategoryId}
-                        value={selectedBrand}
-                        onChange={setSelectedBrand}
-                      />
-                    </div>
+                    {/* Marca foi removida daqui — vira atributo de categoria
+                        na Etapa 3 (Especificações), seguindo a UX da Shopee. */}
                   </div>
                 );
               })()}
