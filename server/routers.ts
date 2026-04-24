@@ -2428,6 +2428,34 @@ export const appRouter = router({
         return shopeeOptimizer.generateAdContent(input);
       }),
 
+    /**
+     * Single LLM call that produces title + description + 20-char display
+     * name for each variation. Used by the wizard's "Gerar tudo com IA"
+     * button. Kept separate from generateAdContent so the individual
+     * tag/title/desc regeneration buttons keep their cheaper shape.
+     */
+    generateAllContent: protectedProcedure
+      .input(z.object({
+        productName: z.string().min(1),
+        category: z.string().optional(),
+        brand: z.string().optional(),
+        variationType: z.string(),
+        variations: z.array(z.object({
+          label: z.string().min(1),
+          qty: z.number().optional(),
+          weight: z.string().optional(),
+          dimensions: z.string().optional(),
+          price: z.string().optional(),
+        })).min(1),
+        attributes: z.array(z.object({
+          name: z.string(),
+          value: z.string(),
+        })).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return shopeeOptimizer.generateAllContent(input);
+      }),
+
     // Publish a product created via the ShopeeCriador wizard
     createProductFromWizard: protectedProcedure
       .input(z.object({

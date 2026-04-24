@@ -993,3 +993,189 @@ REGRAS:
     }
   }
 }
+
+// ============ 3-in-1: TITLE + DESCRIPTION + VARIATION NAMES ============
+
+export interface AllContent {
+  title: string;
+  description: string;
+  variationNames: Array<{ originalLabel: string; generatedName: string }>;
+}
+
+/**
+ * Single LLM call that produces title, description, and a short display name
+ * for each variation — used by the wizard's "Gerar tudo com IA" button.
+ *
+ * Kept separate from `generateAdContent` (which also returns tags/score) so
+ * the individual buttons (Gerar Tags, etc.) continue using that path, and
+ * this one stays cheaper/focused when the user just wants the 3 essentials.
+ *
+ * Shopee hard limits enforced by the prompt:
+ *  - title ≤ 120 chars (item_name)
+ *  - generatedName ≤ 20 chars (tier_variation option)
+ */
+export async function generateAllContent(params: {
+  productName: string;
+  category?: string;
+  brand?: string;
+  variationType: string;
+  variations: Array<{ label: string; qty?: number; weight?: string; dimensions?: string; price?: string }>;
+  attributes?: Array<{ name: string; value: string }>;
+}): Promise<AllContent> {
+  await loadAiProviderFromDb();
+
+  if (!params.variations.length) {
+    throw new Error("generateAllContent: variations array is empty");
+  }
+  if (!params.productName || !params.productName.trim()) {
+    throw new Error("generateAllContent: productName is required");
+  }
+
+  const variationsText = params.variations
+    .map((v) => {
+      const bits: string[] = [`"${v.label}"`];
+      if (v.qty != null) bits.push(`${v.qty}un`);
+      if (v.weight) bits.push(`${v.weight}kg`);
+      if (v.dimensions) bits.push(v.dimensions);
+      if (v.price) bits.push(`R$${v.price}`);
+      return `- ${bits.join(" | ")}`;
+    })
+    .join("\n");
+
+  const attrsText = params.attributes && params.attributes.length > 0
+    ? params.attributes.map((a) => `- ${a.name}: ${a.value}`).join("\n")
+    : "(nenhum atributo fornecido)";
+
+  const brandLine = params.brand ? `\n- Marca: ${params.brand}` : "";
+  const categoryLine = params.category ? `\n- Categoria: ${params.category}` : "";
+
+  const response = await invokeLLM({
+    maxTokens: 2048,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Você é um especialista em copywriting de e-commerce para Shopee Brasil. " +
+          "Responda SOMENTE com JSON válido, sem markdown, sem blocos de código, sem texto antes ou depois.",
+      },
+      {
+        role: "user",
+        content: `Gere o conteúdo de anúncio (título, descrição e nome curto de cada variação) para este produto.
+
+DADOS:
+- Nome base: ${params.productName}${categoryLine}${brandLine}
+- Tipo de variação: ${params.variationType}
+
+VARIAÇÕES (rótulos locais que o usuário digitou):
+${variationsText}
+
+ATRIBUTOS RELEVANTES:
+${attrsText}
+
+RETORNE APENAS ESTE JSON, SEM TEXTO ADICIONAL, SEM MARKDOWN:
+{
+  "title": "(título até 120 chars, pt-BR, profissional, inclui marca se houver)",
+  "description": "(300-800 chars, pt-BR, 3-5 bullet points com marcador •, fecha com call-to-action curta, sem emojis excessivos)",
+  "variationNames": [
+    ${params.variations.map((v) => `{ "originalLabel": ${JSON.stringify(v.label)}, "generatedName": "(≤20 chars)" }`).join(",\n    ")}
+  ]
+}
+
+REGRAS DURAS:
+- title.length ≤ 120 (conte antes de responder)
+- description.length entre 300 e 800
+- cada generatedName.length ≤ 20 (conte antes de responder)
+- variationNames DEVE ter exatamente ${params.variations.length} itens, na mesma ordem das variações listadas acima, e cada originalLabel DEVE coincidir byte-a-byte com o rótulo de origem
+- não use markdown, não use \`\`\`json, não adicione comentários ou explicações fora do JSON`,
+      },
+    ],
+  });
+
+  const raw = extractJsonFromResponse(response);
+
+  // Defensive parse: direct, then strip markdown, then regex-extract first object.
+  const tryParse = (s: string): AllContent | null => {
+    try {
+      const obj = JSON.parse(s);
+      if (
+        typeof obj?.title === "string" &&
+        typeof obj?.description === "string" &&
+        Array.isArray(obj?.variationNames)
+      ) {
+        return obj as AllContent;
+      }
+    } catch { /* fall through */ }
+    return null;
+  };
+
+  const direct = tryParse(raw);
+  if (direct) return normalizeAllContent(direct, params.variations);
+
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const afterStrip = tryParse(stripped);
+  if (afterStrip) return normalizeAllContent(afterStrip, params.variations);
+
+  const match = stripped.match(/\{[\s\S]*\}/);
+  if (match) {
+    const extracted = tryParse(match[0]);
+    if (extracted) return normalizeAllContent(extracted, params.variations);
+  }
+
+  throw new Error(
+    `generateAllContent: resposta da IA não é JSON válido ou não tem os campos esperados. Preview: ${raw.slice(0, 200)}`,
+  );
+}
+
+/**
+ * Enforces hard limits + aligns variationNames with the exact local labels.
+ *
+ * Two-pass matching so a model that mislabels ONE entry doesn't cause two
+ * source variations to receive the same generatedName:
+ *   1. Exact label match (canonical path). Claims the model entry.
+ *   2. For leftover source variations, consume remaining model entries in order.
+ */
+function normalizeAllContent(
+  parsed: AllContent,
+  sourceVariations: Array<{ label: string }>,
+): AllContent {
+  const title = parsed.title.slice(0, 120).trim();
+  const description = parsed.description.trim();
+
+  const consumed = new Set<number>();
+  const names: Array<{ originalLabel: string; generatedName: string } | null> =
+    sourceVariations.map(() => null);
+
+  // Pass 1: label match
+  sourceVariations.forEach((src, i) => {
+    const modelIdx = parsed.variationNames.findIndex(
+      (v, j) => !consumed.has(j) && v?.originalLabel === src.label,
+    );
+    if (modelIdx >= 0) {
+      consumed.add(modelIdx);
+      names[i] = {
+        originalLabel: src.label,
+        generatedName: String(parsed.variationNames[modelIdx].generatedName ?? src.label).slice(0, 20).trim(),
+      };
+    }
+  });
+
+  // Pass 2: positional fill for unmatched sources
+  sourceVariations.forEach((src, i) => {
+    if (names[i]) return;
+    const nextIdx = parsed.variationNames.findIndex((_, j) => !consumed.has(j));
+    if (nextIdx >= 0) {
+      consumed.add(nextIdx);
+      names[i] = {
+        originalLabel: src.label,
+        generatedName: String(parsed.variationNames[nextIdx]?.generatedName ?? src.label).slice(0, 20).trim(),
+      };
+    } else {
+      names[i] = { originalLabel: src.label, generatedName: src.label.slice(0, 20) };
+    }
+  });
+
+  return { title, description, variationNames: names as Array<{ originalLabel: string; generatedName: string }> };
+}

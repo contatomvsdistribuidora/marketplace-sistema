@@ -1328,6 +1328,7 @@ function VariationWizard({
 
   const optimizeMutation     = trpc.shopee.optimizeTitle.useMutation();
   const generateAdMutation   = trpc.shopee.generateAdContent.useMutation();
+  const generateAllMutation  = trpc.shopee.generateAllContent.useMutation();
   const publishMutation      = trpc.shopee.createProductFromWizard.useMutation();
   const fillAttrsMutation    = trpc.ai.fillAttributes.useMutation();
 
@@ -1352,6 +1353,15 @@ function VariationWizard({
 
   const [adContent, setAdContent]       = useState<any>(null);
   const [adLoadingSection, setAdLoadingSection] = useState<"all"|"title"|"desc"|"tags"|null>(null);
+  // Undo snapshot captured right before a "Gerar tudo com IA" run. The toast
+  // gives the user 10s to roll back if the regeneration overwrote manually
+  // edited title/description/variation names.
+  const [undoSnapshot, setUndoSnapshot] = useState<{
+    title: string;
+    description: string;
+    optionLabels: Array<{ id: string; label: string }>;
+  } | null>(null);
+  const [undoToastVisible, setUndoToastVisible] = useState(false);
   const adLoading = adLoadingSection === "all";
   const [adTab, setAdTab]               = useState<"titulo"|"descricao"|"tags"|"keywords"|"score">("titulo");
   const [selectedTitle, setSelectedTitle] = useState<string>("");
@@ -1623,6 +1633,114 @@ function VariationWizard({
         height: o.height || (baseH * scale).toFixed(1),
       };
     }));
+  }
+
+  // Auto-hide undo toast after 10s (user has that window to restore).
+  useEffect(() => {
+    if (!undoToastVisible) return;
+    const t = setTimeout(() => {
+      setUndoToastVisible(false);
+      setUndoSnapshot(null);
+    }, 10_000);
+    return () => clearTimeout(t);
+  }, [undoToastVisible]);
+
+  // "Gerar tudo com IA" — single LLM call that yields title, description, and
+  // a short (≤20ch) name for each local variation. Captures an undo snapshot
+  // first so the user can restore manually-edited content within 10s.
+  async function handleGenerateAll() {
+    if (optionDetails.length === 0) return;
+
+    setUndoSnapshot({
+      title: selectedTitle || (adContent?.titulo_principal ?? ""),
+      description: editedDesc || (adContent?.descricao ?? ""),
+      optionLabels: optionDetails.map((o) => ({ id: o.id, label: o.label })),
+    });
+
+    setAdLoadingSection("all");
+    try {
+      const attributes = Object.entries(attributeValues)
+        .filter(([, v]) => v.originalValue.trim() !== "")
+        .map(([attrId, v]) => {
+          const def = Array.isArray(categoryAttributes)
+            ? (categoryAttributes as any[]).find((a) => Number(a.attribute_id) === Number(attrId))
+            : null;
+          return {
+            name: def?.display_attribute_name ?? def?.original_attribute_name ?? `attr_${attrId}`,
+            value: v.originalValue,
+          };
+        });
+
+      const variations = optionDetails.map((opt, idx) => {
+        const c = computePricing(opt, idx);
+        return {
+          label: opt.label,
+          qty: c.qty,
+          weight: opt.weight || c.weight.toFixed(2),
+          dimensions: `${opt.length || c.length.toFixed(1)}×${opt.width || c.width.toFixed(1)}×${opt.height || c.height.toFixed(1)}`,
+          price: c.price.toFixed(2),
+        };
+      });
+
+      const result = await generateAllMutation.mutateAsync({
+        productName: product.itemName || "Produto",
+        category: product.categoryName ?? undefined,
+        brand: (product as any).brand ?? undefined,
+        variationType: typeName,
+        variations,
+        attributes: attributes.length > 0 ? attributes : undefined,
+      });
+
+      setSelectedTitle(result.title);
+      setEditedDesc(result.description);
+      setEditingDesc(false);
+      setAdContent((prev: any) => prev
+        ? { ...prev, titulo_principal: result.title, descricao: result.description }
+        : {
+            titulo_principal: result.title,
+            titulos_alternativos: [],
+            descricao: result.description,
+            hashtags: [],
+            tags_seo: [],
+            keywords_principais: [],
+            score: { titulo: 0, descricao: 0, tags: 0, variacoes: 0, total: 0, nivel: "-", sugestoes: [] },
+          });
+      setAdTab("titulo");
+
+      // Apply generated variation names. Server already trims to 20 chars but
+      // we respect the same limit here to be defensive.
+      const byLabel = new Map<string, string>();
+      for (const v of result.variationNames) byLabel.set(v.originalLabel, v.generatedName);
+      setOptionDetails((opts) =>
+        opts.map((o) => {
+          const name = byLabel.get(o.label);
+          return name ? { ...o, label: name.slice(0, 20) } : o;
+        }),
+      );
+
+      setUndoToastVisible(true);
+    } catch {
+      // On failure there's nothing to undo — drop the snapshot.
+      setUndoSnapshot(null);
+    } finally {
+      setAdLoadingSection(null);
+    }
+  }
+
+  function handleUndoGenerate() {
+    if (!undoSnapshot) return;
+    setSelectedTitle(undoSnapshot.title);
+    setEditedDesc(undoSnapshot.description);
+    setEditingDesc(false);
+    setAdContent((prev: any) => prev
+      ? { ...prev, titulo_principal: undoSnapshot.title, descricao: undoSnapshot.description }
+      : prev);
+    setOptionDetails((opts) => {
+      const byId = new Map(undoSnapshot.optionLabels.map((o) => [o.id, o.label]));
+      return opts.map((o) => ({ ...o, label: byId.get(o.id) ?? o.label }));
+    });
+    setUndoSnapshot(null);
+    setUndoToastVisible(false);
   }
 
   // ── Etapa D ──
@@ -2778,14 +2896,23 @@ function VariationWizard({
               )}
 
               {/* Botões de geração IA */}
-              {!adContent && adLoadingSection === null && (
+              {!adContent && adLoadingSection === null && (() => {
+                // "Variações preenchidas" = all local options have a label
+                // AND at least one option exists. This gates the main button.
+                const variationsReady =
+                  optionDetails.length >= 1 &&
+                  optionDetails.every((o) => o.label.trim().length > 0);
+                return (
                 <div className="space-y-2">
-                  {/* Botão principal */}
-                  <button onClick={() => generateAdSection("all")}
-                    className="w-full flex items-center justify-center gap-3 py-4 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold text-base transition shadow-lg shadow-orange-200">
-                    <Sparkles className="w-5 h-5" /> ✨ Gerar Tudo com IA
+                  {/* Botão principal — gera título + descrição + nomes das variações em 1 chamada */}
+                  <button
+                    onClick={handleGenerateAll}
+                    disabled={!variationsReady}
+                    title={variationsReady ? "" : "Preencha as variações primeiro"}
+                    className="w-full flex items-center justify-center gap-3 py-4 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white font-bold text-base transition shadow-lg shadow-orange-200 disabled:shadow-none">
+                    <Sparkles className="w-5 h-5" /> ✨ Gerar tudo com IA
                   </button>
-                  {/* Botões individuais */}
+                  {/* Botões individuais — caso o usuário queira regerar só 1 seção */}
                   <div className="grid grid-cols-3 gap-2">
                     {[
                       { key: "title" as const, label: "✨ Gerar Título" },
@@ -2829,7 +2956,8 @@ function VariationWizard({
                     </div>
                   )}
                 </div>
-              )}
+                );
+              })()}
 
               {/* Loading */}
               {adLoadingSection === "all" && (
@@ -3168,6 +3296,27 @@ function VariationWizard({
           )}
         </div>
       </div>
+
+      {/* ── Undo toast após "Gerar tudo com IA" ──────────────────────── */}
+      {undoToastVisible && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[80] bg-gray-900 text-white rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3 max-w-md animate-in fade-in slide-in-from-bottom-4">
+          <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+          <span className="text-sm flex-1">Conteúdo regerado com base nas variações</span>
+          <button
+            onClick={handleUndoGenerate}
+            className="text-xs font-semibold text-orange-400 hover:text-orange-300 uppercase tracking-wide px-2 py-1 rounded transition"
+          >
+            Desfazer
+          </button>
+          <button
+            onClick={() => { setUndoToastVisible(false); setUndoSnapshot(null); }}
+            className="text-gray-400 hover:text-white transition"
+            aria-label="Fechar"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* ── Modal de decisão: criar novo vs. promover existente ─────────── */}
       {showDecisionModal && !showNameEditor && (
