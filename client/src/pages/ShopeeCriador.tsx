@@ -3,12 +3,21 @@ import { useSearch, useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
 import { CategoryPicker } from "../components/shopee/CategoryPicker";
 import { VariationsReadOnly } from "../components/shopee/VariationsReadOnly";
+import {
+  FiltersPanel,
+  EMPTY_FILTERS,
+  readFiltersFromUrl,
+  readOrderFromUrl,
+  buildQueryInput,
+  type FilterState,
+  type OrderBy,
+} from "../components/shopee/FiltersPanel";
 // BrandPicker NÃO é usado na Etapa 4 (Revisão). Brand é atributo de categoria
 // na Shopee — renderizado dentro de Especificações na Etapa 3 quando o
 // backend devolve um attribute com input_type=BRAND. O componente fica
 // disponível pra ser usado lá no próximo passo.
 import {
-  Search, Package, ChevronRight, Star, Loader2,
+  Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
   Palette, PenLine, ArrowLeft, ArrowRight, Check,
   CheckCircle2, X, PlusCircle, AlertTriangle, TrendingUp,
@@ -120,11 +129,16 @@ export default function ShopeeCriador() {
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [urlSearch]);
 
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const initialParams = useMemo(() => new URLSearchParams(urlSearch), [urlSearch]);
+  const initialAccountId = initialParams.get("accountId");
+
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
+    initialAccountId ? parseInt(initialAccountId) : null,
+  );
   const [page, setPage] = useState(1);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [filters, setFilters] = useState<FilterState>(() => readFiltersFromUrl(initialParams));
+  const [orderBy, setOrderBy] = useState<OrderBy>(() => readOrderFromUrl(initialParams));
 
   const { data: urlProduct, error: urlProductError } = trpc.shopee.getProductById.useQuery(
     { productId: urlProductId! },
@@ -140,17 +154,37 @@ export default function ShopeeCriador() {
     }
   }, [urlProduct, selectedProduct?.id]);
 
+  // Keep URL params in sync with picker filter state (only meaningful while
+  // the picker is on screen — once a product is selected, the deep-link
+  // ?productId= takes over).
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 400);
-    return () => clearTimeout(t);
-  }, [search]);
+    if (urlProductId || selectedProduct) return;
+    const params = new URLSearchParams();
+    if (selectedAccountId != null) params.set("accountId", String(selectedAccountId));
+    const writeIfSet = (k: keyof FilterState) => {
+      const v = filters[k];
+      if (v && v !== "all") params.set(k as string, String(v));
+    };
+    (Object.keys(filters) as Array<keyof FilterState>).forEach(writeIfSet);
+    if (orderBy !== "recent") params.set("orderBy", orderBy);
+    const qs = params.toString();
+    const next = qs ? `/shopee-criador?${qs}` : "/shopee-criador";
+    if (typeof window !== "undefined" && window.location.pathname + window.location.search !== next) {
+      window.history.replaceState({}, "", next);
+    }
+  }, [filters, orderBy, selectedAccountId, urlProductId, selectedProduct]);
 
   const { data: accounts } = trpc.shopee.getAccounts.useQuery();
   const activeAccounts = accounts?.filter((a: any) => a.isActive) ?? [];
 
   const offset = (page - 1) * PAGE_SIZE;
   const { data: productsData, isLoading, error } = trpc.shopee.getProducts.useQuery(
-    { accountId: selectedAccountId!, offset, limit: PAGE_SIZE, search: debouncedSearch || undefined },
+    {
+      accountId: selectedAccountId!,
+      offset,
+      limit: PAGE_SIZE,
+      ...buildQueryInput(filters, orderBy),
+    },
     { enabled: !!selectedAccountId }
   );
 
@@ -161,10 +195,25 @@ export default function ShopeeCriador() {
   function handleSelectAccount(id: number) {
     setSelectedAccountId(id);
     setPage(1);
-    setSearch("");
-    setDebouncedSearch("");
+    setFilters(EMPTY_FILTERS);
     setSelectedProduct(null);
   }
+
+  const handleApplyFilters = (next: FilterState) => {
+    setFilters(next);
+    setPage(1);
+  };
+
+  const handleClearFilters = () => {
+    setFilters(EMPTY_FILTERS);
+    setPage(1);
+  };
+
+  const hasActiveSearch =
+    filters.search.length > 0 ||
+    filters.sku.length > 0 ||
+    filters.brand.length > 0 ||
+    filters.categoryId.length > 0;
 
   if (selectedProduct) {
     // When arrived via deep-link, "Voltar" goes back to the products page.
@@ -244,15 +293,24 @@ export default function ShopeeCriador() {
 
       {selectedAccountId && (
         <>
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Buscar produto por nome..."
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm"
+          <div className="mb-4 flex items-center gap-2 flex-wrap">
+            <FiltersPanel
+              filters={filters}
+              onApply={handleApplyFilters}
+              onClear={handleClearFilters}
             />
+            <select
+              value={orderBy}
+              onChange={(e) => { setOrderBy(e.target.value as OrderBy); setPage(1); }}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"
+            >
+              <option value="recent">Mais recentes</option>
+              <option value="oldest">Mais antigos</option>
+              <option value="name_asc">Nome A→Z</option>
+              <option value="name_desc">Nome Z→A</option>
+              <option value="price_asc">Preço menor</option>
+              <option value="price_desc">Preço maior</option>
+            </select>
           </div>
 
           {isLoading && (
@@ -270,7 +328,7 @@ export default function ShopeeCriador() {
           {!isLoading && !error && (
             <>
               <p className="text-sm text-gray-500 mb-3">
-                {debouncedSearch ? `${total} resultado(s) para "${debouncedSearch}"` : `${total} produtos`}
+                {hasActiveSearch ? `${total} resultado(s) com filtros aplicados` : `${total} produtos`}
               </p>
 
               {products.length === 0 ? (
@@ -280,31 +338,54 @@ export default function ShopeeCriador() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {products.map((product: any) => (
-                    <div
-                      key={product.id}
-                      onClick={() => setSelectedProduct(product)}
-                      className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md hover:border-orange-300 transition-all cursor-pointer"
-                    >
-                      <div className="flex gap-3 items-start">
-                        {product.imageUrl ? (
-                          <img src={product.imageUrl} alt={product.itemName} className="w-16 h-16 object-cover rounded-lg flex-shrink-0" />
-                        ) : (
-                          <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <Package className="w-6 h-6 text-gray-400" />
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">{product.itemName || "Sem título"}</p>
-                          <p className="text-xs text-gray-400 mt-1">ID: {product.itemId}</p>
-                          {product.price && (
-                            <p className="text-sm font-semibold text-orange-600 mt-1">R$ {Number(product.price).toFixed(2)}</p>
+                  {products.map((product: any) => {
+                    const titleAi = !!product.titleAiGenerated;
+                    const descAi = !!product.descriptionAiGenerated;
+                    const createdBySys = !!product.createdBySystem;
+                    return (
+                      <div
+                        key={product.id}
+                        onClick={() => setSelectedProduct(product)}
+                        className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md hover:border-orange-300 transition-all cursor-pointer"
+                      >
+                        <div className="flex gap-3 items-start">
+                          {product.imageUrl ? (
+                            <img src={product.imageUrl} alt={product.itemName} className="w-16 h-16 object-cover rounded-lg flex-shrink-0" />
+                          ) : (
+                            <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <Package className="w-6 h-6 text-gray-400" />
+                            </div>
                           )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">{product.itemName || "Sem título"}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {product.price && (
+                                <span className="text-sm font-semibold text-orange-600">R$ {Number(product.price).toFixed(2)}</span>
+                              )}
+                              <span className="text-xs text-gray-500">Est: {product.stock ?? 0}</span>
+                            </div>
+                            {product.itemSku && (
+                              <p className="text-xs text-gray-500 mt-0.5 truncate">SKU: {product.itemSku}</p>
+                            )}
+                            <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                              {(titleAi || descAi) && (
+                                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-violet-300 bg-violet-50 text-violet-700">
+                                  <Sparkles className="w-3 h-3" />
+                                  {titleAi && descAi ? "IA Título+Descr." : titleAi ? "IA Título" : "IA Descrição"}
+                                </span>
+                              )}
+                              {createdBySys && (
+                                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-orange-300 bg-orange-50 text-orange-700">
+                                  Feito pelo sistema
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1" />
                         </div>
-                        <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1" />
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
