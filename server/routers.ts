@@ -1861,23 +1861,142 @@ export const appRouter = router({
         };
       }),
 
-    // Get synced products from local DB
+    // Get synced products from local DB with filters + ordering.
+    // 12 optional filters: createdBySystem, status, hasVariation, priceMin,
+    // priceMax, stockFilter, categoryId, brand (matches `display_value_name`
+    // inside attributes JSON via JSON_CONTAINS), titleAiGenerated,
+    // descriptionAiGenerated, createdRange, sku. Plus the legacy `search`
+    // (LIKE on itemName) and ordering by recent / oldest / name / price.
     getProducts: protectedProcedure
       .input(z.object({
         accountId: z.number(),
         offset: z.number().optional(),
         limit: z.number().optional(),
         search: z.string().optional(),
+        createdBySystem: z.boolean().optional(),
+        status: z.enum(["active", "paused", "draft"]).optional(),
+        hasVariation: z.boolean().optional(),
+        priceMin: z.number().nonnegative().optional(),
+        priceMax: z.number().nonnegative().optional(),
+        stockFilter: z.enum(["with", "without", "low"]).optional(),
+        categoryId: z.number().int().positive().optional(),
+        brand: z.string().min(1).optional(),
+        titleAiGenerated: z.boolean().optional(),
+        descriptionAiGenerated: z.boolean().optional(),
+        createdRange: z.enum(["today", "last7days", "last30days"]).optional(),
+        sku: z.string().min(1).optional(),
+        orderBy: z
+          .enum(["recent", "oldest", "name_asc", "name_desc", "price_asc", "price_desc"])
+          .optional(),
       }))
       .query(async ({ input }) => {
-        const products = await shopee.getLocalProducts(
-          input.accountId,
-          input.offset || 0,
-          input.limit || 50,
-          input.search || undefined
-        );
-        const total = await shopee.getProductCount(input.accountId, input.search || undefined);
-        return { products, total };
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { and, eq, like, gte, lte, desc, asc, sql } = await import("drizzle-orm");
+
+        const conds: any[] = [eq(shopeeProducts.shopeeAccountId, input.accountId)];
+
+        if (input.search) conds.push(like(shopeeProducts.itemName, `%${input.search}%`));
+        if (input.sku) conds.push(like(shopeeProducts.itemSku, `%${input.sku}%`));
+
+        if (typeof input.createdBySystem === "boolean") {
+          conds.push(eq(shopeeProducts.createdBySystem, input.createdBySystem ? 1 : 0));
+        }
+        if (typeof input.titleAiGenerated === "boolean") {
+          conds.push(eq(shopeeProducts.titleAiGenerated, input.titleAiGenerated ? 1 : 0));
+        }
+        if (typeof input.descriptionAiGenerated === "boolean") {
+          conds.push(eq(shopeeProducts.descriptionAiGenerated, input.descriptionAiGenerated ? 1 : 0));
+        }
+
+        if (input.status) {
+          // Map UI labels to Shopee's itemStatus strings.
+          const statusMap: Record<string, string> = {
+            active: "NORMAL",
+            paused: "UNLIST",
+            draft: "DRAFT",
+          };
+          conds.push(eq(shopeeProducts.itemStatus, statusMap[input.status]));
+        }
+
+        if (typeof input.hasVariation === "boolean") {
+          // `variations` is JSON; treat NULL/empty-array as "no variation".
+          conds.push(
+            input.hasVariation
+              ? sql`${shopeeProducts.variations} IS NOT NULL AND JSON_LENGTH(${shopeeProducts.variations}) > 0`
+              : sql`${shopeeProducts.variations} IS NULL OR JSON_LENGTH(${shopeeProducts.variations}) = 0`
+          );
+        }
+
+        if (typeof input.priceMin === "number") {
+          // price is varchar in DB (Shopee stores as decimal string). CAST to
+          // DECIMAL for numeric comparison.
+          conds.push(sql`CAST(${shopeeProducts.price} AS DECIMAL(15,2)) >= ${input.priceMin}`);
+        }
+        if (typeof input.priceMax === "number") {
+          conds.push(sql`CAST(${shopeeProducts.price} AS DECIMAL(15,2)) <= ${input.priceMax}`);
+        }
+
+        if (input.stockFilter === "with") conds.push(gte(shopeeProducts.stock, 1));
+        else if (input.stockFilter === "without") conds.push(eq(shopeeProducts.stock, 0));
+        else if (input.stockFilter === "low") {
+          conds.push(gte(shopeeProducts.stock, 1));
+          conds.push(lte(shopeeProducts.stock, 4));
+        }
+
+        if (typeof input.categoryId === "number") {
+          conds.push(eq(shopeeProducts.categoryId, input.categoryId));
+        }
+
+        if (input.brand) {
+          // Brand lives inside the `attributes` JSON column as
+          // {original_value_name|display_value_name}. JSON_SEARCH locates the
+          // value regardless of which attribute holds it.
+          conds.push(sql`JSON_SEARCH(${shopeeProducts.attributes}, 'one', ${input.brand}) IS NOT NULL`);
+        }
+
+        if (input.createdRange) {
+          const now = new Date();
+          let cutoff: Date;
+          if (input.createdRange === "today") {
+            cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          } else if (input.createdRange === "last7days") {
+            cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          } else {
+            cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          }
+          conds.push(gte(shopeeProducts.createdAt, cutoff));
+        }
+
+        const whereExpr = conds.length === 1 ? conds[0] : and(...conds);
+
+        // Ordering. Default = recent (most-recently-touched in our DB first,
+        // not in Shopee — uses updatedAt then createdAt).
+        const order = input.orderBy ?? "recent";
+        const orderExprs =
+          order === "recent" ? [desc(shopeeProducts.updatedAt), desc(shopeeProducts.createdAt)] :
+          order === "oldest" ? [asc(shopeeProducts.createdAt)] :
+          order === "name_asc" ? [asc(shopeeProducts.itemName)] :
+          order === "name_desc" ? [desc(shopeeProducts.itemName)] :
+          order === "price_asc" ? [sql`CAST(${shopeeProducts.price} AS DECIMAL(15,2)) ASC`] :
+          [sql`CAST(${shopeeProducts.price} AS DECIMAL(15,2)) DESC`];
+
+        const offset = input.offset || 0;
+        const limit = input.limit || 50;
+
+        const products = await sharedDb
+          .select()
+          .from(shopeeProducts)
+          .where(whereExpr)
+          .orderBy(...orderExprs)
+          .limit(limit)
+          .offset(offset);
+
+        const totalRows = await sharedDb
+          .select({ id: shopeeProducts.id })
+          .from(shopeeProducts)
+          .where(whereExpr);
+
+        return { products, total: totalRows.length };
       }),
 
     /**
@@ -2513,7 +2632,9 @@ export const appRouter = router({
         if (!product) throw new Error("Produto não encontrado");
         const { accessToken, shopId } = await shopee.getValidToken(product.shopeeAccountId);
         await shopee.updateItemName(accessToken, shopId, product.itemId, input.newTitle);
-        await db.update(shopeeProducts).set({ itemName: input.newTitle }).where(eq(shopeeProducts.id, input.productId));
+        await db.update(shopeeProducts)
+          .set({ itemName: input.newTitle, titleAiGenerated: 1 })
+          .where(eq(shopeeProducts.id, input.productId));
         return { success: true };
       }),
 
@@ -2550,7 +2671,9 @@ export const appRouter = router({
         if (!product) throw new Error("Produto não encontrado");
         const { accessToken, shopId } = await shopee.getValidToken(product.shopeeAccountId);
         await shopee.updateItemFields(accessToken, shopId, product.itemId, { description: input.newDescription });
-        await db.update(shopeeProducts).set({ description: input.newDescription }).where(eq(shopeeProducts.id, input.productId));
+        await db.update(shopeeProducts)
+          .set({ description: input.newDescription, descriptionAiGenerated: 1 })
+          .where(eq(shopeeProducts.id, input.productId));
         return { success: true };
       }),
 
@@ -2926,16 +3049,23 @@ export const appRouter = router({
           // means the local row is now pointing at the wrong listing. Rewrite
           // it so future UPDATE calls target the new item, and stash the old
           // itemId in shopeeItemIdLegacy for audit / cross-reference.
-          if (input.overrideMode === "create" && sourceProduct.itemId && result.itemId !== Number(sourceProduct.itemId)) {
+          // Also mark createdBySystem=1: a fresh listing put on Shopee through
+          // our wizard is "ours" regardless of whether the local row had a
+          // legacy itemId.
+          if (mode === "create") {
+            const sets: Record<string, any> = { createdBySystem: 1 };
+            if (sourceProduct.itemId && result.itemId !== Number(sourceProduct.itemId)) {
+              sets.itemId = result.itemId;
+              sets.shopeeItemIdLegacy = Number(sourceProduct.itemId);
+              sets.variations = null;
+              sets.itemStatus = "NORMAL";
+            }
             await db.update(shopeeProducts)
-              .set({
-                itemId: result.itemId,
-                shopeeItemIdLegacy: Number(sourceProduct.itemId),
-                variations: null,
-                itemStatus: "NORMAL",
-              })
+              .set(sets)
               .where(eq(shopeeProducts.id, input.sourceProductId));
-            console.log(`[Shopee Wizard] Rewrote local item_id ${sourceProduct.itemId} → ${result.itemId} after forced CREATE (legacy preservado)`);
+            if (sourceProduct.itemId && result.itemId !== Number(sourceProduct.itemId)) {
+              console.log(`[Shopee Wizard] Rewrote local item_id ${sourceProduct.itemId} → ${result.itemId} after forced CREATE (legacy preservado)`);
+            }
           }
 
           return { success: true, mode: result.mode, itemId: result.itemId, itemUrl: result.itemUrl, shopId };
@@ -3058,7 +3188,8 @@ export const appRouter = router({
 
           // Persist new itemId + preserve the old one as legacy. Only writes
           // when add_item actually succeeded (the call above throws on failure,
-          // and we don't reach this line — banco intacto).
+          // and we don't reach this line — banco intacto). Always marks
+          // createdBySystem=1 since this path always produces a new listing.
           if (result.itemId && (oldItemId === null || result.itemId !== oldItemId)) {
             await db.update(shopeeProducts)
               .set({
@@ -3066,9 +3197,14 @@ export const appRouter = router({
                 shopeeItemIdLegacy: oldItemId ?? null,
                 variations: null,
                 itemStatus: "NORMAL",
+                createdBySystem: 1,
               })
               .where(eq(shopeeProducts.id, input.sourceProductId));
             console.log(`[Shopee PublishAsNew] item antigo ${oldItemId ?? "(nenhum)"} → novo ${result.itemId}, legacy preservado`);
+          } else if (result.itemId) {
+            await db.update(shopeeProducts)
+              .set({ createdBySystem: 1 })
+              .where(eq(shopeeProducts.id, input.sourceProductId));
           }
 
           return { success: true, itemId: result.itemId, itemUrl: result.itemUrl, legacyItemId: oldItemId, shopId };

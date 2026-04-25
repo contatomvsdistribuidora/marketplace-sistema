@@ -458,6 +458,17 @@ export const shopeeProducts = mysqlTable("shopee_products", {
   dimensionWidth: varchar("dimensionWidth", { length: 32 }),
   dimensionHeight: varchar("dimensionHeight", { length: 32 }),
   description: text("description"),
+  /**
+   * 1 = the listing was created on Shopee through our wizard
+   * (createProductFromWizard / publishAsNewProduct).
+   * 0 = imported from Shopee via sync. Default 0 keeps every pre-existing
+   * row backwards-compatible.
+   */
+  createdBySystem: int("createdBySystem").default(0).notNull(),
+  /** 1 when the user accepted an AI-generated title (applyTitle). */
+  titleAiGenerated: int("titleAiGenerated").default(0).notNull(),
+  /** 1 when the user accepted an AI-generated description (applyDescription). */
+  descriptionAiGenerated: int("descriptionAiGenerated").default(0).notNull(),
   lastSyncAt: timestamp("lastSyncAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

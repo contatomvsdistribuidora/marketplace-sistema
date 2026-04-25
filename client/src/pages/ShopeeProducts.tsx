@@ -2,8 +2,11 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSearch, useLocation } from "wouter";
 import {
   Select,
@@ -12,6 +15,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import {
   Package,
   Video,
@@ -24,10 +34,118 @@ import {
   CheckCircle2,
   AlertTriangle,
   WifiOff,
+  SlidersHorizontal,
+  Sparkles,
+  X,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 type SyncStatus = "synced" | "outdated" | "not_found" | "checking" | "unknown";
+
+type CreatedBySystem = "all" | "yes" | "no";
+type StatusFilter = "all" | "active" | "paused" | "draft";
+type VariationFilter = "all" | "yes" | "no";
+type StockFilter = "all" | "with" | "without" | "low";
+type AiFilter = "all" | "yes" | "no";
+type CreatedRangeFilter = "all" | "today" | "last7days" | "last30days";
+type OrderBy = "recent" | "oldest" | "name_asc" | "name_desc" | "price_asc" | "price_desc";
+
+type FilterState = {
+  createdBySystem: CreatedBySystem;
+  status: StatusFilter;
+  hasVariation: VariationFilter;
+  priceMin: string;
+  priceMax: string;
+  stockFilter: StockFilter;
+  categoryId: string;
+  brand: string;
+  titleAi: AiFilter;
+  descriptionAi: AiFilter;
+  createdRange: CreatedRangeFilter;
+  sku: string;
+  search: string;
+};
+
+const EMPTY_FILTERS: FilterState = {
+  createdBySystem: "all",
+  status: "all",
+  hasVariation: "all",
+  priceMin: "",
+  priceMax: "",
+  stockFilter: "all",
+  categoryId: "",
+  brand: "",
+  titleAi: "all",
+  descriptionAi: "all",
+  createdRange: "all",
+  sku: "",
+  search: "",
+};
+
+function readFiltersFromUrl(params: URLSearchParams): FilterState {
+  const get = (k: string) => params.get(k) ?? "";
+  return {
+    createdBySystem: (get("createdBySystem") || "all") as CreatedBySystem,
+    status: (get("status") || "all") as StatusFilter,
+    hasVariation: (get("hasVariation") || "all") as VariationFilter,
+    priceMin: get("priceMin"),
+    priceMax: get("priceMax"),
+    stockFilter: (get("stockFilter") || "all") as StockFilter,
+    categoryId: get("categoryId"),
+    brand: get("brand"),
+    titleAi: (get("titleAi") || "all") as AiFilter,
+    descriptionAi: (get("descriptionAi") || "all") as AiFilter,
+    createdRange: (get("createdRange") || "all") as CreatedRangeFilter,
+    sku: get("sku"),
+    search: get("search"),
+  };
+}
+
+function readOrderFromUrl(params: URLSearchParams): OrderBy {
+  const v = params.get("orderBy");
+  if (v === "recent" || v === "oldest" || v === "name_asc" || v === "name_desc" || v === "price_asc" || v === "price_desc") return v;
+  return "recent";
+}
+
+function countActiveFilters(f: FilterState): number {
+  let n = 0;
+  if (f.createdBySystem !== "all") n++;
+  if (f.status !== "all") n++;
+  if (f.hasVariation !== "all") n++;
+  if (f.priceMin) n++;
+  if (f.priceMax) n++;
+  if (f.stockFilter !== "all") n++;
+  if (f.categoryId) n++;
+  if (f.brand) n++;
+  if (f.titleAi !== "all") n++;
+  if (f.descriptionAi !== "all") n++;
+  if (f.createdRange !== "all") n++;
+  if (f.sku) n++;
+  if (f.search) n++;
+  return n;
+}
+
+function buildQueryInput(f: FilterState, orderBy: OrderBy) {
+  const out: Record<string, unknown> = {};
+  if (f.createdBySystem !== "all") out.createdBySystem = f.createdBySystem === "yes";
+  if (f.status !== "all") out.status = f.status;
+  if (f.hasVariation !== "all") out.hasVariation = f.hasVariation === "yes";
+  const min = parseFloat(f.priceMin);
+  const max = parseFloat(f.priceMax);
+  if (!Number.isNaN(min) && f.priceMin !== "") out.priceMin = min;
+  if (!Number.isNaN(max) && f.priceMax !== "") out.priceMax = max;
+  if (f.stockFilter !== "all") out.stockFilter = f.stockFilter;
+  const catId = parseInt(f.categoryId, 10);
+  if (!Number.isNaN(catId) && catId > 0) out.categoryId = catId;
+  if (f.brand) out.brand = f.brand;
+  if (f.titleAi !== "all") out.titleAiGenerated = f.titleAi === "yes";
+  if (f.descriptionAi !== "all") out.descriptionAiGenerated = f.descriptionAi === "yes";
+  if (f.createdRange !== "all") out.createdRange = f.createdRange;
+  if (f.sku) out.sku = f.sku;
+  if (f.search) out.search = f.search;
+  out.orderBy = orderBy;
+  return out;
+}
 
 function SyncBadge({ status, changes }: { status: SyncStatus; changes?: string[] }) {
   if (status === "checking")
@@ -69,6 +187,24 @@ function SyncBadge({ status, changes }: { status: SyncStatus; changes?: string[]
   );
 }
 
+function AiBadges({ titleAi, descAi }: { titleAi: boolean; descAi: boolean }) {
+  if (!titleAi && !descAi) return null;
+  if (titleAi && descAi) {
+    return (
+      <Badge variant="outline" className="text-xs gap-1 text-violet-700 border-violet-300 bg-violet-50">
+        <Sparkles className="h-3 w-3" />
+        IA Título+Descrição
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-xs gap-1 text-violet-700 border-violet-300 bg-violet-50">
+      <Sparkles className="h-3 w-3" />
+      IA {titleAi ? "Título" : "Descrição"}
+    </Badge>
+  );
+}
+
 function formatDate(d: string | Date | null | undefined) {
   if (!d) return "—";
   return new Date(d).toLocaleString("pt-BR", {
@@ -80,8 +216,8 @@ function formatDate(d: string | Date | null | undefined) {
 export default function ShopeeProducts() {
   const search = useSearch();
   const [, setLocation] = useLocation();
-  const params = new URLSearchParams(search);
-  const initialAccountId = params.get("accountId");
+  const initialParams = useMemo(() => new URLSearchParams(search), [search]);
+  const initialAccountId = initialParams.get("accountId");
 
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
     initialAccountId ? parseInt(initialAccountId) : null
@@ -91,9 +227,38 @@ export default function ShopeeProducts() {
   const [syncingProductId, setSyncingProductId] = useState<number | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
 
+  const [filters, setFilters] = useState<FilterState>(() => readFiltersFromUrl(initialParams));
+  const [orderBy, setOrderBy] = useState<OrderBy>(() => readOrderFromUrl(initialParams));
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Draft state lets the user stage filter edits inside the sheet without
+  // triggering a refetch on every keystroke. Apply commits to the live state.
+  const [draftFilters, setDraftFilters] = useState<FilterState>(filters);
+
+  // Push filter state into URL query params so links are shareable + reload-safe.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedAccountId != null) params.set("accountId", String(selectedAccountId));
+    const writeIfSet = (k: keyof FilterState) => {
+      const v = filters[k];
+      if (v && v !== "all") params.set(k as string, String(v));
+    };
+    (Object.keys(filters) as Array<keyof FilterState>).forEach(writeIfSet);
+    if (orderBy !== "recent") params.set("orderBy", orderBy);
+    const qs = params.toString();
+    const next = qs ? `/shopee-products?${qs}` : "/shopee-products";
+    if (typeof window !== "undefined" && window.location.pathname + window.location.search !== next) {
+      window.history.replaceState({}, "", next);
+    }
+  }, [filters, orderBy, selectedAccountId]);
+
   const { data: accounts } = trpc.shopee.getAccounts.useQuery();
   const { data: productsData, isLoading, refetch: refetchProducts } = trpc.shopee.getProducts.useQuery(
-    { accountId: selectedAccountId!, offset: page * pageSize, limit: pageSize },
+    {
+      accountId: selectedAccountId!,
+      offset: page * pageSize,
+      limit: pageSize,
+      ...buildQueryInput(filters, orderBy),
+    },
     { enabled: !!selectedAccountId }
   );
   const { data: qualityStats } = trpc.shopee.getQualityStats.useQuery(
@@ -136,12 +301,9 @@ export default function ShopeeProducts() {
   }, [accounts, selectedAccountId]);
 
   const totalPages = productsData ? Math.ceil(productsData.total / pageSize) : 0;
+  const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
 
   const syncValues = useMemo(() => Array.from(syncStatusByItemId.values()), [syncStatusByItemId]);
-  const outdatedCount = useMemo(
-    () => syncValues.filter(s => s.status === "outdated" || s.status === "not_found").length,
-    [syncValues]
-  );
 
   const getScoreBadge = (filled: number, total: number) => {
     if (total === 0) return { label: "Sem dados", color: "bg-gray-100 text-gray-700" };
@@ -182,6 +344,23 @@ export default function ShopeeProducts() {
     }
   };
 
+  const applyFilters = () => {
+    setFilters(draftFilters);
+    setPage(0);
+    setFiltersOpen(false);
+  };
+
+  const clearFilters = () => {
+    setDraftFilters(EMPTY_FILTERS);
+    setFilters(EMPTY_FILTERS);
+    setPage(0);
+  };
+
+  const openFilters = () => {
+    setDraftFilters(filters);
+    setFiltersOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -210,6 +389,273 @@ export default function ShopeeProducts() {
               </SelectContent>
             </Select>
           )}
+
+          <Sheet open={filtersOpen} onOpenChange={(o) => (o ? openFilters() : setFiltersOpen(false))}>
+            <SheetTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <SlidersHorizontal className="h-4 w-4" />
+                Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+              </Button>
+            </SheetTrigger>
+            <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+              <SheetHeader>
+                <SheetTitle>Filtros</SheetTitle>
+              </SheetHeader>
+
+              <div className="mt-6 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {countActiveFilters(draftFilters)} filtro(s) ativo(s)
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDraftFilters(EMPTY_FILTERS)}
+                  className="gap-1 h-7 text-xs"
+                >
+                  <X className="h-3 w-3" />
+                  Limpar
+                </Button>
+              </div>
+
+              <Separator className="my-4" />
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold">Origem</h3>
+                <div>
+                  <Label className="text-xs">Feitos pelo sistema</Label>
+                  <Select
+                    value={draftFilters.createdBySystem}
+                    onValueChange={(v) => setDraftFilters({ ...draftFilters, createdBySystem: v as CreatedBySystem })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="yes">Sim — feitos pelo sistema</SelectItem>
+                      <SelectItem value="no">Não — importados da Shopee</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+
+              <Separator className="my-4" />
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold">Status & Variação</h3>
+                <div>
+                  <Label className="text-xs">Status</Label>
+                  <Select
+                    value={draftFilters.status}
+                    onValueChange={(v) => setDraftFilters({ ...draftFilters, status: v as StatusFilter })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="active">Ativo</SelectItem>
+                      <SelectItem value="paused">Pausado</SelectItem>
+                      <SelectItem value="draft">Rascunho</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Variação</Label>
+                  <Select
+                    value={draftFilters.hasVariation}
+                    onValueChange={(v) => setDraftFilters({ ...draftFilters, hasVariation: v as VariationFilter })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="yes">Com variação</SelectItem>
+                      <SelectItem value="no">Sem variação</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+
+              <Separator className="my-4" />
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold">Preço & Estoque</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs">Preço mín. (R$)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={draftFilters.priceMin}
+                      onChange={(e) => setDraftFilters({ ...draftFilters, priceMin: e.target.value })}
+                      placeholder="0"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Preço máx. (R$)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={draftFilters.priceMax}
+                      onChange={(e) => setDraftFilters({ ...draftFilters, priceMax: e.target.value })}
+                      placeholder="∞"
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Estoque</Label>
+                  <Select
+                    value={draftFilters.stockFilter}
+                    onValueChange={(v) => setDraftFilters({ ...draftFilters, stockFilter: v as StockFilter })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="with">Com estoque (≥ 1)</SelectItem>
+                      <SelectItem value="without">Sem estoque</SelectItem>
+                      <SelectItem value="low">Estoque baixo (1–4)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+
+              <Separator className="my-4" />
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold">Classificação</h3>
+                <div>
+                  <Label className="text-xs">Categoria (ID Shopee)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={draftFilters.categoryId}
+                    onChange={(e) => setDraftFilters({ ...draftFilters, categoryId: e.target.value })}
+                    placeholder="ex: 100018"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Marca</Label>
+                  <Input
+                    value={draftFilters.brand}
+                    onChange={(e) => setDraftFilters({ ...draftFilters, brand: e.target.value })}
+                    placeholder="ex: Nike"
+                    className="mt-1"
+                  />
+                </div>
+              </section>
+
+              <Separator className="my-4" />
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold">Conteúdo IA</h3>
+                <div>
+                  <Label className="text-xs">Título por IA</Label>
+                  <Select
+                    value={draftFilters.titleAi}
+                    onValueChange={(v) => setDraftFilters({ ...draftFilters, titleAi: v as AiFilter })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="yes">Gerado por IA</SelectItem>
+                      <SelectItem value="no">Manual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Descrição por IA</Label>
+                  <Select
+                    value={draftFilters.descriptionAi}
+                    onValueChange={(v) => setDraftFilters({ ...draftFilters, descriptionAi: v as AiFilter })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="yes">Gerada por IA</SelectItem>
+                      <SelectItem value="no">Manual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+
+              <Separator className="my-4" />
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold">Tempo</h3>
+                <div>
+                  <Label className="text-xs">Data de criação</Label>
+                  <Select
+                    value={draftFilters.createdRange}
+                    onValueChange={(v) => setDraftFilters({ ...draftFilters, createdRange: v as CreatedRangeFilter })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Qualquer data</SelectItem>
+                      <SelectItem value="today">Hoje</SelectItem>
+                      <SelectItem value="last7days">Últimos 7 dias</SelectItem>
+                      <SelectItem value="last30days">Últimos 30 dias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+
+              <Separator className="my-4" />
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold">Busca</h3>
+                <div>
+                  <Label className="text-xs">SKU</Label>
+                  <Input
+                    value={draftFilters.sku}
+                    onChange={(e) => setDraftFilters({ ...draftFilters, sku: e.target.value })}
+                    placeholder="busca por SKU (parcial)"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Nome do produto</Label>
+                  <Input
+                    value={draftFilters.search}
+                    onChange={(e) => setDraftFilters({ ...draftFilters, search: e.target.value })}
+                    placeholder="busca por nome (parcial)"
+                    className="mt-1"
+                  />
+                </div>
+              </section>
+
+              <Separator className="my-4" />
+
+              <div className="flex gap-2 sticky bottom-0 bg-background pt-2 pb-1">
+                <Button variant="outline" onClick={() => setFiltersOpen(false)} className="flex-1">
+                  Cancelar
+                </Button>
+                <Button onClick={applyFilters} className="flex-1">
+                  Aplicar
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          <Select value={orderBy} onValueChange={(v) => { setOrderBy(v as OrderBy); setPage(0); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="recent">Mais recentes</SelectItem>
+              <SelectItem value="oldest">Mais antigos</SelectItem>
+              <SelectItem value="name_asc">Nome A→Z</SelectItem>
+              <SelectItem value="name_desc">Nome Z→A</SelectItem>
+              <SelectItem value="price_asc">Preço menor</SelectItem>
+              <SelectItem value="price_desc">Preço maior</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {activeFilterCount > 0 && (
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1">
+              <X className="h-4 w-4" />
+              Limpar filtros
+            </Button>
+          )}
+
           {selectedAccountId && (
             <Button
               onClick={handleSyncAll}
@@ -310,13 +756,21 @@ export default function ShopeeProducts() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Package className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">Nenhum produto sincronizado</h3>
+            <h3 className="text-lg font-semibold mb-2">
+              {activeFilterCount > 0 ? "Nenhum produto bate com os filtros" : "Nenhum produto sincronizado"}
+            </h3>
             <p className="text-muted-foreground text-center max-w-md mb-4">
-              Clique em "Sincronizar" na página de Contas Shopee para importar os produtos desta loja.
+              {activeFilterCount > 0
+                ? "Tente afrouxar ou limpar os filtros."
+                : "Clique em \"Sincronizar\" na página de Contas Shopee para importar os produtos desta loja."}
             </p>
-            <Button variant="outline" asChild>
-              <a href="/shopee-accounts">Ir para Contas Shopee</a>
-            </Button>
+            {activeFilterCount > 0 ? (
+              <Button variant="outline" onClick={clearFilters}>Limpar filtros</Button>
+            ) : (
+              <Button variant="outline" asChild>
+                <a href="/shopee-accounts">Ir para Contas Shopee</a>
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -331,6 +785,9 @@ export default function ShopeeProducts() {
                 ? "checking"
                 : syncInfo?.status ?? "unknown";
               const isSyncingThis = syncingProductId === product.id;
+              const titleAi = !!product.titleAiGenerated;
+              const descAi = !!product.descriptionAiGenerated;
+              const createdBySys = !!product.createdBySystem;
 
               return (
                 <Card
@@ -381,9 +838,15 @@ export default function ShopeeProducts() {
                             <span className="text-xs text-muted-foreground">SKU: {product.itemSku}</span>
                           )}
                         </div>
-                        {/* Last sync + status */}
+                        {/* Last sync + status + IA + origin */}
                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                           <SyncBadge status={syncStatus} changes={syncInfo?.changes} />
+                          <AiBadges titleAi={titleAi} descAi={descAi} />
+                          {createdBySys && (
+                            <Badge variant="outline" className="text-xs gap-1 text-orange-700 border-orange-300 bg-orange-50">
+                              Feito pelo sistema
+                            </Badge>
+                          )}
                           <span className="text-xs text-muted-foreground">
                             Sync: {formatDate(product.lastSyncAt)}
                           </span>
