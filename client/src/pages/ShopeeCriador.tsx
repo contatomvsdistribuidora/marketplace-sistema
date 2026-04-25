@@ -166,7 +166,7 @@ export default function ShopeeCriador() {
       if (v && v !== "all") params.set(k as string, String(v));
     };
     (Object.keys(filters) as Array<keyof FilterState>).forEach(writeIfSet);
-    if (orderBy !== "recent") params.set("orderBy", orderBy);
+    if (orderBy !== "updated_desc") params.set("orderBy", orderBy);
     const qs = params.toString();
     const next = qs ? `/shopee-criador?${qs}` : "/shopee-criador";
     if (typeof window !== "undefined" && window.location.pathname + window.location.search !== next) {
@@ -304,12 +304,15 @@ export default function ShopeeCriador() {
               onChange={(e) => { setOrderBy(e.target.value as OrderBy); setPage(1); }}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"
             >
-              <option value="recent">Mais recentes</option>
-              <option value="oldest">Mais antigos</option>
+              <option value="updated_desc">Último modificado</option>
+              <option value="updated_asc">Mais antigos</option>
+              <option value="created_desc">Último criado</option>
               <option value="name_asc">Nome A→Z</option>
               <option value="name_desc">Nome Z→A</option>
               <option value="price_asc">Preço menor</option>
               <option value="price_desc">Preço maior</option>
+              <option value="quality_desc">Maior qualidade</option>
+              <option value="quality_asc">Menor qualidade</option>
             </select>
           </div>
 

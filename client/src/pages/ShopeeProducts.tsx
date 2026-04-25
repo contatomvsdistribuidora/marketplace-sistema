@@ -131,7 +131,7 @@ export default function ShopeeProducts() {
       if (v && v !== "all") params.set(k as string, String(v));
     };
     (Object.keys(filters) as Array<keyof FilterState>).forEach(writeIfSet);
-    if (orderBy !== "recent") params.set("orderBy", orderBy);
+    if (orderBy !== "updated_desc") params.set("orderBy", orderBy);
     const qs = params.toString();
     const next = qs ? `/shopee-products?${qs}` : "/shopee-products";
     if (typeof window !== "undefined" && window.location.pathname + window.location.search !== next) {
@@ -275,12 +275,15 @@ export default function ShopeeProducts() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="recent">Mais recentes</SelectItem>
-              <SelectItem value="oldest">Mais antigos</SelectItem>
+              <SelectItem value="updated_desc">Último modificado</SelectItem>
+              <SelectItem value="updated_asc">Mais antigos</SelectItem>
+              <SelectItem value="created_desc">Último criado</SelectItem>
               <SelectItem value="name_asc">Nome A→Z</SelectItem>
               <SelectItem value="name_desc">Nome Z→A</SelectItem>
               <SelectItem value="price_asc">Preço menor</SelectItem>
               <SelectItem value="price_desc">Preço maior</SelectItem>
+              <SelectItem value="quality_desc">Maior qualidade</SelectItem>
+              <SelectItem value="quality_asc">Menor qualidade</SelectItem>
             </SelectContent>
           </Select>
 

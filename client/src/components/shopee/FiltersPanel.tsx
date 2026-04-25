@@ -23,12 +23,17 @@ export type StockFilter = "all" | "with" | "without" | "low";
 export type AiFilter = "all" | "yes" | "no";
 export type CreatedRangeFilter = "all" | "today" | "last7days" | "last30days";
 export type OrderBy =
-  | "recent"
-  | "oldest"
+  | "updated_desc"
+  | "updated_asc"
+  | "created_desc"
   | "name_asc"
   | "name_desc"
   | "price_asc"
-  | "price_desc";
+  | "price_desc"
+  | "quality_desc"
+  | "quality_asc";
+
+export const DEFAULT_ORDER: OrderBy = "updated_desc";
 
 export type FilterState = {
   createdBySystem: CreatedBySystem;
@@ -83,16 +88,22 @@ export function readFiltersFromUrl(params: URLSearchParams): FilterState {
 
 export function readOrderFromUrl(params: URLSearchParams): OrderBy {
   const v = params.get("orderBy");
+  // Normalize legacy aliases silently so old bookmarks keep working.
+  if (v === "recent") return "updated_desc";
+  if (v === "oldest") return "updated_asc";
   if (
-    v === "recent" ||
-    v === "oldest" ||
+    v === "updated_desc" ||
+    v === "updated_asc" ||
+    v === "created_desc" ||
     v === "name_asc" ||
     v === "name_desc" ||
     v === "price_asc" ||
-    v === "price_desc"
+    v === "price_desc" ||
+    v === "quality_desc" ||
+    v === "quality_asc"
   )
     return v;
-  return "recent";
+  return DEFAULT_ORDER;
 }
 
 export function countActiveFilters(f: FilterState): number {

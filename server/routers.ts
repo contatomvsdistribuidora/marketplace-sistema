@@ -1886,7 +1886,23 @@ export const appRouter = router({
         createdRange: z.enum(["today", "last7days", "last30days"]).optional(),
         sku: z.string().min(1).optional(),
         orderBy: z
-          .enum(["recent", "oldest", "name_asc", "name_desc", "price_asc", "price_desc"])
+          .enum([
+            // Current vocabulary
+            "updated_desc",
+            "updated_asc",
+            "created_desc",
+            "name_asc",
+            "name_desc",
+            "price_asc",
+            "price_desc",
+            "quality_desc",
+            "quality_asc",
+            // Deprecated aliases kept so bookmarked URLs from before the
+            // 9-option dropdown keep working: "recent" → updated_desc,
+            // "oldest" → updated_asc.
+            "recent",
+            "oldest",
+          ])
           .optional(),
       }))
       .query(async ({ input }) => {
@@ -1969,16 +1985,28 @@ export const appRouter = router({
 
         const whereExpr = conds.length === 1 ? conds[0] : and(...conds);
 
-        // Ordering. Default = recent (most-recently-touched in our DB first,
-        // not in Shopee — uses updatedAt then createdAt).
-        const order = input.orderBy ?? "recent";
+        // Ordering. Default = updated_desc (most-recently-touched in our DB
+        // first, not in Shopee — uses updatedAt then createdAt).
+        // Legacy aliases "recent"/"oldest" are normalized so old bookmarks
+        // keep working.
+        const rawOrder = input.orderBy ?? "updated_desc";
+        const order =
+          rawOrder === "recent" ? "updated_desc" :
+          rawOrder === "oldest" ? "updated_asc" :
+          rawOrder;
+        // qualityScore is stored as "<score>-<grade>" (e.g. "44-D"), so the
+        // numeric prefix has to be extracted before sorting.
+        const qualityNum = sql`CAST(SUBSTRING_INDEX(${shopeeProducts.qualityScore}, '-', 1) AS DECIMAL(10,2))`;
         const orderExprs =
-          order === "recent" ? [desc(shopeeProducts.updatedAt), desc(shopeeProducts.createdAt)] :
-          order === "oldest" ? [asc(shopeeProducts.createdAt)] :
+          order === "updated_desc" ? [desc(shopeeProducts.updatedAt), desc(shopeeProducts.createdAt)] :
+          order === "updated_asc" ? [asc(shopeeProducts.updatedAt), asc(shopeeProducts.createdAt)] :
+          order === "created_desc" ? [desc(shopeeProducts.createdAt)] :
           order === "name_asc" ? [asc(shopeeProducts.itemName)] :
           order === "name_desc" ? [desc(shopeeProducts.itemName)] :
           order === "price_asc" ? [sql`CAST(${shopeeProducts.price} AS DECIMAL(15,2)) ASC`] :
-          [sql`CAST(${shopeeProducts.price} AS DECIMAL(15,2)) DESC`];
+          order === "price_desc" ? [sql`CAST(${shopeeProducts.price} AS DECIMAL(15,2)) DESC`] :
+          order === "quality_desc" ? [sql`${qualityNum} DESC`] :
+          [sql`${qualityNum} ASC`];
 
         const offset = input.offset || 0;
         const limit = input.limit || 50;

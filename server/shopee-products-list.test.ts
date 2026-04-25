@@ -270,16 +270,16 @@ describe("shopee.getProducts — ordering & combinations", () => {
     resetCaptured();
   });
 
-  it("default orderBy is `recent` (updatedAt DESC, createdAt DESC → 2 sort keys)", async () => {
+  it("default orderBy is `updated_desc` (updatedAt DESC, createdAt DESC → 2 sort keys)", async () => {
     const caller = await makeCaller();
     await caller.shopee.getProducts({ accountId: 7 });
     expect(captured.orderByArgs).toHaveLength(2);
   });
 
-  it("explicit orderBy=oldest emits a single sort key", async () => {
+  it("explicit orderBy=updated_asc emits 2 sort keys (updatedAt ASC, createdAt ASC)", async () => {
     const caller = await makeCaller();
-    await caller.shopee.getProducts({ accountId: 7, orderBy: "oldest" });
-    expect(captured.orderByArgs).toHaveLength(1);
+    await caller.shopee.getProducts({ accountId: 7, orderBy: "updated_asc" });
+    expect(captured.orderByArgs).toHaveLength(2);
   });
 
   it("explicit orderBy=name_asc / price_desc emit a single sort key", async () => {
@@ -290,7 +290,37 @@ describe("shopee.getProducts — ordering & combinations", () => {
     expect(captured.orderByArgs).toHaveLength(1);
   });
 
-  it("combination: createdBySystem=true + status=active + orderBy=recent", async () => {
+  it("orderBy=created_desc emits a single sort key (createdAt DESC)", async () => {
+    const caller = await makeCaller();
+    await caller.shopee.getProducts({ accountId: 7, orderBy: "created_desc" });
+    expect(captured.orderByArgs).toHaveLength(1);
+  });
+
+  it("orderBy=quality_desc emits a single sort key over qualityScore", async () => {
+    const caller = await makeCaller();
+    await caller.shopee.getProducts({ accountId: 7, orderBy: "quality_desc" });
+    expect(captured.orderByArgs).toHaveLength(1);
+  });
+
+  it("orderBy=quality_asc emits a single sort key over qualityScore", async () => {
+    const caller = await makeCaller();
+    await caller.shopee.getProducts({ accountId: 7, orderBy: "quality_asc" });
+    expect(captured.orderByArgs).toHaveLength(1);
+  });
+
+  it("legacy orderBy=`recent` is silently treated as updated_desc (2 sort keys)", async () => {
+    const caller = await makeCaller();
+    await caller.shopee.getProducts({ accountId: 7, orderBy: "recent" });
+    expect(captured.orderByArgs).toHaveLength(2);
+  });
+
+  it("legacy orderBy=`oldest` is silently treated as updated_asc (2 sort keys)", async () => {
+    const caller = await makeCaller();
+    await caller.shopee.getProducts({ accountId: 7, orderBy: "oldest" });
+    expect(captured.orderByArgs).toHaveLength(2);
+  });
+
+  it("combination: createdBySystem=true + status=active + orderBy=updated_desc", async () => {
     const caller = await makeCaller();
     captured.rowsResponse = [
       {
@@ -300,7 +330,7 @@ describe("shopee.getProducts — ordering & combinations", () => {
     ];
     captured.countResponse = [{ id: 1 }];
     const out = await caller.shopee.getProducts({
-      accountId: 7, createdBySystem: true, status: "active", orderBy: "recent",
+      accountId: 7, createdBySystem: true, status: "active", orderBy: "updated_desc",
     });
     expect(out.total).toBe(1);
     expect(out.products[0].createdBySystem).toBe(1);
