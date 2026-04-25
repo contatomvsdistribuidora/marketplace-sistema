@@ -1950,9 +1950,10 @@ export const appRouter = router({
           }
           const hasModel: boolean = !!item.has_model;
           const tierVariation: any[] = Array.isArray(item.tier_variation) ? item.tier_variation : [];
-          // tierVariation may carry option_list per tier; flatten the FIRST tier
-          // for the headline count. Real model count comes from get_model_list
-          // below (more authoritative — handles multi-tier products correctly).
+          // Diagnostic dump (kept compact in prod). Lets us inspect Shopee's
+          // exact response when the wizard misreads a tier name or option.
+          console.log(`[Shopee VariationCheck] DEBUG raw tier_variation: ${JSON.stringify(tierVariation)}`);
+
           const headlineOptionsCount = tierVariation[0]?.option_list?.length ?? 0;
           const hasVariation = hasModel || headlineOptionsCount > 0;
 
@@ -1961,16 +1962,33 @@ export const appRouter = router({
             return { hasVariation: false as const, itemId };
           }
 
-          // Build the read-only tier shape (name + full option entries with image).
-          const tierVariationOut = tierVariation.map((t: any) => ({
-            name: String(t?.name ?? ""),
-            optionList: Array.isArray(t?.option_list)
-              ? t.option_list.map((o: any) => ({
-                  option: String(o?.option ?? ""),
-                  image: o?.image?.image_url ? String(o.image.image_url) : null,
-                }))
-              : [],
-          }));
+          // Tier name source priority: name → display_name → original_name.
+          // Some Shopee responses return the localized name in `display_name`
+          // and leave `name` empty; previous code only read `name`, which is
+          // why the banner showed "Variação" instead of "Cor". Same for options.
+          const tierVariationOut = tierVariation.map((t: any, ti: number) => {
+            const tierName =
+              (typeof t?.name === "string" && t.name.trim()) ? t.name.trim() :
+              (typeof t?.display_name === "string" && t.display_name.trim()) ? t.display_name.trim() :
+              (typeof t?.original_name === "string" && t.original_name.trim()) ? t.original_name.trim() :
+              `Tier ${ti + 1}`;
+            return {
+              name: tierName,
+              optionList: Array.isArray(t?.option_list)
+                ? t.option_list.map((o: any) => {
+                    const optName =
+                      (typeof o?.option === "string" && o.option.trim()) ? o.option.trim() :
+                      (typeof o?.display_option === "string" && o.display_option.trim()) ? o.display_option.trim() :
+                      (typeof o?.original_option === "string" && o.original_option.trim()) ? o.original_option.trim() :
+                      "";
+                    return {
+                      option: optName,
+                      image: o?.image?.image_url ? String(o.image.image_url) : null,
+                    };
+                  })
+                : [],
+            };
+          });
 
           // Fetch the model list (authoritative SKU/price/stock per variation).
           // Fail-soft: if Shopee returns an error we still surface the tier
@@ -2905,13 +2923,19 @@ export const appRouter = router({
           console.log(`[Shopee Wizard] ${result.mode} OK — item ${result.itemId}: ${result.itemUrl}`);
 
           // overrideMode="create" on a product that already had a Shopee item_id
-          // means the local row is now pointing at the wrong listing. Rewrite it
-          // so future UPDATE calls target the new item.
+          // means the local row is now pointing at the wrong listing. Rewrite
+          // it so future UPDATE calls target the new item, and stash the old
+          // itemId in shopeeItemIdLegacy for audit / cross-reference.
           if (input.overrideMode === "create" && sourceProduct.itemId && result.itemId !== Number(sourceProduct.itemId)) {
             await db.update(shopeeProducts)
-              .set({ itemId: result.itemId, variations: null, itemStatus: "NORMAL" })
+              .set({
+                itemId: result.itemId,
+                shopeeItemIdLegacy: Number(sourceProduct.itemId),
+                variations: null,
+                itemStatus: "NORMAL",
+              })
               .where(eq(shopeeProducts.id, input.sourceProductId));
-            console.log(`[Shopee Wizard] Rewrote local item_id ${sourceProduct.itemId} → ${result.itemId} after forced CREATE`);
+            console.log(`[Shopee Wizard] Rewrote local item_id ${sourceProduct.itemId} → ${result.itemId} after forced CREATE (legacy preservado)`);
           }
 
           return { success: true, mode: result.mode, itemId: result.itemId, itemUrl: result.itemUrl, shopId };
@@ -2924,6 +2948,133 @@ export const appRouter = router({
                 `[NEEDS_USER_DECISION] ${e.userMessage} :: modes=${(e.availableModes ?? []).join(",")}`
               );
             }
+            throw new Error(`[${e.code}] ${e.userMessage}`);
+          }
+          throw e;
+        }
+      }),
+
+    /**
+     * Publish a fresh new listing on Shopee, bypassing any promote/update
+     * path. Used when the source product already has variations on Shopee
+     * (which we don't yet know how to edit) — preserving the old item_id in
+     * `shopeeItemIdLegacy` for cross-reference.
+     *
+     * Thin wrapper around createProductFromWizard with overrideMode="create"
+     * forced, so all the existing protections (newItemName validation,
+     * brand/category override, image reuse) apply uniformly.
+     */
+    publishAsNewProduct: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        sourceProductId: z.number(),
+        variationTypeName: z.string(),
+        variations: z.array(z.object({
+          label: z.string().max(20),
+          price: z.number().positive(),
+          stock: z.number().int().min(0),
+          weight: z.number().positive(),
+          length: z.number().positive().optional().transform((v) => (v !== undefined ? Math.round(v) : v)),
+          width: z.number().positive().optional().transform((v) => (v !== undefined ? Math.round(v) : v)),
+          height: z.number().positive().optional().transform((v) => (v !== undefined ? Math.round(v) : v)),
+          sku: z.string().max(64).optional(),
+          ean: z.string().optional(),
+        })).min(1),
+        title: z.string().min(1).max(120),
+        description: z.string(),
+        hashtags: z.array(z.string()).optional(),
+        attributes: z.array(z.object({
+          attributeId: z.number(),
+          attributeValueList: z.array(z.object({
+            valueId: z.number(),
+            originalValueName: z.string().optional(),
+          })),
+        })).optional(),
+        newItemName: z.string().optional(),
+        categoryId: z.number().int().positive().optional(),
+        brand: z.object({
+          brandId: z.number().int().min(0),
+          brandName: z.string().min(1).max(128),
+        }).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const db = sharedDb;
+        const { shopeeProducts } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+
+        const [sourceProduct] = await db.select().from(shopeeProducts)
+          .where(eq(shopeeProducts.id, input.sourceProductId)).limit(1);
+        if (!sourceProduct) throw new Error("Produto base não encontrado no banco de dados");
+
+        const categoryId = input.categoryId ?? sourceProduct.categoryId;
+        if (!categoryId) throw new Error("Produto base não possui categoria Shopee. Sincronize os produtos antes de publicar.");
+
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+
+        // Logistics: only fetched on CREATE.
+        let logisticIds: number[] = [];
+        try {
+          const channels = await shopeePublish.getLogisticsChannels(accessToken, shopId);
+          logisticIds = (channels as any[]).filter((c) => c.enabled)
+            .map((c) => c.logistics_channel_id).slice(0, 5);
+        } catch (e) {
+          console.warn("[Shopee PublishAsNew] Could not fetch logistics channels:", e);
+        }
+
+        const imageUrls: string[] = [];
+        const imgs = sourceProduct.images;
+        if (Array.isArray(imgs) && imgs.length > 0) {
+          imageUrls.push(...(imgs as string[]).filter(Boolean).slice(0, 9));
+        } else if (sourceProduct.imageUrl) {
+          imageUrls.push(sourceProduct.imageUrl);
+        }
+        if (imageUrls.length === 0) throw new Error("Produto base não possui imagens.");
+
+        let fullDescription = input.description;
+        if (input.hashtags && input.hashtags.length > 0) {
+          fullDescription += "\n\n" + input.hashtags.slice(0, 20).join(" ");
+        }
+
+        const oldItemId = sourceProduct.itemId ? Number(sourceProduct.itemId) : null;
+        console.log(`[Shopee PublishAsNew] item antigo ${oldItemId ?? "(nenhum)"} → criando novo`);
+
+        try {
+          const result = await shopeePublish.publishProductFromWizard(accessToken, shopId, {
+            title: input.title,
+            description: fullDescription,
+            categoryId,
+            imageUrls,
+            logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
+            baseSku: sourceProduct.itemSku ?? undefined,
+            variationTypeName: input.variationTypeName,
+            variations: input.variations,
+            attributes: input.attributes,
+            // Force CREATE: ignores sourceItemId and goes straight to add_item.
+            sourceItemId: oldItemId ?? undefined,
+            overrideMode: "create",
+            newItemName: input.newItemName,
+            brand: input.brand,
+          });
+
+          // Persist new itemId + preserve the old one as legacy. Only writes
+          // when add_item actually succeeded (the call above throws on failure,
+          // and we don't reach this line — banco intacto).
+          if (result.itemId && (oldItemId === null || result.itemId !== oldItemId)) {
+            await db.update(shopeeProducts)
+              .set({
+                itemId: result.itemId,
+                shopeeItemIdLegacy: oldItemId ?? null,
+                variations: null,
+                itemStatus: "NORMAL",
+              })
+              .where(eq(shopeeProducts.id, input.sourceProductId));
+            console.log(`[Shopee PublishAsNew] item antigo ${oldItemId ?? "(nenhum)"} → novo ${result.itemId}, legacy preservado`);
+          }
+
+          return { success: true, itemId: result.itemId, itemUrl: result.itemUrl, legacyItemId: oldItemId, shopId };
+        } catch (e: any) {
+          console.error(`[Shopee PublishAsNew] falha ao criar novo (item antigo ${oldItemId ?? "(nenhum)"} preservado intacto):`, e?.message);
+          if (e instanceof shopeePublish.PublishValidationError) {
             throw new Error(`[${e.code}] ${e.userMessage}`);
           }
           throw e;

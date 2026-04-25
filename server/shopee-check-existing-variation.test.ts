@@ -152,6 +152,41 @@ describe("shopee.checkExistingVariation", () => {
     }
   });
 
+  it("falls back to display_name / original_name when tier.name is empty (parser fix for LE22-style payload)", async () => {
+    dbResponse.rows = [
+      { product: { id: 933, itemId: 23598070827, shopeeAccountId: 7 }, accountId: 7 },
+    ];
+    mockGetValidToken.mockResolvedValueOnce({ accessToken: "tok", shopId: 12345 });
+    mockGetItemBaseInfo.mockResolvedValueOnce([
+      {
+        item_id: 23598070827,
+        has_model: true,
+        // Shopee's response sometimes leaves `name` empty and puts the
+        // localized name in `display_name`. Same for options. The wizard
+        // banner used to display "Variação 0" because of this.
+        tier_variation: [
+          {
+            name: "",
+            display_name: "Cor",
+            option_list: [
+              { option: "", display_option: "Vermelho" },
+            ],
+          },
+        ],
+      },
+    ]);
+    mockGetModelList.mockResolvedValueOnce([]);
+
+    const caller = await makeCaller(1);
+    const result = await caller.shopee.checkExistingVariation({ productId: 933 });
+
+    expect(result.hasVariation).toBe(true);
+    if (result.hasVariation === true) {
+      expect(result.tierVariation[0].name).toBe("Cor");
+      expect(result.tierVariation[0].optionList[0].option).toBe("Vermelho");
+    }
+  });
+
   it("returns hasVariation=false when has_model is false and tier_variation is empty", async () => {
     dbResponse.rows = [
       { product: { id: 50, itemId: 50, shopeeAccountId: 7 }, accountId: 7 },

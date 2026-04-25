@@ -430,6 +430,12 @@ export const shopeeProducts = mysqlTable("shopee_products", {
   userId: int("userId").notNull(),
   shopeeAccountId: int("shopeeAccountId").notNull(),
   itemId: bigint("itemId", { mode: "number" }).notNull(),
+  /**
+   * Previous Shopee item_id when the user re-publishes as a new product
+   * (publishAsNewProduct flow). Preserved for audit / cross-reference;
+   * the old listing on Shopee stays untouched.
+   */
+  shopeeItemIdLegacy: bigint("shopeeItemIdLegacy", { mode: "number" }),
   itemName: varchar("itemName", { length: 1024 }),
   itemSku: varchar("itemSku", { length: 256 }),
   itemStatus: varchar("itemStatus", { length: 32 }),

@@ -353,6 +353,17 @@ function ScoreBar({ score, max }: { score: number; max: number }) {
 function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: { product: any; accountId: number; onBack: () => void; showBreadcrumb?: boolean }) {
   // — existing wizard/publish state —
   const [wizardOpen, setWizardOpen] = useState(false);
+  // wizardCreateNewMode=true = força fluxo "publicar como novo produto"
+  // (chama publishAsNewProduct em vez de createProductFromWizard). Setado
+  // quando o usuário clica em "Criar como novo produto na Shopee" no card
+  // âmbar da tela principal (produto que já tem variação na Shopee).
+  const [wizardCreateNewMode, setWizardCreateNewMode] = useState(false);
+  // Pré-flight: produto já tem variação na Shopee?
+  const { data: productVariationCheck } = trpc.shopee.checkExistingVariation.useQuery(
+    { productId: product.id },
+    { staleTime: 30_000 },
+  );
+  const productHasVariation = productVariationCheck?.hasVariation === true;
   const [savedVariations, setSavedVariations] = useState<VariationGroup[]>([]);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishModalStatus, setPublishModalStatus] = useState<"idle"|"loading"|"success"|"error">("idle");
@@ -911,6 +922,33 @@ function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: {
         </div>
       )}
 
+      {/* Bloco "produto já tem variação" — leitura + botão de criar novo.
+          Aparece ANTES do botão de wizard, com prioridade visual. */}
+      {productHasVariation && productVariationCheck && productVariationCheck.hasVariation && (
+        <div className="space-y-3">
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4">
+            <div className="flex gap-3 items-start">
+              <span className="text-2xl flex-shrink-0">⚠️</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-900 mb-1">
+                  Este produto já tem variação na Shopee
+                </p>
+                <p className="text-xs text-amber-800 leading-relaxed">
+                  O modo de edição de variações ainda não está disponível. Você pode
+                  criar um <b>produto NOVO</b> na Shopee — o item atual ficará
+                  intacto e marcado como <b>legacy</b> no nosso sistema.
+                </p>
+              </div>
+            </div>
+          </div>
+          <VariationsReadOnly
+            itemId={productVariationCheck.itemId!}
+            tierVariation={productVariationCheck.tierVariation ?? []}
+            models={productVariationCheck.models ?? []}
+          />
+        </div>
+      )}
+
       {/* Publicar / Criar variação */}
       {savedVariations.length > 0 && (
         <button
@@ -919,11 +957,26 @@ function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: {
           🚀 Publicar na Shopee
         </button>
       )}
-      <button
-        onClick={() => setWizardOpen(true)}
-        className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50">
-        <PlusCircle className="w-5 h-5" /> {savedVariations.length > 0 ? "Criar Nova Variação" : "Criar Variação de Anúncio"}
-      </button>
+      {productHasVariation ? (
+        <>
+          <button
+            onClick={() => { setWizardCreateNewMode(true); setWizardOpen(true); }}
+            className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-base transition shadow-md shadow-blue-200">
+            🆕 Criar como novo produto na Shopee
+          </button>
+          <p className="text-xs text-gray-500 text-center leading-relaxed -mt-1">
+            Isso vai criar um item NOVO na Shopee. O item atual{" "}
+            <span className="font-mono">({productVariationCheck?.itemId ?? "—"})</span>{" "}
+            ficará intacto e marcado como legacy no nosso sistema.
+          </p>
+        </>
+      ) : (
+        <button
+          onClick={() => { setWizardCreateNewMode(false); setWizardOpen(true); }}
+          className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50">
+          <PlusCircle className="w-5 h-5" /> {savedVariations.length > 0 ? "Criar Nova Variação" : "Criar Variação de Anúncio"}
+        </button>
+      )}
 
       {/* ── Modal de sugestão de título ─────────────────────────────────── */}
       {titleSuggestion && (
@@ -1261,7 +1314,8 @@ function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: {
           product={product}
           accountId={accountId}
           onSave={handleSaveVariation}
-          onClose={() => setWizardOpen(false)}
+          onClose={() => { setWizardOpen(false); setWizardCreateNewMode(false); }}
+          createNewMode={wizardCreateNewMode}
         />
       )}
     </div>
@@ -1376,11 +1430,17 @@ function VariationWizard({
   accountId,
   onSave,
   onClose,
+  createNewMode = false,
 }: {
   product: any;
   accountId: number;
   onSave: (group: VariationGroup) => void;
   onClose: () => void;
+  /** When true, the wizard's final publish call uses publishAsNewProduct
+   *  (which preserves the old itemId in shopeeItemIdLegacy). Used when the
+   *  source product already has variations on Shopee and the user picked
+   *  "Criar como novo produto" on the main product screen. */
+  createNewMode?: boolean;
 }) {
   const [step, setStep]                   = useState<WizardStep>("A");
   const [selectedType, setSelectedType]   = useState<VariationType | null>(null);
@@ -1424,6 +1484,7 @@ function VariationWizard({
   const generateAdMutation   = trpc.shopee.generateAdContent.useMutation();
   const generateAllMutation  = trpc.shopee.generateAllContent.useMutation();
   const publishMutation      = trpc.shopee.createProductFromWizard.useMutation();
+  const publishAsNewMutation = trpc.shopee.publishAsNewProduct.useMutation();
   const fillAttrsMutation    = trpc.ai.fillAttributes.useMutation();
 
   // Categoria efetiva: começa do produto e fica editável no fluxo CREATE.
@@ -1468,7 +1529,10 @@ function VariationWizard({
       { productId: product.id },
       { staleTime: 30_000 },
     );
-  const hasExistingVariation = existingVariation?.hasVariation === true;
+  // hasExistingVariation bloqueia o botão Publicar do wizard SOMENTE quando
+  // o usuário NÃO escolheu o modo "createNew" — nesse modo é exatamente o
+  // que ele quer fazer (criar novo) e a guarda atrapalharia.
+  const hasExistingVariation = existingVariation?.hasVariation === true && !createNewMode;
   const { data: categoryAttributes, isLoading: attrLoading, error: attrError } =
     trpc.shopee.getCategoryAttributes.useQuery(
       { accountId, categoryId: categoryId! },
@@ -2007,7 +2071,7 @@ function VariationWizard({
     setPublishStatus("loading");
     setPublishError("");
     try {
-      const result = await publishMutation.mutateAsync({
+      const commonPayload = {
         accountId,
         sourceProductId: product.id,
         variationTypeName: typeName,
@@ -2016,17 +2080,31 @@ function VariationWizard({
         description,
         hashtags,
         attributes: attributes.length > 0 ? attributes : undefined,
-        overrideMode: effectiveOverrideMode,
-        newItemName: effectiveOverrideMode === "create" ? effectiveNewItemName : undefined,
-        // Only forward categoryId if the user actually changed it — avoids
-        // no-op overrides on the happy-path update.
         categoryId:
           selectedCategoryId && selectedCategoryId !== initialCategoryId
             ? selectedCategoryId
             : undefined,
-        // Brand: extraído dos attributes da Etapa 3 (input_type=BRAND), não
-        // mais de um picker separado. O backend já lê brand via attribute_list.
-      });
+      };
+
+      let result: { itemId: number; itemUrl: string; mode?: "create" | "update" | "promote" };
+      if (createNewMode) {
+        // Fluxo "Criar como novo produto" — força add_item, preserva o
+        // itemId antigo em shopeeItemIdLegacy. Não passa overrideMode (a
+        // procedure do backend já força create).
+        const r = await publishAsNewMutation.mutateAsync({
+          ...commonPayload,
+          newItemName: effectiveNewItemName || undefined,
+        });
+        result = { itemId: r.itemId, itemUrl: r.itemUrl, mode: "create" };
+      } else {
+        const r = await publishMutation.mutateAsync({
+          ...commonPayload,
+          overrideMode: effectiveOverrideMode,
+          newItemName: effectiveOverrideMode === "create" ? (effectiveNewItemName || undefined) : undefined,
+          // Brand: extraído dos attributes da Etapa 3 (input_type=BRAND).
+        });
+        result = { itemId: r.itemId, itemUrl: r.itemUrl, mode: r.mode };
+      }
       setPublishResult({ itemId: result.itemId, itemUrl: result.itemUrl, mode: result.mode });
       setPublishStatus("success");
     } catch (e: any) {
@@ -2888,8 +2966,28 @@ function VariationWizard({
           {step === "D" && (
             <div className="space-y-4">
 
+              {/* Banner azul: usuário escolheu "Criar como novo produto"
+                  na tela principal. Suprime o banner âmbar e o read-only
+                  abaixo (não faz sentido mostrar a variação antiga ao
+                  criar item novo). */}
+              {createNewMode && existingVariation?.itemId && (
+                <div className="bg-blue-50 border border-blue-300 rounded-xl p-4 flex gap-3 items-start">
+                  <span className="text-2xl flex-shrink-0">ℹ️</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-blue-900 mb-1">
+                      Você está criando um produto NOVO na Shopee
+                    </p>
+                    <p className="text-xs text-blue-800 leading-relaxed">
+                      O item existente (<span className="font-mono">{existingVariation.itemId}</span>) NÃO será alterado.
+                      Após a publicação, o registro local vai apontar pro novo item, e o id antigo
+                      ficará preservado como <b>legacy</b>.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Banner: produto já tem variação na Shopee (modo edição não disponível) */}
-              {hasExistingVariation && existingVariation && (() => {
+              {!createNewMode && hasExistingVariation && existingVariation && (() => {
                 // modelCount agora é authoritative (vem do get_model_list).
                 // Para o headline pegamos o maior entre modelCount e a soma
                 // das opções por tier — defensa contra resposta crua estranha.
