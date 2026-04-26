@@ -415,6 +415,100 @@ describe("Shopee Publish Module", () => {
       expect(Number.isInteger(body.dimension.package_width)).toBe(true);
       expect(Number.isInteger(body.dimension.package_height)).toBe(true);
     });
+
+    it("should forward brand picked in the wizard to the add_item payload", async () => {
+      // image download + upload + add_item
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img_id_1" } } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 99001 } }),
+      });
+
+      await publishProductFromWizard("tok", 12345, {
+        title: "Produto Marca Tupperware",
+        description: "Descrição longa o suficiente para o teste passar no filtro da Shopee.",
+        categoryId: 100001,
+        imageUrls: ["https://example.com/img1.jpg"],
+        variationTypeName: "Quantidade",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5 },
+        ],
+        brand: { brandId: 12345, brandName: "Tupperware" },
+      });
+
+      const addItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_item"));
+      const body = JSON.parse(addItemCall![1].body);
+      expect(body.brand).toEqual({ brand_id: 12345, original_brand_name: "Tupperware" });
+    });
+
+    it("should fall back to brand_id=0 / 'No Brand' when caller omits brand", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img_id_1" } } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 99002 } }),
+      });
+
+      await publishProductFromWizard("tok", 12345, {
+        title: "Produto Sem Marca",
+        description: "Descrição longa o suficiente para o teste passar no filtro da Shopee.",
+        categoryId: 100001,
+        imageUrls: ["https://example.com/img1.jpg"],
+        variationTypeName: "Quantidade",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5 },
+        ],
+      });
+
+      const addItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_item"));
+      const body = JSON.parse(addItemCall![1].body);
+      expect(body.brand).toEqual({ brand_id: 0, original_brand_name: "No Brand" });
+    });
+
+    it("should send brand_id=0 with the user-typed name when 'Sem marca' is the explicit pick", async () => {
+      // BrandPicker free-text fallback returns { brandId: 0, brandName: "<texto>" }.
+      // The payload must keep that text in original_brand_name (not silently
+      // overwrite with "No Brand"), so unregistered brands stay visible to the
+      // seller in the Shopee dashboard.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Map([["content-type", "image/jpeg"]]),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { image_info: { image_id: "img_id_1" } } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "", response: { item_id: 99003 } }),
+      });
+
+      await publishProductFromWizard("tok", 12345, {
+        title: "Produto Marca Livre",
+        description: "Descrição longa o suficiente para o teste passar no filtro da Shopee.",
+        categoryId: 100001,
+        imageUrls: ["https://example.com/img1.jpg"],
+        variationTypeName: "Quantidade",
+        variations: [
+          { label: "1 Un", price: 29.9, stock: 100, weight: 0.5 },
+        ],
+        brand: { brandId: 0, brandName: "MinhaMarcaNova" },
+      });
+
+      const addItemCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/api/v2/product/add_item"));
+      const body = JSON.parse(addItemCall![1].body);
+      expect(body.brand).toEqual({ brand_id: 0, original_brand_name: "MinhaMarcaNova" });
+    });
   });
 
   describe("publishProductFromWizard — update mode", () => {

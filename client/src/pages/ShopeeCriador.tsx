@@ -12,10 +12,7 @@ import {
   type FilterState,
   type OrderBy,
 } from "../components/shopee/FiltersPanel";
-// BrandPicker NÃO é usado na Etapa 4 (Revisão). Brand é atributo de categoria
-// na Shopee — renderizado dentro de Especificações na Etapa 3 quando o
-// backend devolve um attribute com input_type=BRAND. O componente fica
-// disponível pra ser usado lá no próximo passo.
+import { BrandPicker, type BrandValue } from "../components/shopee/BrandPicker";
 import {
   Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
@@ -1547,6 +1544,12 @@ function VariationWizard({
   const [inlinePriceEdits, setInlinePriceEdits]     = useState<Record<string, string>>({});
   const [inlineLabelEdits, setInlineLabelEdits]     = useState<Record<string, string>>({});
   const [attributeValues, setAttributeValues]       = useState<Record<number, { valueId: number; originalValue: string }>>({});
+  // Brand fica fora de attributeValues: o atributo BRAND sintético (attribute_id=-1
+  // injetado por ensureBrandAttribute no backend) só serve pra renderizar o
+  // campo. O brand_id real vai num campo separado no payload de add_item da
+  // Shopee, então mantemos um estado dedicado e filtramos o sintético do
+  // attribute_list enviado.
+  const [brandValue, setBrandValue]                 = useState<BrandValue>({ brandId: 0, brandName: "No Brand" });
   const [aiFillingAttrs, setAiFillingAttrs]         = useState(false);
 
   const [pricing, setPricing] = useState<PricingGlobals>({
@@ -1943,7 +1946,7 @@ function VariationWizard({
     setAdLoadingSection("all");
     try {
       const attributes = Object.entries(attributeValues)
-        .filter(([, v]) => v.originalValue.trim() !== "")
+        .filter(([attrId, v]) => v.originalValue.trim() !== "" && parseInt(attrId) > 0)
         .map(([attrId, v]) => {
           const def = Array.isArray(categoryAttributes)
             ? (categoryAttributes as any[]).find((a) => Number(a.attribute_id) === Number(attrId))
@@ -1968,7 +1971,12 @@ function VariationWizard({
       const result = await generateAllMutation.mutateAsync({
         productName: product.itemName || "Produto",
         category: product.categoryName ?? undefined,
-        brand: (product as any).brand ?? undefined,
+        // Marca escolhida no BrandPicker (Etapa 3). brandId=0 com nome "No Brand"
+        // significa "Sem marca" — não passa nada pra IA pra evitar alucinação.
+        brand:
+          brandValue.brandId !== 0 || brandValue.brandName !== "No Brand"
+            ? brandValue.brandName
+            : undefined,
         variationType: typeName,
         variations,
         attributes: attributes.length > 0 ? attributes : undefined,
@@ -2144,9 +2152,11 @@ function VariationWizard({
     const description = editedDesc || adContent?.descricao || product.description || "";
     const hashtags: string[] = adContent?.hashtags ?? [];
 
-    // Build attribute_list from Ficha Técnica values
+    // Build attribute_list from Ficha Técnica values. attribute_id<=0 é o
+    // sintético BRAND (ensureBrandAttribute) — vai no campo `brand` separado,
+    // não no attribute_list, então filtramos aqui.
     const attributes = Object.entries(attributeValues)
-      .filter(([, v]) => v.originalValue.trim() !== "")
+      .filter(([attrId, v]) => v.originalValue.trim() !== "" && parseInt(attrId) > 0)
       .map(([attrId, v]) => ({
         attributeId: parseInt(attrId),
         attributeValueList: [{ valueId: v.valueId, originalValueName: v.originalValue }],
@@ -2168,6 +2178,10 @@ function VariationWizard({
           selectedCategoryId && selectedCategoryId !== initialCategoryId
             ? selectedCategoryId
             : undefined,
+        // Brand vai como campo top-level do payload add_item (não como
+        // attribute). Backend só consome no CREATE path; UPDATE preserva
+        // a marca cadastrada no anúncio.
+        brand: { brandId: brandValue.brandId, brandName: brandValue.brandName },
       };
 
       let result: { itemId: number; itemUrl: string; mode?: "create" | "update" | "promote" };
@@ -2185,7 +2199,6 @@ function VariationWizard({
           ...commonPayload,
           overrideMode: effectiveOverrideMode,
           newItemName: effectiveOverrideMode === "create" ? (effectiveNewItemName || undefined) : undefined,
-          // Brand: extraído dos attributes da Etapa 3 (input_type=BRAND).
         });
         result = { itemId: r.itemId, itemUrl: r.itemUrl, mode: r.mode };
       }
@@ -2263,12 +2276,16 @@ function VariationWizard({
           features: {},
           category: product.categoryName || "",
         },
-        requiredAttributes: attrs.map(a => ({
-          name: a.display_attribute_name,
-          id: String(a.attribute_id),
-          required: a.is_mandatory,
-          options: (a.attribute_value_list ?? []).slice(0, 30).map(o => o.display_value_name),
-        })),
+        // Pula o BRAND sintético: marca é controlada pelo BrandPicker
+        // dedicado, não pelo preenchimento de atributos.
+        requiredAttributes: attrs
+          .filter(a => a.input_type !== "BRAND")
+          .map(a => ({
+            name: a.display_attribute_name,
+            id: String(a.attribute_id),
+            required: a.is_mandatory,
+            options: (a.attribute_value_list ?? []).slice(0, 30).map(o => o.display_value_name),
+          })),
         marketplace: "shopee",
       });
       setAttributeValues(prev => {
@@ -2726,11 +2743,11 @@ function VariationWizard({
                               {attr.is_mandatory && <span className="text-orange-500 ml-0.5">*</span>}
                             </label>
                             {attr.input_type === "BRAND" ? (
-                              <input
-                                type="text"
-                                readOnly
-                                value={values[0]?.display_value_name ?? values[0]?.original_value_name ?? ""}
-                                className={`w-full text-xs rounded-lg border ${border} bg-gray-50 px-2 py-1.5 text-gray-600`}
+                              <BrandPicker
+                                accountId={accountId}
+                                categoryId={categoryId}
+                                value={brandValue}
+                                onChange={setBrandValue}
                               />
                             ) : attr.input_type === "DROP_DOWN" ? (
                               <select
@@ -3286,11 +3303,11 @@ function VariationWizard({
                             </label>
 
                             {attr.input_type === "BRAND" ? (
-                              <input
-                                type="text"
-                                readOnly
-                                value={values[0]?.display_value_name ?? values[0]?.original_value_name ?? ""}
-                                className={`w-full text-xs rounded-lg border ${borderClass} bg-gray-50 px-2 py-1.5 text-gray-600`}
+                              <BrandPicker
+                                accountId={accountId}
+                                categoryId={categoryId}
+                                value={brandValue}
+                                onChange={setBrandValue}
                               />
                             ) : attr.input_type === "DROP_DOWN" ? (
                               <select
