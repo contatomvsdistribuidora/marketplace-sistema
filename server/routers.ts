@@ -2312,6 +2312,224 @@ export const appRouter = router({
         }
       }),
 
+    /**
+     * V2: pulls from the lazy attribute-cache (populated by
+     * /api/v2/product/get_attribute_tree). Falls back to the static seed
+     * in shopee_category_attributes whenever the cache is empty + the
+     * background sync hasn't landed yet, so the wizard always renders
+     * something even on the very first call. Brand entry is still injected
+     * via ensureBrandAttribute() for now (the API may also return a Brand
+     * attribute — duplicidade temporária tolerável until ensureBrandAttribute
+     * is removed in a future phase).
+     */
+    getCategoryAttributesV2: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        categoryId: z.number(),
+        language: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        if (!input.categoryId) return [];
+        const language = input.language ?? "pt-BR";
+        try {
+          const attributeSync = await import("./shopee/attribute-sync");
+          const parsed = await attributeSync.getAttributesForCategory(
+            input.accountId,
+            input.categoryId,
+            language,
+          );
+          if (parsed.length > 0) return ensureBrandAttribute(parsed);
+          // Cache empty + background sync dispatched. Serve static fallback.
+          const { shopeeCategoryAttributes } = await import("../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const [row] = await sharedDb
+            .select()
+            .from(shopeeCategoryAttributes)
+            .where(eq(shopeeCategoryAttributes.categoryId, input.categoryId))
+            .limit(1);
+          if (row?.attributeList && (row.attributeList as any[]).length > 0) {
+            const list = ensureBrandAttribute(row.attributeList as any[]);
+            console.log(
+              `[Router] getCategoryAttributesV2(${input.categoryId}): cache vazio, usando fallback local (${list.length} atributos)`,
+            );
+            return list;
+          }
+          return ensureBrandAttribute([]);
+        } catch (e: any) {
+          console.error(
+            `[Router] getCategoryAttributesV2(${input.categoryId}):`,
+            e?.message ?? e,
+          );
+          return ensureBrandAttribute([]);
+        }
+      }),
+
+    /**
+     * Bulk-sync the attribute tree for every category in use by this
+     * seller's products. Mirrors syncAllBrandsForAccount: returns
+     * immediately, runs the actual sync as a setImmediate worker.
+     */
+    syncAllAttributesForAccount: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        force: z.boolean().optional(),
+        language: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const language = input.language ?? "pt-BR";
+        const { shopeeProducts, shopeeCategoryAttributeSyncProgress } = await import(
+          "../drizzle/schema"
+        );
+        const { eq, and, inArray } = await import("drizzle-orm");
+        const attributeSync = await import("./shopee/attribute-sync");
+
+        const rows = await sharedDb
+          .selectDistinct({ categoryId: shopeeProducts.categoryId })
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.shopeeAccountId, input.accountId));
+
+        const categoryIds: number[] = rows
+          .map((r) => r.categoryId)
+          .filter((c): c is number => typeof c === "number" && c > 0);
+
+        if (categoryIds.length === 0) {
+          return { jobStarted: false as const, totalCategories: 0 };
+        }
+
+        let toSync = categoryIds;
+        if (!input.force) {
+          const existing = await sharedDb
+            .select()
+            .from(shopeeCategoryAttributeSyncProgress)
+            .where(
+              and(
+                eq(shopeeCategoryAttributeSyncProgress.shopeeAccountId, input.accountId),
+                eq(shopeeCategoryAttributeSyncProgress.language, language),
+                inArray(shopeeCategoryAttributeSyncProgress.categoryId, categoryIds),
+              ),
+            );
+          const fresh = new Set<number>();
+          for (const row of existing) {
+            if (
+              row.status === "done" &&
+              row.lastSyncedAt &&
+              Date.now() - new Date(row.lastSyncedAt).getTime() < attributeSync.TTL_MS
+            ) {
+              fresh.add(row.categoryId);
+            }
+          }
+          toSync = categoryIds.filter((c) => !fresh.has(c));
+        }
+
+        for (const categoryId of toSync) {
+          const [existing] = await sharedDb
+            .select()
+            .from(shopeeCategoryAttributeSyncProgress)
+            .where(
+              and(
+                eq(shopeeCategoryAttributeSyncProgress.shopeeAccountId, input.accountId),
+                eq(shopeeCategoryAttributeSyncProgress.categoryId, categoryId),
+                eq(shopeeCategoryAttributeSyncProgress.language, language),
+              ),
+            )
+            .limit(1);
+          if (existing) {
+            await sharedDb
+              .update(shopeeCategoryAttributeSyncProgress)
+              .set({ status: "pending", errorMessage: null })
+              .where(eq(shopeeCategoryAttributeSyncProgress.id, existing.id));
+          } else {
+            await sharedDb.insert(shopeeCategoryAttributeSyncProgress).values({
+              shopeeAccountId: input.accountId,
+              categoryId,
+              language,
+              status: "pending",
+            });
+          }
+        }
+
+        setImmediate(() => {
+          attributeSync.runBulkSync(input.accountId, toSync, language).catch((err) => {
+            console.error("[Shopee AttributeSync] bulk worker failed:", err?.message ?? err);
+          });
+        });
+
+        return {
+          jobStarted: true as const,
+          totalCategories: toSync.length,
+          skipped: categoryIds.length - toSync.length,
+        };
+      }),
+
+    /**
+     * Snapshot of the attribute-sync progress for an account. Polled by
+     * the AttributeSyncCard every ~5s.
+     */
+    getAttributeSyncStatus: protectedProcedure
+      .input(z.object({
+        accountId: z.number(),
+        language: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        const language = input.language ?? "pt-BR";
+        const {
+          shopeeProducts,
+          shopeeCategoryAttributeSyncProgress,
+          shopeeCategoryAttributeCache,
+        } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+
+        const productCategoryRows = await sharedDb
+          .selectDistinct({ categoryId: shopeeProducts.categoryId })
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.shopeeAccountId, input.accountId));
+        const totalCategories = productCategoryRows.filter(
+          (r) => typeof r.categoryId === "number" && r.categoryId > 0,
+        ).length;
+
+        const progressRows = await sharedDb
+          .select()
+          .from(shopeeCategoryAttributeSyncProgress)
+          .where(
+            and(
+              eq(shopeeCategoryAttributeSyncProgress.shopeeAccountId, input.accountId),
+              eq(shopeeCategoryAttributeSyncProgress.language, language),
+            ),
+          );
+
+        let doneCount = 0;
+        let inProgressCount = 0;
+        let errorCount = 0;
+        let pendingCount = 0;
+        let lastSyncedAt: Date | null = null;
+        for (const row of progressRows) {
+          if (row.status === "done") doneCount += 1;
+          else if (row.status === "in_progress") inProgressCount += 1;
+          else if (row.status === "error") errorCount += 1;
+          else if (row.status === "pending") pendingCount += 1;
+          if (row.lastSyncedAt && (!lastSyncedAt || row.lastSyncedAt > lastSyncedAt)) {
+            lastSyncedAt = row.lastSyncedAt as Date;
+          }
+        }
+
+        const cacheRows = await sharedDb.select().from(shopeeCategoryAttributeCache);
+        let totalCachedAttributes = 0;
+        for (const row of cacheRows) {
+          totalCachedAttributes += row.attributeCount ?? 0;
+        }
+
+        return {
+          totalCategories,
+          doneCategories: doneCount,
+          inProgressCount,
+          errorCount,
+          pendingCount,
+          lastSyncedAt,
+          isRunning: inProgressCount > 0 || pendingCount > 0,
+          totalCachedAttributes,
+        };
+      }),
+
     // Seed or update local category attributes (admin)
     seedCategoryAttributes: protectedProcedure
       .input(z.object({

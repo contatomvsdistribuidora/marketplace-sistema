@@ -486,7 +486,7 @@ function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: {
     trpc.shopee.getProductDiagnostic.useQuery({ productId: product.id }, { staleTime: 60_000 });
   const { data: urlData } =
     trpc.shopee.getProductUrls.useQuery({ accountId, productId: product.id }, { staleTime: 300_000 });
-  const { data: categoryAttrsForDisplay } = trpc.shopee.getCategoryAttributes.useQuery(
+  const { data: categoryAttrsForDisplay } = trpc.shopee.getCategoryAttributesV2.useQuery(
     { accountId, categoryId: Number(product.categoryId) },
     { enabled: !!product.categoryId, staleTime: 5 * 60 * 1000 }
   );
@@ -1621,7 +1621,7 @@ function VariationWizard({
   // que ele quer fazer (criar novo) e a guarda atrapalharia.
   const hasExistingVariation = existingVariation?.hasVariation === true && !createNewMode;
   const { data: categoryAttributes, isLoading: attrLoading, error: attrError } =
-    trpc.shopee.getCategoryAttributes.useQuery(
+    trpc.shopee.getCategoryAttributesV2.useQuery(
       { accountId, categoryId: categoryId! },
       { enabled: !!categoryId, staleTime: 5 * 60 * 1000 }
     );

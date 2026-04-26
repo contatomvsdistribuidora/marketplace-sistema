@@ -545,3 +545,48 @@ export const shopeeBrandSyncProgress = mysqlTable("shopee_brand_sync_progress", 
 
 export type ShopeeBrandSyncProgress = typeof shopeeBrandSyncProgress.$inferSelect;
 export type InsertShopeeBrandSyncProgress = typeof shopeeBrandSyncProgress.$inferInsert;
+
+/**
+ * Per-(region, categoryId, language) cache of the response from
+ * /api/v2/product/get_attribute_tree. Shared across sellers in a region —
+ * the attribute tree for a category is the same for every shop. TTL 24h
+ * enforced by the caller via `updated_at`.
+ */
+export const shopeeCategoryAttributeCache = mysqlTable("shopee_category_attribute_cache", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  region: varchar("region", { length: 8 }).default("BR").notNull(),
+  categoryId: bigint("category_id", { mode: "number" }).notNull(),
+  language: varchar("language", { length: 8 }).default("pt-BR").notNull(),
+  attributeTree: json("attribute_tree").$type<any[]>().notNull(),
+  attributeCount: int("attribute_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeCategoryAttributeCache = typeof shopeeCategoryAttributeCache.$inferSelect;
+export type InsertShopeeCategoryAttributeCache = typeof shopeeCategoryAttributeCache.$inferInsert;
+
+/**
+ * Progress tracking for the bulk + lazy attribute-sync workflow. One row per
+ * (shopeeAccountId, categoryId, language). Same state machine as the brand
+ * sync (pending → in_progress → done | error). TTL 24h enforced by the
+ * lazy reader against `last_synced_at`; in_progress staleness is 5min.
+ */
+export const shopeeCategoryAttributeSyncProgress = mysqlTable(
+  "shopee_category_attribute_sync_progress",
+  {
+    id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+    shopeeAccountId: bigint("shopee_account_id", { mode: "number" }).notNull(),
+    categoryId: bigint("category_id", { mode: "number" }).notNull(),
+    language: varchar("language", { length: 8 }).default("pt-BR").notNull(),
+    status: mysqlEnum("status", ["pending", "in_progress", "done", "error"]).default("pending").notNull(),
+    attributeCount: int("attribute_count").default(0).notNull(),
+    lastSyncedAt: timestamp("last_synced_at"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+);
+
+export type ShopeeCategoryAttributeSyncProgress = typeof shopeeCategoryAttributeSyncProgress.$inferSelect;
+export type InsertShopeeCategoryAttributeSyncProgress = typeof shopeeCategoryAttributeSyncProgress.$inferInsert;

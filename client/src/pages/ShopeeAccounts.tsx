@@ -630,6 +630,11 @@ export default function ShopeeAccounts() {
         <BrandSyncCard accountId={selectedAccountId} />
       )}
 
+      {/* Attribute Sync Card */}
+      {selectedAccountId && (
+        <AttributeSyncCard accountId={selectedAccountId} />
+      )}
+
       {/* Recent Products Preview */}
       {selectedAccountId && productsData && productsData.products.length > 0 && (
         <div className="space-y-4">
@@ -985,6 +990,167 @@ function BrandSyncCard({ accountId }: { accountId: number }) {
               Vai chamar a API Shopee para cada categoria usada pelos seus produtos
               ({total} no total). Pode levar até 2 horas dependendo do volume. As
               marcas já em cache (menos de 24h) serão puladas. Continuar?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleStart}>Sincronizar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function AttributeSyncCard({ accountId }: { accountId: number }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { data: status, refetch, isFetching } = trpc.shopee.getAttributeSyncStatus.useQuery(
+    { accountId },
+    { refetchInterval: 5000 },
+  );
+  const syncMutation = trpc.shopee.syncAllAttributesForAccount.useMutation();
+
+  const total = status?.totalCategories ?? 0;
+  const done = status?.doneCategories ?? 0;
+  const inProgress = status?.inProgressCount ?? 0;
+  const pending = status?.pendingCount ?? 0;
+  const errors = status?.errorCount ?? 0;
+  const isRunning = status?.isRunning ?? false;
+  const cachedAttributes = status?.totalCachedAttributes ?? 0;
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  const handleStart = async () => {
+    setConfirmOpen(false);
+    try {
+      const result = await syncMutation.mutateAsync({ accountId });
+      if (!result.jobStarted) {
+        toast.info("Nenhuma categoria precisa de sincronização agora.");
+      } else {
+        toast.success(
+          `Iniciado: ${result.totalCategories} categoria(s) na fila.${
+            result.skipped ? ` ${result.skipped} já estavam atualizadas.` : ""
+          }`,
+        );
+      }
+      refetch();
+    } catch (err: any) {
+      toast.error(`Erro ao iniciar: ${err?.message ?? err}`);
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-orange-100 flex items-center justify-center">
+                <FileText className="h-5 w-5 text-orange-600" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Cache de Atributos por Categoria</CardTitle>
+                <CardDescription>
+                  Sincroniza a árvore de atributos (get_attribute_tree) por categoria. Cache de 24h.
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+                Atualizar status
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setConfirmOpen(true)}
+                disabled={isRunning || syncMutation.isPending}
+                className="gap-2"
+              >
+                {isRunning || syncMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Sincronizando...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    Sincronizar todos os atributos
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <span className="text-muted-foreground">Categorias usadas</span>
+              <p className="font-medium">{total}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Sincronizadas</span>
+              <p className="font-medium">
+                {done}/{total} ({percent}%)
+              </p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Atributos em cache</span>
+              <p className="font-medium">{cachedAttributes.toLocaleString("pt-BR")}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Última sincronização</span>
+              <p className="font-medium">{formatRelative(status?.lastSyncedAt ?? null)}</p>
+            </div>
+          </div>
+
+          {total > 0 && (
+            <div>
+              <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                <span>Progresso</span>
+                <span>{percent}%</span>
+              </div>
+              <Progress value={percent} className="h-2" />
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2 text-xs">
+            {isRunning ? (
+              <Badge variant="secondary" className="bg-orange-100 text-orange-800 gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Sincronizando ({inProgress} em curso, {pending} na fila)
+              </Badge>
+            ) : errors > 0 ? (
+              <Badge variant="secondary" className="bg-amber-100 text-amber-800 gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                Erro em {errors} categoria{errors === 1 ? "" : "s"}
+              </Badge>
+            ) : done > 0 ? (
+              <Badge variant="secondary" className="bg-green-100 text-green-800 gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                Pronto
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="bg-gray-100 text-gray-700">
+                Nunca sincronizado
+              </Badge>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sincronizar todos os atributos?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vai chamar a API Shopee para cada categoria usada pelos seus produtos
+              ({total} no total) — uma chamada por categoria. As categorias já em
+              cache (menos de 24h) serão puladas. Continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
