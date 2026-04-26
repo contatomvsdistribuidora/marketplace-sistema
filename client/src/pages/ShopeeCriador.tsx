@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearch, useLocation } from "wouter";
+import { toast } from "sonner";
 import { trpc } from "../lib/trpc";
 import { CategoryPicker } from "../components/shopee/CategoryPicker";
 import { VariationsReadOnly } from "../components/shopee/VariationsReadOnly";
@@ -1551,6 +1552,7 @@ function VariationWizard({
   // attribute_list enviado.
   const [brandValue, setBrandValue]                 = useState<BrandValue>({ brandId: 0, brandName: "No Brand" });
   const [aiFillingAttrs, setAiFillingAttrs]         = useState(false);
+  const [, setLocation]                             = useLocation();
 
   const [pricing, setPricing] = useState<PricingGlobals>({
     unitCost: "",
@@ -1573,6 +1575,7 @@ function VariationWizard({
   const publishMutation      = trpc.shopee.createProductFromWizard.useMutation();
   const publishAsNewMutation = trpc.shopee.publishAsNewProduct.useMutation();
   const fillAttrsMutation    = trpc.ai.fillAttributes.useMutation();
+  const trpcUtils            = trpc.useUtils();
 
   // Categoria efetiva: começa do produto e fica editável no fluxo CREATE.
   // Em UPDATE/PROMOTE a Shopee bloqueia mudança (CATEGORY_CHANGED), então o
@@ -2189,11 +2192,19 @@ function VariationWizard({
         // Fluxo "Criar como novo produto" — força add_item, preserva o
         // itemId antigo em shopeeItemIdLegacy. Não passa overrideMode (a
         // procedure do backend já força create).
-        const r = await publishAsNewMutation.mutateAsync({
+        await publishAsNewMutation.mutateAsync({
           ...commonPayload,
           newItemName: effectiveNewItemName || undefined,
         });
-        result = { itemId: r.itemId, itemUrl: r.itemUrl, mode: "create" };
+        // Diferente do fluxo normal (update/promote), o "publicar como novo"
+        // troca o itemId do registro local pelo novo anúncio Shopee — o
+        // usuário esperaria ver isso refletido na lista, então invalidamos a
+        // query, mostramos toast e redirecionamos. Sai cedo pra não piscar o
+        // card verde do publishStatus="success" antes da navegação.
+        await trpcUtils.shopee.getProducts.invalidate();
+        toast.success("Produto criado com sucesso na Shopee!");
+        setLocation("/shopee-products");
+        return;
       } else {
         const r = await publishMutation.mutateAsync({
           ...commonPayload,
