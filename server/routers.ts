@@ -3353,6 +3353,7 @@ export const appRouter = router({
           attributeValueList: z.array(z.object({
             valueId: z.number(),
             originalValueName: z.string().optional(),
+            valueUnit: z.string().optional(),
           })),
         })).optional(),
         /** User's explicit choice for the simple→variated ambiguous case.
@@ -3521,6 +3522,7 @@ export const appRouter = router({
           attributeValueList: z.array(z.object({
             valueId: z.number(),
             originalValueName: z.string().optional(),
+            valueUnit: z.string().optional(),
           })),
         })).optional(),
         newItemName: z.string().optional(),

@@ -466,7 +466,7 @@ export interface CreateProductInput {
   logisticIds?: number[];
   attributes?: Array<{
     attributeId: number;
-    attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
+    attributeValueList: Array<{ valueId: number; originalValueName?: string; valueUnit?: string }>;
   }>;
   brand?: { brandId: number; originalBrandName?: string };
   /** GTIN/EAN code at the item level. Shopee does NOT support per-model
@@ -525,6 +525,7 @@ export async function createProduct(
       attribute_value_list: a.attributeValueList.map((v) => ({
         value_id: v.valueId,
         ...(v.originalValueName ? { original_value_name: v.originalValueName } : {}),
+        ...(v.valueUnit ? { value_unit: v.valueUnit } : {}),
       })),
     }));
   }
@@ -621,7 +622,7 @@ export interface UpdateProductInput {
   };
   attributes?: Array<{
     attributeId: number;
-    attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
+    attributeValueList: Array<{ valueId: number; originalValueName?: string; valueUnit?: string }>;
   }>;
   /** Only set when the item has no variations (simple product). */
   price?: number;
@@ -665,6 +666,7 @@ export async function updateProduct(
       attribute_value_list: a.attributeValueList.map((v) => ({
         value_id: v.valueId,
         ...(v.originalValueName ? { original_value_name: v.originalValueName } : {}),
+        ...(v.valueUnit ? { value_unit: v.valueUnit } : {}),
       })),
     }));
   }
@@ -851,7 +853,7 @@ export interface ProductToPublish {
   // Attributes
   attributes?: Array<{
     attributeId: number;
-    attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
+    attributeValueList: Array<{ valueId: number; originalValueName?: string; valueUnit?: string }>;
   }>;
 }
 
@@ -880,7 +882,7 @@ export interface WizardPublishInput {
   logisticIds?: number[];
   attributes?: Array<{
     attributeId: number;
-    attributeValueList: Array<{ valueId: number; originalValueName?: string }>;
+    attributeValueList: Array<{ valueId: number; originalValueName?: string; valueUnit?: string }>;
   }>;
   /** When present, publishProductFromWizard performs an UPDATE on this item
    *  instead of creating a new listing. */

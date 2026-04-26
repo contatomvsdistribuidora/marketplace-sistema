@@ -175,6 +175,56 @@ describe("Shopee Publish Module", () => {
       expect(body.image.image_id_list).toEqual(["img_id_1", "img_id_2"]);
     });
 
+    it("should forward value_unit when attribute is QUANTITATIVE_WITH_UNIT (format_type=2)", async () => {
+      // Categoria 101208 (Sacos Plásticos) tem atributos como "Tamanho do Pacote"
+      // que exigem value_unit no payload (format_type=2). Sem isso, a Shopee
+      // rejeita add_item com "Your attribute info is invalid".
+      mockFetch.mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            error: "",
+            response: { item_id: 555 },
+          }),
+      });
+
+      await createProduct("test_token", 12345, {
+        itemName: "Saco de Lixo Resistente",
+        description: "Descrição válida com mais de cinquenta caracteres para a API da Shopee aceitar",
+        categoryId: 101208,
+        price: 19.9,
+        stock: 100,
+        weight: 0.5,
+        imageIds: ["img1"],
+        attributes: [
+          {
+            attributeId: 101029, // Tamanho Do Pacote
+            attributeValueList: [{ valueId: 0, originalValueName: "60", valueUnit: "cm" }],
+          },
+          {
+            attributeId: 100015, // País de Origem (caso simples — sem unit)
+            attributeValueList: [{ valueId: 12345, originalValueName: "Brazil" }],
+          },
+        ],
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.attribute_list).toHaveLength(2);
+      expect(body.attribute_list[0]).toEqual({
+        attribute_id: 101029,
+        attribute_value_list: [
+          { value_id: 0, original_value_name: "60", value_unit: "cm" },
+        ],
+      });
+      // Atributo simples não deve ter value_unit
+      expect(body.attribute_list[1]).toEqual({
+        attribute_id: 100015,
+        attribute_value_list: [
+          { value_id: 12345, original_value_name: "Brazil" },
+        ],
+      });
+      expect(body.attribute_list[1].attribute_value_list[0].value_unit).toBeUndefined();
+    });
+
     it("should truncate long names to 120 chars", async () => {
       mockFetch.mockResolvedValueOnce({
         json: () =>

@@ -1544,7 +1544,7 @@ function VariationWizard({
   const [baseHeightOverride, setBaseHeightOverride] = useState<string>("");
   const [inlinePriceEdits, setInlinePriceEdits]     = useState<Record<string, string>>({});
   const [inlineLabelEdits, setInlineLabelEdits]     = useState<Record<string, string>>({});
-  const [attributeValues, setAttributeValues]       = useState<Record<number, { valueId: number; originalValue: string }>>({});
+  const [attributeValues, setAttributeValues]       = useState<Record<number, { valueId: number; originalValue: string; displayValue?: string; valueUnit?: string }>>({});
   // Brand fica fora de attributeValues: o atributo BRAND sintético (attribute_id=-1
   // injetado por ensureBrandAttribute no backend) só serve pra renderizar o
   // campo. O brand_id real vai num campo separado no payload de add_item da
@@ -1954,9 +1954,15 @@ function VariationWizard({
           const def = Array.isArray(categoryAttributes)
             ? (categoryAttributes as any[]).find((a) => Number(a.attribute_id) === Number(attrId))
             : null;
+          // Para format_type=2 a IA precisa ver "60 cm" e não só "60", senão
+          // perde contexto de unidade na descrição. Display PT-BR (quando
+          // dropdown) também é mais útil pra IA do que o EN cru.
+          const valueText = v.valueUnit
+            ? `${v.originalValue} ${v.valueUnit}`
+            : (v.displayValue ?? v.originalValue);
           return {
             name: def?.display_attribute_name ?? def?.original_attribute_name ?? `attr_${attrId}`,
-            value: v.originalValue,
+            value: valueText,
           };
         });
 
@@ -2162,7 +2168,11 @@ function VariationWizard({
       .filter(([attrId, v]) => v.originalValue.trim() !== "" && parseInt(attrId) > 0)
       .map(([attrId, v]) => ({
         attributeId: parseInt(attrId),
-        attributeValueList: [{ valueId: v.valueId, originalValueName: v.originalValue }],
+        attributeValueList: [{
+          valueId: v.valueId,
+          originalValueName: v.originalValue,
+          ...(v.valueUnit ? { valueUnit: v.valueUnit } : {}),
+        }],
       }));
 
     setPublishStatus("loading");
@@ -2278,7 +2288,7 @@ function VariationWizard({
         display_attribute_name: string;
         is_mandatory: boolean;
         input_type: string;
-        attribute_value_list: Array<{ value_id: number; display_value_name: string }>;
+        attribute_value_list: Array<{ value_id: number; display_value_name: string; original_value_name?: string }>;
       }>;
       const suggestions = await fillAttrsMutation.mutateAsync({
         product: {
@@ -2314,8 +2324,14 @@ function VariationWizard({
               o => o.display_value_name.toLowerCase().includes(valueLower) ||
                    valueLower.includes(o.display_value_name.toLowerCase())
             );
-            if (match) next[attrId] = { valueId: match.value_id, originalValue: match.display_value_name };
+            if (match) next[attrId] = {
+              valueId: match.value_id,
+              originalValue: match.original_value_name ?? match.display_value_name,
+              displayValue: match.display_value_name,
+            };
           } else {
+            // Para format_type=2 (QUANTITATIVE_WITH_UNIT) o usuário escolhe a
+            // unidade no select; a IA não inferia unidade até agora.
             next[attrId] = { valueId: 0, originalValue: s.value };
           }
         }
@@ -2734,7 +2750,9 @@ function VariationWizard({
                         display_attribute_name: string;
                         is_mandatory: boolean;
                         input_type: string;
-                        attribute_value_list: Array<{ value_id: number; display_value_name: string }>;
+                        format_type?: number;
+                        attribute_unit_list?: string[];
+                        attribute_value_list: Array<{ value_id: number; display_value_name: string; original_value_name?: string }>;
                       }>;
                       const mandatory = attrs.filter(a => a.is_mandatory);
                       const optional  = attrs.filter(a => !a.is_mandatory);
@@ -2766,7 +2784,16 @@ function VariationWizard({
                                 onChange={e => {
                                   const opt = values.find(o => o.value_id === Number(e.target.value));
                                   if (opt) {
-                                    setAttributeValues(prev => ({ ...prev, [attr.attribute_id]: { valueId: opt.value_id, originalValue: opt.display_value_name } }));
+                                    // Shopee espera `original_value_name` (EN) no payload; o display
+                                    // (PT-BR) é só pra UI. Guardamos os dois separados.
+                                    setAttributeValues(prev => ({
+                                      ...prev,
+                                      [attr.attribute_id]: {
+                                        valueId: opt.value_id,
+                                        originalValue: opt.original_value_name ?? opt.display_value_name,
+                                        displayValue: opt.display_value_name,
+                                      },
+                                    }));
                                   } else {
                                     setAttributeValues(prev => { const n = { ...prev }; delete n[attr.attribute_id]; return n; });
                                   }
@@ -2778,6 +2805,40 @@ function VariationWizard({
                                   <option key={o.value_id} value={o.value_id}>{o.display_value_name}</option>
                                 ))}
                               </select>
+                            ) : (attr.format_type === 2 && Array.isArray(attr.attribute_unit_list) && attr.attribute_unit_list.length > 0) ? (
+                              // QUANTITATIVE_WITH_UNIT: número + select de unidade.
+                              // Shopee exige value_unit no payload (ex: "60" + "cm").
+                              <div className="flex gap-1.5">
+                                <input type="number" step="any"
+                                  value={current?.originalValue ?? ""}
+                                  onChange={e => setAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_id]: {
+                                      valueId: 0,
+                                      originalValue: e.target.value,
+                                      valueUnit: prev[attr.attribute_id]?.valueUnit ?? attr.attribute_unit_list![0],
+                                    },
+                                  }))}
+                                  placeholder="0"
+                                  className={`flex-1 text-xs rounded-lg border ${border} ${bg} px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                                />
+                                <select
+                                  value={current?.valueUnit ?? attr.attribute_unit_list[0]}
+                                  onChange={e => setAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_id]: {
+                                      valueId: 0,
+                                      originalValue: prev[attr.attribute_id]?.originalValue ?? "",
+                                      valueUnit: e.target.value,
+                                    },
+                                  }))}
+                                  className={`text-xs rounded-lg border ${border} ${bg} px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                                >
+                                  {attr.attribute_unit_list.map(u => (
+                                    <option key={u} value={u}>{u}</option>
+                                  ))}
+                                </select>
+                              </div>
                             ) : attr.input_type === "INT_TYPE" ? (
                               <input type="number" step={1}
                                 value={current?.originalValue ?? ""}

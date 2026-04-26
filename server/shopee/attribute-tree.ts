@@ -82,6 +82,9 @@ export interface ApiAttribute {
     is_oem?: boolean;
     max_input_value_number?: number;
     max_value_count?: number;
+    /** Real API: lives nested under attribute_info when format_type=2
+     *  (QUANTITATIVE_WITH_UNIT). Top-level fallback kept for legacy fixtures. */
+    attribute_unit_list?: string[];
   };
   multi_lang?: Array<{
     language: string;
@@ -336,9 +339,17 @@ export function parseAttribute(api: ApiAttribute): ParsedAttribute {
       ? { input_validation_type: validation }
       : {}),
     ...(formatType !== undefined ? { format_type: formatType } : {}),
-    ...(Array.isArray(api.attribute_unit_list) && api.attribute_unit_list.length > 0
-      ? { attribute_unit_list: api.attribute_unit_list }
-      : {}),
+    ...((() => {
+      // Real API places attribute_unit_list under `attribute_info` (only when
+      // format_type=2). Legacy fixtures keep it at the top level — fall back.
+      const unitList =
+        Array.isArray(info.attribute_unit_list) && info.attribute_unit_list.length > 0
+          ? info.attribute_unit_list
+          : Array.isArray(api.attribute_unit_list) && api.attribute_unit_list.length > 0
+            ? api.attribute_unit_list
+            : undefined;
+      return unitList ? { attribute_unit_list: unitList } : {};
+    })()),
     ...(supportSearch !== undefined ? { support_search_value: supportSearch } : {}),
     ...(maxInputValue !== undefined ? { max_input_value_number: maxInputValue } : {}),
     ...(isOem !== undefined ? { is_oem: isOem } : {}),
