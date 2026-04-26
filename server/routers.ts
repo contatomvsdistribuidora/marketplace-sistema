@@ -2498,6 +2498,163 @@ export const appRouter = router({
         return shopeePublish.fuzzyMatchBrands(brands as any, input.query, input.limit ?? 20);
       }),
 
+    /**
+     * Bulk-sync brands for every category in use by the seller's products.
+     * Returns immediately with jobStarted=true; the actual sync runs as a
+     * setImmediate worker so the tRPC call doesn't time out.
+     * Phase 2 of brand-sync infra: lazy reads in the wizard, bulk reads here.
+     */
+    syncAllBrandsForAccount: protectedProcedure
+      .input(z.object({ accountId: z.number(), force: z.boolean().optional() }))
+      .mutation(async ({ input }) => {
+        const { shopeeProducts, shopeeBrandSyncProgress } = await import("../drizzle/schema");
+        const { sql, eq, and, inArray } = await import("drizzle-orm");
+        const brandSync = await import("./shopee/brand-sync");
+
+        const rows = await sharedDb
+          .selectDistinct({ categoryId: shopeeProducts.categoryId })
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.shopeeAccountId, input.accountId));
+
+        const categoryIds: number[] = rows
+          .map((r) => r.categoryId)
+          .filter((c): c is number => typeof c === "number" && c > 0);
+
+        if (categoryIds.length === 0) {
+          return { jobStarted: false as const, totalCategories: 0 };
+        }
+
+        // If not force, drop the categories whose progress row is already
+        // done & fresh — saves Shopee calls when the user mashes the button.
+        let toSync = categoryIds;
+        if (!input.force) {
+          const existing = await sharedDb
+            .select()
+            .from(shopeeBrandSyncProgress)
+            .where(
+              and(
+                eq(shopeeBrandSyncProgress.shopeeAccountId, input.accountId),
+                inArray(shopeeBrandSyncProgress.categoryId, categoryIds),
+              ),
+            );
+          const fresh = new Set<number>();
+          for (const row of existing) {
+            if (
+              row.status === "done" &&
+              row.lastSyncedAt &&
+              Date.now() - new Date(row.lastSyncedAt).getTime() < brandSync.TTL_MS
+            ) {
+              fresh.add(row.categoryId);
+            }
+          }
+          toSync = categoryIds.filter((c) => !fresh.has(c));
+        }
+
+        // Mark everything as pending up front so the polling status reflects
+        // the queue immediately, even before the worker picks up the first.
+        for (const categoryId of toSync) {
+          const [existing] = await sharedDb
+            .select()
+            .from(shopeeBrandSyncProgress)
+            .where(
+              and(
+                eq(shopeeBrandSyncProgress.shopeeAccountId, input.accountId),
+                eq(shopeeBrandSyncProgress.categoryId, categoryId),
+              ),
+            )
+            .limit(1);
+          if (existing) {
+            await sharedDb
+              .update(shopeeBrandSyncProgress)
+              .set({ status: "pending", errorMessage: null })
+              .where(eq(shopeeBrandSyncProgress.id, existing.id));
+          } else {
+            await sharedDb.insert(shopeeBrandSyncProgress).values({
+              shopeeAccountId: input.accountId,
+              categoryId,
+              status: "pending",
+            });
+          }
+        }
+
+        // Fire-and-forget worker. We don't await — the mutation must return
+        // before the tRPC client times out.
+        setImmediate(() => {
+          brandSync.runBulkSync(input.accountId, toSync).catch((err) => {
+            console.error("[Shopee BrandSync] bulk worker failed:", err?.message ?? err);
+          });
+          // Silence sql import warning without removing it (drizzle exports vary).
+          void sql;
+        });
+
+        return {
+          jobStarted: true as const,
+          totalCategories: toSync.length,
+          skipped: categoryIds.length - toSync.length,
+        };
+      }),
+
+    /**
+     * Snapshot of the brand-sync progress for an account. The frontend
+     * polls this every ~5s to drive the live status card.
+     */
+    getBrandSyncStatus: protectedProcedure
+      .input(z.object({ accountId: z.number() }))
+      .query(async ({ input }) => {
+        const { shopeeProducts, shopeeBrandSyncProgress, shopeeBrandCache } = await import(
+          "../drizzle/schema"
+        );
+        const { eq } = await import("drizzle-orm");
+
+        const productCategoryRows = await sharedDb
+          .selectDistinct({ categoryId: shopeeProducts.categoryId })
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.shopeeAccountId, input.accountId));
+        const totalCategories = productCategoryRows.filter(
+          (r) => typeof r.categoryId === "number" && r.categoryId > 0,
+        ).length;
+
+        const progressRows = await sharedDb
+          .select()
+          .from(shopeeBrandSyncProgress)
+          .where(eq(shopeeBrandSyncProgress.shopeeAccountId, input.accountId));
+
+        let doneCount = 0;
+        let inProgressCount = 0;
+        let errorCount = 0;
+        let pendingCount = 0;
+        let lastSyncedAt: Date | null = null;
+        for (const row of progressRows) {
+          if (row.status === "done") doneCount += 1;
+          else if (row.status === "in_progress") inProgressCount += 1;
+          else if (row.status === "error") errorCount += 1;
+          else if (row.status === "pending") pendingCount += 1;
+          if (row.lastSyncedAt && (!lastSyncedAt || row.lastSyncedAt > lastSyncedAt)) {
+            lastSyncedAt = row.lastSyncedAt as Date;
+          }
+        }
+
+        // Total cached brands across every category for this account's
+        // categories. Quick approximation: count entries in shopee_brand_cache
+        // for those categoryIds.
+        const cacheRows = await sharedDb.select().from(shopeeBrandCache);
+        let totalCachedBrands = 0;
+        for (const row of cacheRows) {
+          if (Array.isArray(row.brandList)) totalCachedBrands += row.brandList.length;
+        }
+
+        return {
+          totalCategories,
+          doneCategories: doneCount,
+          inProgressCount,
+          errorCount,
+          pendingCount,
+          lastSyncedAt,
+          isRunning: inProgressCount > 0 || pendingCount > 0,
+          totalCachedBrands,
+        };
+      }),
+
     // Get logistics channels
     getLogisticsChannels: protectedProcedure
       .input(z.object({ accountId: z.number() }))

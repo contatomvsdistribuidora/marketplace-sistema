@@ -507,6 +507,10 @@ export type ShopeeCategoryCache = typeof shopeeCategoryCache.$inferSelect;
 /**
  * Cache of Shopee's brand list per category (shared across sellers in a
  * region — same as category tree). TTL: 7 days, enforced by the caller.
+ *
+ * Structure: one row per (region, categoryId), brandList is the full JSON
+ * array of brands returned by /api/v2/product/get_brand_list. updatedAt
+ * doubles as `cached_at` for TTL enforcement.
  */
 export const shopeeBrandCache = mysqlTable("shopee_brand_cache", {
   id: int("id").autoincrement().primaryKey(),
@@ -517,3 +521,27 @@ export const shopeeBrandCache = mysqlTable("shopee_brand_cache", {
 });
 
 export type ShopeeBrandCache = typeof shopeeBrandCache.$inferSelect;
+
+/**
+ * Progress tracking for the bulk + lazy brand-sync workflow. One row per
+ * (shopeeAccountId, categoryId). status drives the state machine:
+ *   pending → in_progress → done | error
+ * The lazy reader (getBrandsForCategory) consults this table to decide
+ * whether to serve from cache, dispatch a background sync, or skip
+ * because another worker is already syncing.
+ */
+export const shopeeBrandSyncProgress = mysqlTable("shopee_brand_sync_progress", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  shopeeAccountId: bigint("shopee_account_id", { mode: "number" }).notNull(),
+  categoryId: bigint("category_id", { mode: "number" }).notNull(),
+  status: mysqlEnum("status", ["pending", "in_progress", "done", "error"]).default("pending").notNull(),
+  totalBrands: int("total_brands").default(0).notNull(),
+  syncedPages: int("synced_pages").default(0).notNull(),
+  lastSyncedAt: timestamp("last_synced_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeBrandSyncProgress = typeof shopeeBrandSyncProgress.$inferSelect;
+export type InsertShopeeBrandSyncProgress = typeof shopeeBrandSyncProgress.$inferInsert;

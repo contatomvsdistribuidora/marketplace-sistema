@@ -120,6 +120,13 @@
       "when": 1777250000000,
       "tag": "0016_shopee_origin_ai_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1777340000000,
+      "tag": "0017_shopee_brand_sync",
+      "breakpoints": true
     }
   ]
 }
