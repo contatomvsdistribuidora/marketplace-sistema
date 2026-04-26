@@ -21,19 +21,74 @@ const ATTRIBUTE_TREE_PATH = "/api/v2/product/get_attribute_tree";
 /** Hard cap from the Shopee docs (§4.2 — error_param when > 20). */
 export const MAX_CATEGORIES_PER_CALL = 20;
 
-/** Single attribute_value entry as returned by Shopee. */
+/**
+ * Single attribute_value entry as returned by Shopee.
+ *
+ * Real wire shape (confirmed against /api/v2/product/get_attribute_tree
+ * responses persisted in shopee_category_attribute_cache):
+ *   { name: "Multipack", value_id: 358,
+ *     multi_lang: [{ value: "Pacotes Múltiplos", language: "pt-BR" }] }
+ *
+ * Note multi_lang items use `value` for the localized string — NOT `name`.
+ * Original/display fields (`original_value_name`, `display_value_name`) are
+ * accepted for back-compat with the older shape used by tests/fixtures.
+ */
 export interface ApiAttributeValue {
   value_id: number;
+  /** Real API field — the EN-equivalent value name. */
+  name?: string;
+  /** Legacy shape used by some fixtures/tests. */
   original_value_name?: string;
   display_value_name?: string;
   value_unit?: string;
   child_attribute_list?: any[];
-  multi_lang?: Array<{ language: string; name: string }>;
+  multi_lang?: Array<{
+    language: string;
+    /** Real API field for the localized string. */
+    value?: string;
+    /** Legacy shape used by some fixtures/tests. */
+    name?: string;
+  }>;
 }
 
-/** Single attribute as returned by Shopee. input_type is NUMERIC (1..5). */
+/**
+ * Single attribute as returned by Shopee.
+ *
+ * Real wire shape (confirmed against shopee_category_attribute_cache):
+ *   { name: "pack type", mandatory: false,
+ *     multi_lang: [{ value: "Dimensões do Produto", language: "pt-BR" }],
+ *     attribute_id: 100016,
+ *     attribute_info: { input_type: 1, input_validation_type: 0,
+ *                       format_type: 1, support_search_value: false,
+ *                       is_oem: false, max_value_count: 5 },
+ *     attribute_value_list: [...] }
+ *
+ * The numeric switches (input_type, input_validation_type, format_type) live
+ * NESTED under `attribute_info`, not at the top level. Top-level legacy
+ * fields are still accepted so existing fixtures keep working.
+ */
 export interface ApiAttribute {
   attribute_id: number;
+  /** Real API field — the EN-equivalent attribute name. */
+  name?: string;
+  /** Real API field — equivalent of legacy is_mandatory. */
+  mandatory?: boolean;
+  /** Real API nested bag with the numeric switches. */
+  attribute_info?: {
+    input_type?: number;
+    input_validation_type?: number;
+    format_type?: number;
+    support_search_value?: boolean;
+    is_oem?: boolean;
+    max_input_value_number?: number;
+    max_value_count?: number;
+  };
+  multi_lang?: Array<{
+    language: string;
+    value?: string;
+    name?: string;
+  }>;
+  /** Legacy shape (top-level) — used by tests and ensureBrandAttribute. */
   original_attribute_name?: string;
   display_attribute_name?: string;
   is_mandatory?: boolean;
@@ -187,34 +242,67 @@ export interface ParsedAttribute {
 
 const INPUT_TYPE_DROPDOWN_FAMILY = new Set([1, 2, 4, 5]);
 
-function pickPtBr(multiLang?: Array<{ language: string; name: string }>): string | null {
+function pickPtBr(
+  multiLang?: Array<{ language: string; value?: string; name?: string }>,
+): string | null {
   if (!Array.isArray(multiLang)) return null;
   const exact = multiLang.find((m) => m.language === "pt-BR" || m.language === "pt-br");
-  return exact?.name ?? null;
+  if (!exact) return null;
+  // Real API shape uses `value`; legacy fixtures use `name`.
+  return (exact.value ?? exact.name) ?? null;
 }
 
 /**
- * Map a single API attribute to the frontend-legacy shape. Brand detection:
- * the synthetic Brand entry from ensureBrandAttribute() is still injected
- * by the router, so this function does NOT relabel "Brand" → "BRAND" — that
- * would create three brand entries (synthetic + relabelled + original). It
- * simply leaves Brand as a regular DROP_DOWN; the router-level dedup is the
- * next phase's concern (see spec: "duplicidade temporária tolerável").
+ * Map a single API attribute to the frontend-legacy shape. Handles both the
+ * real wire shape (top-level `name`/`mandatory`, nested `attribute_info`) and
+ * the legacy top-level shape used by older tests/fixtures and the synthetic
+ * Brand entry from ensureBrandAttribute(). Brand detection is deferred to the
+ * router-level dedup; this function just leaves Brand as a regular DROP_DOWN.
  */
 export function parseAttribute(api: ApiAttribute): ParsedAttribute {
-  const apiInputType = typeof api.input_type === "number" ? api.input_type : 0;
-  const validation = typeof api.input_validation_type === "number" ? api.input_validation_type : 0;
-  const valueList: ParsedAttributeValue[] = (api.attribute_value_list ?? []).map((v) => ({
-    value_id: Number(v.value_id ?? 0),
-    original_value_name: String(v.original_value_name ?? v.display_value_name ?? ""),
-    display_value_name: String(
-      pickPtBr(v.multi_lang) ?? v.display_value_name ?? v.original_value_name ?? "",
-    ),
-    ...(v.value_unit !== undefined ? { value_unit: v.value_unit } : {}),
-    ...(Array.isArray(v.multi_lang) && v.multi_lang.length > 0
-      ? { multi_lang: v.multi_lang }
-      : {}),
-  }));
+  const info = api.attribute_info ?? {};
+  const apiInputType =
+    typeof info.input_type === "number"
+      ? info.input_type
+      : typeof api.input_type === "number"
+        ? api.input_type
+        : 0;
+  const validation =
+    typeof info.input_validation_type === "number"
+      ? info.input_validation_type
+      : typeof api.input_validation_type === "number"
+        ? api.input_validation_type
+        : 0;
+  const formatType =
+    typeof info.format_type === "number" ? info.format_type : api.format_type;
+  const supportSearch =
+    typeof info.support_search_value === "boolean"
+      ? info.support_search_value
+      : api.support_search_value;
+  const isOem =
+    typeof info.is_oem === "boolean" ? info.is_oem : api.is_oem;
+  const maxInputValue =
+    typeof info.max_input_value_number === "number"
+      ? info.max_input_value_number
+      : api.max_input_value_number;
+
+  const valueList: ParsedAttributeValue[] = (api.attribute_value_list ?? []).map((v) => {
+    // Real API: { name, multi_lang:[{value, language}] }.
+    // Legacy:   { original_value_name, display_value_name, multi_lang:[{name, language}] }.
+    const original = String(v.name ?? v.original_value_name ?? v.display_value_name ?? "");
+    const display = String(
+      pickPtBr(v.multi_lang) ?? v.display_value_name ?? v.name ?? v.original_value_name ?? "",
+    );
+    return {
+      value_id: Number(v.value_id ?? 0),
+      original_value_name: original,
+      display_value_name: display,
+      ...(v.value_unit !== undefined ? { value_unit: v.value_unit } : {}),
+      ...(Array.isArray(v.multi_lang) && v.multi_lang.length > 0
+        ? { multi_lang: v.multi_lang as Array<{ language: string; name: string }> }
+        : {}),
+    };
+  });
 
   let inputType: ParsedInputType;
   if (INPUT_TYPE_DROPDOWN_FAMILY.has(apiInputType)) {
@@ -227,31 +315,33 @@ export function parseAttribute(api: ApiAttribute): ParsedAttribute {
     inputType = valueList.length > 0 ? "DROP_DOWN" : "TEXT_FIELD";
   }
 
-  const original = String(api.original_attribute_name ?? "");
-  const display = String(api.display_attribute_name ?? original ?? "");
+  // Real API: top-level `name` is the EN original; multi_lang carries pt-BR.
+  // Legacy:   original_attribute_name + display_attribute_name top-level.
+  const original = String(api.name ?? api.original_attribute_name ?? "");
+  const display = String(
+    pickPtBr(api.multi_lang) ?? api.display_attribute_name ?? original ?? "",
+  );
+  const isMandatory =
+    typeof api.mandatory === "boolean" ? api.mandatory : !!api.is_mandatory;
 
   return {
     attribute_id: Number(api.attribute_id ?? 0),
     original_attribute_name: original,
     display_attribute_name: display,
-    is_mandatory: !!api.is_mandatory,
+    is_mandatory: isMandatory,
     input_type: inputType,
     attribute_value_list: valueList,
     _api_input_type: apiInputType,
-    ...(api.input_validation_type !== undefined
-      ? { input_validation_type: api.input_validation_type }
+    ...(validation !== 0 || api.input_validation_type !== undefined || info.input_validation_type !== undefined
+      ? { input_validation_type: validation }
       : {}),
-    ...(api.format_type !== undefined ? { format_type: api.format_type } : {}),
+    ...(formatType !== undefined ? { format_type: formatType } : {}),
     ...(Array.isArray(api.attribute_unit_list) && api.attribute_unit_list.length > 0
       ? { attribute_unit_list: api.attribute_unit_list }
       : {}),
-    ...(api.support_search_value !== undefined
-      ? { support_search_value: api.support_search_value }
-      : {}),
-    ...(api.max_input_value_number !== undefined
-      ? { max_input_value_number: api.max_input_value_number }
-      : {}),
-    ...(api.is_oem !== undefined ? { is_oem: api.is_oem } : {}),
+    ...(supportSearch !== undefined ? { support_search_value: supportSearch } : {}),
+    ...(maxInputValue !== undefined ? { max_input_value_number: maxInputValue } : {}),
+    ...(isOem !== undefined ? { is_oem: isOem } : {}),
   };
 }
 

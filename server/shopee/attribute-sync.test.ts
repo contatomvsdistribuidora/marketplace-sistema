@@ -372,4 +372,67 @@ describe("parseAttribute", () => {
     expect(out.attribute_value_list[0].display_value_name).toBe("Marca-X-PT");
     expect(out.attribute_value_list[0].multi_lang?.[0]?.name).toBe("Marca-X-PT");
   });
+
+  // Regression: real wire shape from /api/v2/product/get_attribute_tree.
+  // Captured from shopee_category_attribute_cache.attribute_tree (cat 101208,
+  // attribute_id 100016). The parser MUST handle this raw shape — top-level
+  // `name`/`mandatory`/`multi_lang[].value` and nested `attribute_info` —
+  // because that is what Shopee actually returns. If this test breaks, the
+  // wizard renders empty labels / empty dropdowns again.
+  it("real API shape: nested attribute_info + multi_lang.value + name", () => {
+    const raw = {
+      name: "pack type",
+      mandatory: false,
+      multi_lang: [{ value: "Dimensões do Produto", language: "pt-BR" }],
+      attribute_id: 100016,
+      attribute_info: {
+        is_oem: false,
+        input_type: 1,
+        format_type: 1,
+        support_search_value: false,
+        input_validation_type: 0,
+      },
+      attribute_value_list: [
+        {
+          name: "Multipack",
+          value_id: 358,
+          multi_lang: [{ value: "Pacotes Múltiplos", language: "pt-BR" }],
+        },
+        {
+          name: "Single",
+          value_id: 394,
+          multi_lang: [{ value: "Único", language: "pt-BR" }],
+        },
+      ],
+    } as any;
+    const out = parseAttribute(raw);
+    expect(out.attribute_id).toBe(100016);
+    expect(out.original_attribute_name).toBe("pack type");
+    expect(out.display_attribute_name).toBe("Dimensões do Produto");
+    expect(out.is_mandatory).toBe(false);
+    expect(out.input_type).toBe("DROP_DOWN");
+    expect(out._api_input_type).toBe(1);
+    expect(out.attribute_value_list).toHaveLength(2);
+    expect(out.attribute_value_list[0].value_id).toBe(358);
+    expect(out.attribute_value_list[0].original_value_name).toBe("Multipack");
+    expect(out.attribute_value_list[0].display_value_name).toBe("Pacotes Múltiplos");
+    expect(out.attribute_value_list[1].original_value_name).toBe("Single");
+    expect(out.attribute_value_list[1].display_value_name).toBe("Único");
+  });
+
+  it("real API shape: input_type=3 + validation=2 (FLOAT) via attribute_info", () => {
+    const out = parseAttribute({
+      attribute_id: 200,
+      name: "Weight",
+      mandatory: true,
+      multi_lang: [{ value: "Peso", language: "pt-BR" }],
+      attribute_info: { input_type: 3, input_validation_type: 2, format_type: 1 },
+      attribute_value_list: [],
+    } as any);
+    expect(out.display_attribute_name).toBe("Peso");
+    expect(out.original_attribute_name).toBe("Weight");
+    expect(out.is_mandatory).toBe(true);
+    expect(out.input_type).toBe("FLOAT_TYPE");
+    expect(out.input_validation_type).toBe(2);
+  });
 });
