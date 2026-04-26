@@ -1039,26 +1039,18 @@ function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: {
           🚀 Publicar na Shopee
         </button>
       )}
-      {productHasVariation ? (
-        <>
-          <button
-            onClick={() => { setWizardCreateNewMode(true); setWizardOpen(true); }}
-            className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-base transition shadow-md shadow-blue-200">
-            🆕 Criar como novo produto na Shopee
-          </button>
-          <p className="text-xs text-gray-500 text-center leading-relaxed -mt-1">
-            Isso vai criar um item NOVO na Shopee. O item atual{" "}
-            <span className="font-mono">({productVariationCheck?.itemId ?? "—"})</span>{" "}
-            ficará intacto e marcado como legacy no nosso sistema.
-          </p>
-        </>
-      ) : (
+      <div className="flex flex-col md:flex-row gap-3">
         <button
           onClick={() => { setWizardCreateNewMode(false); setWizardOpen(true); }}
-          className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50">
+          className="flex-1 flex items-center justify-center gap-3 py-4 px-6 rounded-xl border-2 border-orange-400 text-orange-600 font-bold text-base transition hover:bg-orange-50">
           <PlusCircle className="w-5 h-5" /> {savedVariations.length > 0 ? "Criar Nova Variação" : "Criar Variação de Anúncio"}
         </button>
-      )}
+        <button
+          onClick={() => { setWizardCreateNewMode(true); setWizardOpen(true); }}
+          className="flex-1 flex items-center justify-center gap-3 py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-base transition shadow-md shadow-blue-200">
+          🆕 Publicar como Novo Produto
+        </button>
+      </div>
 
       {/* ── Modal de sugestão de título ─────────────────────────────────── */}
       {titleSuggestion && (
