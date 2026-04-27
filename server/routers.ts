@@ -19,12 +19,13 @@ import * as shopeeExport from "./shopee-export";
 import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
 import * as multiProductAi from "./multi-product-ai";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, sql } from "drizzle-orm";
 import {
   multiProductListings,
   multiProductListingItems,
   videoBank,
   shopeeAccounts,
+  productCache,
 } from "../drizzle/schema";
 
 /**
@@ -4042,6 +4043,32 @@ export const appRouter = router({
           .set({ isActive: 0 })
           .where(eq(videoBank.id, input.id));
         return { id: input.id, deactivated: true };
+      }),
+
+    /**
+     * Lista vídeos cacheados de produtos BaseLinker (extra_field_101404).
+     * Lê direto do productCache populado pelo sync — não toca a tabela
+     * video_bank global. Usado pelo Step C do wizard multi-produto.
+     */
+    listBaseLinkerVideos: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const rows = await sharedDb
+          .select({
+            productId: productCache.productId,
+            name: productCache.name,
+            videoUrl: productCache.videoUrl,
+            videoTitle: productCache.videoTitle,
+            imageUrl: productCache.imageUrl,
+          })
+          .from(productCache)
+          .where(and(
+            eq(productCache.userId, ctx.user.id),
+            eq(productCache.inventoryId, input.inventoryId),
+            sql`${productCache.videoUrl} IS NOT NULL AND ${productCache.videoUrl} != ''`,
+          ))
+          .orderBy(asc(productCache.name));
+        return rows;
       }),
   }),
 });

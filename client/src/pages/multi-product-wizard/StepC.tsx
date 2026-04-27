@@ -3,19 +3,29 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
+  SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Loader2, Image as ImageIcon, Video } from "lucide-react";
+import { Loader2, Image as ImageIcon, Video, Package } from "lucide-react";
 import { toast } from "sonner";
 import { type Listing } from "./types";
 
 export function StepC({ listing, onChange }: { listing: Listing; onChange: () => void }) {
+  const { data: invData } = trpc.settings.getInventoryId.useQuery();
+  const inventoryId = invData?.inventoryId;
+
   const { data: videos, isLoading: videosLoading } = trpc.videoBank.listVideos.useQuery({
     activeOnly: true,
   });
+
+  const { data: blVideos, isLoading: blVideosLoading } =
+    trpc.videoBank.listBaseLinkerVideos.useQuery(
+      { inventoryId: inventoryId ?? 0 },
+      { enabled: !!inventoryId },
+    );
 
   const updateMutation = trpc.multiProduct.updateMultiProductListing.useMutation({
     onSuccess: () => {
@@ -25,20 +35,50 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     onError: (e) => toast.error(e.message),
   });
 
-  function handleSelectVideo(videoIdStr: string) {
-    if (videoIdStr === "none") {
+  function handleSelectVideo(value: string) {
+    if (value === "none") {
       updateMutation.mutate({ id: listing.id, videoBankId: null, videoUrl: null });
       return;
     }
-    const id = Number(videoIdStr);
-    const video = (videos ?? []).find((v: any) => v.id === id);
-    if (!video) return;
-    updateMutation.mutate({
-      id: listing.id,
-      videoBankId: id,
-      videoUrl: video.url,
-    });
+    if (value.startsWith("bank:")) {
+      const bankId = Number(value.slice(5));
+      const v = (videos ?? []).find((x: any) => x.id === bankId);
+      if (!v) return;
+      updateMutation.mutate({ id: listing.id, videoBankId: bankId, videoUrl: v.url });
+      return;
+    }
+    if (value.startsWith("bl:")) {
+      const productId = Number(value.slice(3));
+      const v = (blVideos ?? []).find((x: any) => Number(x.productId) === productId);
+      if (!v) return;
+      // Vídeo do BL: salva só a URL, videoBankId fica null
+      updateMutation.mutate({ id: listing.id, videoBankId: null, videoUrl: v.videoUrl });
+      return;
+    }
   }
+
+  // Identifica qual fonte está atualmente em uso para calcular o `value` do Select
+  const currentBlVideo = listing.videoUrl
+    ? (blVideos as any[] | undefined)?.find((v) => v.videoUrl === listing.videoUrl)
+    : undefined;
+  const currentBankVideo = listing.videoBankId !== null
+    ? (videos as any[] | undefined)?.find((v) => v.id === listing.videoBankId)
+    : undefined;
+
+  let currentValue: string;
+  if (listing.videoBankId !== null) {
+    currentValue = `bank:${listing.videoBankId}`;
+  } else if (currentBlVideo) {
+    currentValue = `bl:${currentBlVideo.productId}`;
+  } else if (listing.videoUrl) {
+    // URL personalizada que não bate com nenhuma fonte conhecida
+    currentValue = "custom";
+  } else {
+    currentValue = "none";
+  }
+
+  const isLoading = blVideosLoading || videosLoading;
+  const hasAnyVideo = (blVideos?.length ?? 0) > 0 || (videos?.length ?? 0) > 0;
 
   return (
     <div className="space-y-4">
@@ -91,41 +131,95 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
             Vídeo
           </CardTitle>
           <CardDescription>
-            Selecione um vídeo do banco global. Anúncios com vídeo melhoram a Qualidade do Conteúdo na Shopee.
+            Selecione um vídeo cadastrado no BaseLinker (extra_field "Vídeo arquivo")
+            ou do banco interno. Anúncios com vídeo melhoram a Qualidade do Conteúdo na Shopee.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {videosLoading ? (
+        <CardContent className="space-y-3">
+          {isLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Carregando vídeos...
             </div>
-          ) : !videos || videos.length === 0 ? (
+          ) : !hasAnyVideo ? (
             <p className="text-sm text-muted-foreground">
-              Banco de vídeos vazio — adicione vídeos em /video-bank (em breve).
+              Nenhum vídeo disponível. Cadastre vídeos nos produtos do BaseLinker
+              (campo extra "Vídeo arquivo") ou adicione manualmente em /video-bank (em breve).
             </p>
           ) : (
-            <Select
-              value={listing.videoBankId !== null ? String(listing.videoBankId) : "none"}
-              onValueChange={handleSelectVideo}
-            >
+            <Select value={currentValue} onValueChange={handleSelectVideo}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecione um vídeo..." />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Sem vídeo</SelectItem>
-                {(videos as any[]).map((v) => (
-                  <SelectItem key={v.id} value={String(v.id)}>
-                    {v.title}
-                  </SelectItem>
-                ))}
+                {currentValue === "custom" && (
+                  <SelectItem value="custom" disabled>URL personalizada (atual)</SelectItem>
+                )}
+                {blVideos && blVideos.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel className="text-xs">
+                      Vídeos do BaseLinker ({blVideos.length})
+                    </SelectLabel>
+                    {(blVideos as any[]).map((v) => (
+                      <SelectItem key={`bl:${v.productId}`} value={`bl:${v.productId}`}>
+                        {v.videoTitle ?? v.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
+                {videos && videos.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel className="text-xs">Banco de vídeos</SelectLabel>
+                    {(videos as any[]).map((v) => (
+                      <SelectItem key={`bank:${v.id}`} value={`bank:${v.id}`}>
+                        {v.title}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
               </SelectContent>
             </Select>
           )}
+
+          {/* Preview do vídeo selecionado */}
           {listing.videoUrl && (
-            <p className="text-xs text-muted-foreground mt-2 truncate">
-              URL: {listing.videoUrl}
-            </p>
+            <div className="rounded border bg-muted/30 p-3 text-xs space-y-1">
+              {currentBlVideo ? (
+                <div className="flex items-start gap-2">
+                  {currentBlVideo.imageUrl ? (
+                    <img
+                      src={currentBlVideo.imageUrl}
+                      alt=""
+                      className="h-10 w-10 rounded object-cover border shrink-0"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="h-10 w-10 rounded bg-muted flex items-center justify-center shrink-0">
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium line-clamp-1">
+                      {currentBlVideo.videoTitle ?? currentBlVideo.name}
+                    </div>
+                    <div className="text-muted-foreground">
+                      Produto BaseLinker · ID {String(currentBlVideo.productId)}
+                    </div>
+                  </div>
+                </div>
+              ) : currentBankVideo ? (
+                <div>
+                  <div className="font-medium">{currentBankVideo.title}</div>
+                  <div className="text-muted-foreground truncate">{currentBankVideo.url}</div>
+                </div>
+              ) : (
+                <div>
+                  <div className="font-medium">URL personalizada</div>
+                  <div className="text-muted-foreground truncate">{listing.videoUrl}</div>
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
