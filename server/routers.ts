@@ -3747,6 +3747,8 @@ export const appRouter = router({
         videoUrl: z.string().nullable().optional(),
         videoBankId: z.number().nullable().optional(),
         status: z.enum(["draft", "ready", "publishing", "published", "error"]).optional(),
+        mainProductSource: z.enum(["baselinker", "shopee"]).optional(),
+        mainProductSourceId: z.number().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         // Garante ownership

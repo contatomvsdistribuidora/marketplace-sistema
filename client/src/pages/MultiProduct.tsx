@@ -15,6 +15,7 @@ import {
   Package, Store, AlertTriangle, ArrowRight, Trash2,
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
+import { useSearch, useLocation } from "wouter";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 25;
@@ -126,6 +127,7 @@ function SelectionSidebar({
   isSubmitting,
   canSubmit,
   blockingReason,
+  submitLabel,
 }: {
   selected: Map<string, SelectedItem>;
   principalKey: string | null;
@@ -136,6 +138,7 @@ function SelectionSidebar({
   isSubmitting: boolean;
   canSubmit: boolean;
   blockingReason: string | null;
+  submitLabel: string;
 }) {
   const items = Array.from(selected.values());
   const count = items.length;
@@ -229,7 +232,7 @@ function SelectionSidebar({
             className="w-full"
           >
             {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ArrowRight className="h-4 w-4 mr-2" />}
-            Próximo passo
+            {submitLabel}
           </Button>
           {count > 0 && (
             <Button variant="ghost" size="sm" onClick={onClear} disabled={isSubmitting}>
@@ -244,6 +247,16 @@ function SelectionSidebar({
 }
 
 export default function MultiProductPage() {
+  const urlSearch = useSearch();
+  const [, setLocation] = useLocation();
+
+  // ?addToListing=N → modo "adicionar produtos a listing existente"
+  const addToListingId = useMemo(() => {
+    const p = new URLSearchParams(urlSearch).get("addToListing");
+    const n = p ? Number(p) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [urlSearch]);
+
   const [shopeeAccountId, setShopeeAccountId] = useState<number | null>(null);
   const [mode, setMode] = useState<"new" | "promote">("new");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
@@ -255,6 +268,36 @@ export default function MultiProductPage() {
   const [principalKey, setPrincipalKey] = useState<string | null>(null);
 
   const utils = trpc.useUtils();
+
+  // Em modo "adicionar", buscamos o listing existente para travar shopeeAccountId
+  // e contar itens já adicionados (limite 50 global).
+  const existingListingQuery = trpc.multiProduct.getMultiProductListing.useQuery(
+    { id: addToListingId! },
+    { enabled: addToListingId !== null, retry: false },
+  );
+
+  useEffect(() => {
+    if (addToListingId !== null && existingListingQuery.error) {
+      toast.error(existingListingQuery.error.message || "Anúncio combinado não encontrado.");
+      setLocation("/multi-product");
+    }
+  }, [addToListingId, existingListingQuery.error]);
+
+  // Sincroniza shopeeAccountId/mode com listing existente quando em modo addTo
+  useEffect(() => {
+    if (addToListingId !== null && existingListingQuery.data) {
+      const l = existingListingQuery.data.listing as any;
+      setShopeeAccountId(l.shopeeAccountId);
+      setMode(l.mode);
+    }
+  }, [addToListingId, existingListingQuery.data]);
+
+  const existingItemCount = addToListingId !== null
+    ? existingListingQuery.data?.items.length ?? 0
+    : 0;
+
+  const remainingSlots = MAX_SELECTION - existingItemCount;
+  const isLoadingAddToListing = addToListingId !== null && existingListingQuery.isLoading;
 
   // Pré-requisitos
   const { data: accounts, isLoading: accountsLoading } = trpc.shopee.getAccounts.useQuery();
@@ -360,7 +403,7 @@ export default function MultiProductPage() {
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   // Seleção
-  const isMaxed = selected.size >= MAX_SELECTION;
+  const isMaxed = selected.size >= remainingSlots;
 
   function toggleItem(item: SelectedItem) {
     setSelected((prev) => {
@@ -369,8 +412,12 @@ export default function MultiProductPage() {
         next.delete(item.key);
         if (principalKey === item.key) setPrincipalKey(null);
       } else {
-        if (next.size >= MAX_SELECTION) {
-          toast.error(`Limite de ${MAX_SELECTION} produtos atingido.`);
+        if (next.size >= remainingSlots) {
+          toast.error(
+            addToListingId !== null
+              ? `Limite total de ${MAX_SELECTION} atingido (${existingItemCount} já no anúncio).`
+              : `Limite de ${MAX_SELECTION} produtos atingido.`
+          );
           return prev;
         }
         next.set(item.key, item);
@@ -407,19 +454,42 @@ export default function MultiProductPage() {
   const blockingReason: string | null = useMemo(() => {
     if (!shopeeAccountId) return "Selecione uma conta Shopee.";
     if (selected.size === 0) return "Selecione pelo menos 1 produto.";
+    // Em modo addToListing, principal já existe no listing — sem validação
+    if (addToListingId !== null) return null;
     if (!principal) return "Defina o produto principal (⭐).";
     if (mode === "promote" && principal.source !== "shopee") {
       return "No modo promover, o produto principal precisa ser um anúncio Shopee existente.";
     }
     return null;
-  }, [shopeeAccountId, selected.size, principal, mode]);
+  }, [shopeeAccountId, selected.size, principal, mode, addToListingId]);
 
   const canSubmit = blockingReason === null && !isSubmitting;
 
   async function handleSubmit() {
-    if (!canSubmit || !shopeeAccountId || !principal) return;
+    if (!canSubmit || !shopeeAccountId) return;
     setIsSubmitting(true);
     try {
+      // Modo "adicionar a listing existente"
+      if (addToListingId !== null) {
+        const itemsToAdd = Array.from(selected.values());
+        for (let i = 0; i < itemsToAdd.length; i++) {
+          const it = itemsToAdd[i];
+          await addItem.mutateAsync({
+            listingId: addToListingId,
+            source: it.source,
+            sourceId: it.sourceId,
+            position: existingItemCount + i,
+          });
+        }
+        toast.success(`${itemsToAdd.length} produto(s) adicionado(s) ao anúncio #${addToListingId}.`);
+        utils.multiProduct.getMultiProductListing.invalidate({ id: addToListingId });
+        clearSelection();
+        setLocation(`/multi-product-wizard?id=${addToListingId}`);
+        return;
+      }
+
+      // Modo "criar novo listing"
+      if (!principal) return;
       const created = await createListing.mutateAsync({
         shopeeAccountId,
         mode,
@@ -450,6 +520,7 @@ export default function MultiProductPage() {
       toast.success(`Anúncio combinado #${listingId} criado com ${ordered.length} produtos.`);
       utils.multiProduct.listMultiProductListings.invalidate();
       clearSelection();
+      setLocation(`/multi-product-wizard?id=${listingId}`);
     } catch (e: any) {
       toast.error(e?.message || "Falha ao criar anúncio combinado.");
     } finally {
@@ -480,13 +551,20 @@ export default function MultiProductPage() {
   return (
     <div className="container mx-auto p-4 lg:p-6 max-w-7xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Anúncio Combinado (multi-produto)</h1>
+        <h1 className="text-2xl font-bold">
+          {addToListingId !== null
+            ? `Adicionar produtos ao anúncio #${addToListingId}`
+            : "Anúncio Combinado (multi-produto)"}
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Selecione produtos do BaseLinker ou anúncios Shopee existentes para gerar um anúncio com variações.
+          {addToListingId !== null
+            ? `Restam ${remainingSlots} vaga(s) — ${existingItemCount} produto(s) já no anúncio.`
+            : "Selecione produtos do BaseLinker ou anúncios Shopee existentes para gerar um anúncio com variações."}
         </p>
       </div>
 
-      {/* Pré-requisitos */}
+      {/* Pré-requisitos — escondido em modo addTo (listing já tem conta + modo) */}
+      {addToListingId === null && (
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-base">Configuração</CardTitle>
@@ -540,6 +618,7 @@ export default function MultiProductPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Layout principal */}
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
@@ -586,6 +665,11 @@ export default function MultiProductPage() {
           </Card>
 
           {/* Tabela */}
+          {isLoadingAddToListing && (
+            <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 mb-3">
+              Carregando informações do anúncio existente...
+            </div>
+          )}
           <Card>
             <CardContent className="pt-6">
               {isLoading ? (
@@ -617,7 +701,7 @@ export default function MultiProductPage() {
                         isPrincipal={principalKey === item.key}
                         onToggle={() => toggleItem(item)}
                         onSetPrincipal={() => setPrincipal(item.key)}
-                        disabled={isMaxed}
+                        disabled={isMaxed || isLoadingAddToListing}
                       />
                     ))}
                   </TableBody>
@@ -670,6 +754,7 @@ export default function MultiProductPage() {
           isSubmitting={isSubmitting}
           canSubmit={canSubmit}
           blockingReason={blockingReason}
+          submitLabel={addToListingId !== null ? "Adicionar selecionados ao anúncio" : "Próximo passo"}
         />
       </div>
     </div>
