@@ -1926,6 +1926,10 @@ function VariationWizard({
     return () => clearTimeout(t);
   }, [undoToastVisible]);
 
+  // Normaliza dimensões para inteiro (string ou number → string sem ".0").
+  // Bate com a semântica do backend que faz Math.round em 2 camadas.
+  const dim = (v: string | number | undefined) => String(Math.round(Number(v) || 0));
+
   // "Gerar tudo com IA" — single LLM call that yields title, description, and
   // a short (≤20ch) name for each local variation. Captures an undo snapshot
   // first so the user can restore manually-edited content within 10s.
@@ -1964,7 +1968,7 @@ function VariationWizard({
           label: opt.label,
           qty: c.qty,
           weight: opt.weight || c.weight.toFixed(2),
-          dimensions: `${opt.length || c.length.toFixed(1)}×${opt.width || c.width.toFixed(1)}×${opt.height || c.height.toFixed(1)}`,
+          dimensions: `${dim(opt.length || c.length)}×${dim(opt.width || c.width)}×${dim(opt.height || c.height)}`,
           price: c.price.toFixed(2),
         };
       });
@@ -2045,7 +2049,7 @@ function VariationWizard({
           label: opt.label,
           qty: c.qty,
           weight: opt.weight || c.weight.toFixed(2),
-          dimensions: `${opt.length || c.length.toFixed(1)}×${opt.width || c.width.toFixed(1)}×${opt.height || c.height.toFixed(1)}`,
+          dimensions: `${dim(opt.length || c.length)}×${dim(opt.width || c.width)}×${dim(opt.height || c.height)}`,
           price: c.price.toFixed(2),
         };
       });
