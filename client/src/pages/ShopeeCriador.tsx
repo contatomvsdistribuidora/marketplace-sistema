@@ -2156,16 +2156,39 @@ function VariationWizard({
     // Build attribute_list from Ficha Técnica values. attribute_id<=0 é o
     // sintético BRAND (ensureBrandAttribute) — vai no campo `brand` separado,
     // não no attribute_list, então filtramos aqui.
+    // Para format_type=2 (QUANTITATIVE_WITH_UNIT) a Shopee exige value_unit.
+    // Cobrimos aqui os caminhos que não setam unit no estado (IA via
+    // autoFillAttributes + edição no Bloco 2 da Revisão) defaultando para
+    // o primeiro item de attribute_unit_list. Se categoryAttributes ainda
+    // não carregou (def===undefined), preserva o comportamento anterior — não
+    // injeta unit; o backend devolveria o mesmo erro de antes.
+    const attrDefById = new Map<number, any>(
+      Array.isArray(categoryAttributes)
+        ? (categoryAttributes as any[]).map((a) => [Number(a.attribute_id), a])
+        : [],
+    );
     const attributes = Object.entries(attributeValues)
       .filter(([attrId, v]) => v.originalValue.trim() !== "" && parseInt(attrId) > 0)
-      .map(([attrId, v]) => ({
-        attributeId: parseInt(attrId),
-        attributeValueList: [{
-          valueId: v.valueId,
-          originalValueName: v.originalValue,
-          ...(v.valueUnit ? { valueUnit: v.valueUnit } : {}),
-        }],
-      }));
+      .map(([attrId, v]) => {
+        const id = parseInt(attrId);
+        const def = attrDefById.get(id);
+        const unitFallback =
+          !v.valueUnit &&
+          def?.format_type === 2 &&
+          Array.isArray(def.attribute_unit_list) &&
+          def.attribute_unit_list.length > 0
+            ? def.attribute_unit_list[0]
+            : undefined;
+        const valueUnit = v.valueUnit ?? unitFallback;
+        return {
+          attributeId: id,
+          attributeValueList: [{
+            valueId: v.valueId,
+            originalValueName: v.originalValue,
+            ...(valueUnit ? { valueUnit } : {}),
+          }],
+        };
+      });
 
     setPublishStatus("loading");
     setPublishError("");
