@@ -610,3 +610,88 @@ export const shopeeShippingChannels = mysqlTable("shopee_shipping_channels", {
 
 export type ShopeeShippingChannel = typeof shopeeShippingChannels.$inferSelect;
 export type InsertShopeeShippingChannel = typeof shopeeShippingChannels.$inferInsert;
+
+/**
+ * Anúncio combinado: pega N produtos (do BaseLinker em productCache, ou de
+ * anúncios Shopee em shopeeProducts) e gera 1 listagem Shopee com cada
+ * produto virando uma variação.
+ *
+ * Modos:
+ * - new: cria anúncio Shopee novo do zero (Modo 1). shopeeItemId é
+ *   preenchido após publicação bem-sucedida.
+ * - promote: promove anúncio Shopee existente a "principal" e adiciona os
+ *   demais como variações (Modo 2). existingShopeeItemId é o anúncio
+ *   pré-existente.
+ */
+export const multiProductListings = mysqlTable("multi_product_listings", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  shopeeAccountId: bigint("shopee_account_id", { mode: "number" }).notNull(),
+  mode: mysqlEnum("mode", ["new", "promote"]).notNull(),
+  status: mysqlEnum("status", ["draft", "ready", "publishing", "published", "error"]).default("draft").notNull(),
+  existingShopeeItemId: bigint("existing_shopee_item_id", { mode: "number" }),
+  shopeeItemId: bigint("shopee_item_id", { mode: "number" }),
+  mainProductSource: mysqlEnum("main_product_source", ["baselinker", "shopee"]).notNull(),
+  mainProductSourceId: bigint("main_product_source_id", { mode: "number" }).notNull(),
+  title: text("title"),
+  description: text("description"),
+  thumbStatus: mysqlEnum("thumb_status", ["pending", "generated", "approved"]).default("pending").notNull(),
+  thumbUrl: varchar("thumb_url", { length: 1024 }),
+  videoUrl: varchar("video_url", { length: 1024 }),
+  videoBankId: bigint("video_bank_id", { mode: "number" }),
+  lastError: text("last_error"),
+  publishedAt: timestamp("published_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MultiProductListing = typeof multiProductListings.$inferSelect;
+export type InsertMultiProductListing = typeof multiProductListings.$inferInsert;
+
+/**
+ * Itens (variações) de um multiProductListing. Cada linha é uma variação
+ * dentro do anúncio combinado, herdando campos do produto de origem.
+ *
+ * source identifica de qual mundo o item veio:
+ * - baselinker: sourceId é productCache.productId (id BL externo)
+ * - shopee: sourceId é shopeeProducts.itemId (id Shopee externo)
+ *
+ * customPrice/customSku permitem sobrescrever o valor herdado da origem
+ * sem alterar o produto original.
+ */
+export const multiProductListingItems = mysqlTable("multi_product_listing_items", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  listingId: bigint("listing_id", { mode: "number" }).notNull(),
+  source: mysqlEnum("source", ["baselinker", "shopee"]).notNull(),
+  sourceId: bigint("source_id", { mode: "number" }).notNull(),
+  position: int("position").default(0).notNull(),
+  customPrice: decimal("custom_price", { precision: 10, scale: 2 }),
+  customSku: varchar("custom_sku", { length: 256 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MultiProductListingItem = typeof multiProductListingItems.$inferSelect;
+export type InsertMultiProductListingItem = typeof multiProductListingItems.$inferInsert;
+
+/**
+ * Banco de vídeos global (sem userId / shopeeAccountId — qualquer usuário
+ * pode usar qualquer vídeo). Suporta 3 origens:
+ * - external_url: vídeo hospedado externamente (YouTube/Vimeo/CDN)
+ * - manual_upload: vídeo armazenado em storage interno (S3/R2 quando configurado)
+ * - baselinker: vídeo sincronizado a partir do BaseLinker
+ */
+export const videoBank = mysqlTable("video_bank", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  title: varchar("title", { length: 256 }).notNull(),
+  url: varchar("url", { length: 1024 }).notNull(),
+  source: mysqlEnum("source", ["external_url", "manual_upload", "baselinker"]).notNull(),
+  durationSeconds: int("duration_seconds"),
+  thumbnailUrl: varchar("thumbnail_url", { length: 1024 }),
+  isActive: int("is_active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type VideoBank = typeof videoBank.$inferSelect;
+export type InsertVideoBank = typeof videoBank.$inferInsert;

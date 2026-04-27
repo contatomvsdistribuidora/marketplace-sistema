@@ -1,0 +1,27 @@
+-- Anúncios combinados (multi-produto) Shopee. Modo "new" cria do zero,
+-- modo "promote" usa anúncio Shopee existente como principal.
+CREATE TABLE IF NOT EXISTS `multi_product_listings` (
+  `id` BIGINT AUTO_INCREMENT NOT NULL,
+  `user_id` INT NOT NULL,
+  `shopee_account_id` BIGINT NOT NULL,
+  `mode` ENUM('new', 'promote') NOT NULL,
+  `status` ENUM('draft', 'ready', 'publishing', 'published', 'error') NOT NULL DEFAULT 'draft',
+  `existing_shopee_item_id` BIGINT NULL,
+  `shopee_item_id` BIGINT NULL,
+  `main_product_source` ENUM('baselinker', 'shopee') NOT NULL,
+  `main_product_source_id` BIGINT NOT NULL,
+  `title` TEXT NULL,
+  `description` TEXT NULL,
+  `thumb_status` ENUM('pending', 'generated', 'approved') NOT NULL DEFAULT 'pending',
+  `thumb_url` VARCHAR(1024) NULL,
+  `video_url` VARCHAR(1024) NULL,
+  `video_bank_id` BIGINT NULL,
+  `last_error` TEXT NULL,
+  `published_at` DATETIME NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT `multi_product_listings_pk` PRIMARY KEY (`id`),
+  INDEX `idx_multi_product_listings_user` (`user_id`),
+  INDEX `idx_multi_product_listings_account` (`shopee_account_id`),
+  INDEX `idx_multi_product_listings_status` (`status`)
+);
