@@ -18,6 +18,13 @@ import * as shopee from "./shopee";
 import * as shopeeExport from "./shopee-export";
 import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
+import { eq, and, desc, asc } from "drizzle-orm";
+import {
+  multiProductListings,
+  multiProductListingItems,
+  videoBank,
+  shopeeAccounts,
+} from "../drizzle/schema";
 
 /**
  * Brand is a per-category attribute on Shopee, but it's missing from our
@@ -3646,6 +3653,364 @@ export const appRouter = router({
           currentCategoryId: p.categoryId ? Number(p.categoryId) : null,
           hasRemoteVariations: Array.isArray(p.variations) && (p.variations as any[]).length > 0,
         };
+      }),
+  }),
+
+  // ============ MULTI-PRODUCT LISTINGS ============
+  multiProduct: router({
+    listMultiProductListings: protectedProcedure
+      .input(z.object({
+        shopeeAccountId: z.number().optional(),
+        status: z.enum(["draft", "ready", "publishing", "published", "error"]).optional(),
+      }))
+      .query(async ({ ctx, input }) => {
+        const conditions = [eq(multiProductListings.userId, ctx.user.id)];
+        if (input.shopeeAccountId !== undefined) {
+          conditions.push(eq(multiProductListings.shopeeAccountId, input.shopeeAccountId));
+        }
+        if (input.status !== undefined) {
+          conditions.push(eq(multiProductListings.status, input.status));
+        }
+        const rows = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(...conditions))
+          .orderBy(desc(multiProductListings.updatedAt));
+        return rows;
+      }),
+
+    getMultiProductListing: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new Error("Anúncio combinado não encontrado.");
+        const items = await sharedDb
+          .select()
+          .from(multiProductListingItems)
+          .where(eq(multiProductListingItems.listingId, listing.id))
+          .orderBy(asc(multiProductListingItems.position));
+        return { listing, items };
+      }),
+
+    createMultiProductListing: protectedProcedure
+      .input(z.object({
+        shopeeAccountId: z.number(),
+        mode: z.enum(["new", "promote"]),
+        mainProductSource: z.enum(["baselinker", "shopee"]),
+        mainProductSourceId: z.number(),
+        existingShopeeItemId: z.number().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Valida que a conta Shopee pertence ao usuário
+        const [account] = await sharedDb
+          .select({ id: shopeeAccounts.id })
+          .from(shopeeAccounts)
+          .where(and(
+            eq(shopeeAccounts.id, input.shopeeAccountId),
+            eq(shopeeAccounts.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!account) throw new Error("Conta Shopee não encontrada.");
+
+        // Modo "promote" exige existingShopeeItemId
+        if (input.mode === "promote" && !input.existingShopeeItemId) {
+          throw new Error("Modo 'promote' exige existingShopeeItemId.");
+        }
+
+        const result = await sharedDb.insert(multiProductListings).values({
+          userId: ctx.user.id,
+          shopeeAccountId: input.shopeeAccountId,
+          mode: input.mode,
+          status: "draft",
+          mainProductSource: input.mainProductSource,
+          mainProductSourceId: input.mainProductSourceId,
+          existingShopeeItemId: input.existingShopeeItemId ?? null,
+        });
+        const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
+        return { id: Number(insertedId) };
+      }),
+
+    updateMultiProductListing: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        thumbStatus: z.enum(["pending", "generated", "approved"]).optional(),
+        thumbUrl: z.string().nullable().optional(),
+        videoUrl: z.string().nullable().optional(),
+        videoBankId: z.number().nullable().optional(),
+        status: z.enum(["draft", "ready", "publishing", "published", "error"]).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Garante ownership
+        const [existing] = await sharedDb
+          .select({ id: multiProductListings.id })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!existing) throw new Error("Anúncio combinado não encontrado.");
+
+        const { id, ...fields } = input;
+        const updateFields: Record<string, any> = {};
+        for (const [k, v] of Object.entries(fields)) {
+          if (v !== undefined) updateFields[k] = v;
+        }
+        if (Object.keys(updateFields).length === 0) return { id, updated: false };
+
+        await sharedDb
+          .update(multiProductListings)
+          .set(updateFields)
+          .where(eq(multiProductListings.id, id));
+        return { id, updated: true };
+      }),
+
+    deleteMultiProductListing: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const [existing] = await sharedDb
+          .select({ id: multiProductListings.id, status: multiProductListings.status })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!existing) throw new Error("Anúncio combinado não encontrado.");
+        if (existing.status === "published") {
+          throw new Error("Não é possível deletar um anúncio já publicado.");
+        }
+        // Cascata manual: deleta items primeiro
+        await sharedDb
+          .delete(multiProductListingItems)
+          .where(eq(multiProductListingItems.listingId, input.id));
+        await sharedDb
+          .delete(multiProductListings)
+          .where(eq(multiProductListings.id, input.id));
+        return { id: input.id, deleted: true };
+      }),
+
+    addItemToListing: protectedProcedure
+      .input(z.object({
+        listingId: z.number(),
+        source: z.enum(["baselinker", "shopee"]),
+        sourceId: z.number(),
+        position: z.number().optional(),
+        customPrice: z.string().optional(), // decimal vem como string no driver
+        customSku: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Ownership via JOIN com listing
+        const [listing] = await sharedDb
+          .select({ id: multiProductListings.id })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.listingId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new Error("Anúncio combinado não encontrado.");
+
+        const result = await sharedDb.insert(multiProductListingItems).values({
+          listingId: input.listingId,
+          source: input.source,
+          sourceId: input.sourceId,
+          position: input.position ?? 0,
+          customPrice: input.customPrice ?? null,
+          customSku: input.customSku ?? null,
+        });
+        const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
+        return { id: Number(insertedId) };
+      }),
+
+    updateListingItem: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        customPrice: z.string().nullable().optional(),
+        customSku: z.string().nullable().optional(),
+        position: z.number().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Ownership via JOIN
+        const [item] = await sharedDb
+          .select({ itemId: multiProductListingItems.id })
+          .from(multiProductListingItems)
+          .innerJoin(multiProductListings, eq(multiProductListings.id, multiProductListingItems.listingId))
+          .where(and(
+            eq(multiProductListingItems.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!item) throw new Error("Item não encontrado.");
+
+        const { id, ...fields } = input;
+        const updateFields: Record<string, any> = {};
+        for (const [k, v] of Object.entries(fields)) {
+          if (v !== undefined) updateFields[k] = v;
+        }
+        if (Object.keys(updateFields).length === 0) return { id, updated: false };
+
+        await sharedDb
+          .update(multiProductListingItems)
+          .set(updateFields)
+          .where(eq(multiProductListingItems.id, id));
+        return { id, updated: true };
+      }),
+
+    removeListingItem: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const [item] = await sharedDb
+          .select({ itemId: multiProductListingItems.id })
+          .from(multiProductListingItems)
+          .innerJoin(multiProductListings, eq(multiProductListings.id, multiProductListingItems.listingId))
+          .where(and(
+            eq(multiProductListingItems.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!item) throw new Error("Item não encontrado.");
+
+        await sharedDb
+          .delete(multiProductListingItems)
+          .where(eq(multiProductListingItems.id, input.id));
+        return { id: input.id, deleted: true };
+      }),
+
+    reorderListingItems: protectedProcedure
+      .input(z.object({
+        listingId: z.number(),
+        orderedIds: z.array(z.number()).min(1),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Ownership do listing
+        const [listing] = await sharedDb
+          .select({ id: multiProductListings.id })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.listingId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new Error("Anúncio combinado não encontrado.");
+
+        // Atualiza position em sequência
+        for (let i = 0; i < input.orderedIds.length; i++) {
+          await sharedDb
+            .update(multiProductListingItems)
+            .set({ position: i })
+            .where(and(
+              eq(multiProductListingItems.id, input.orderedIds[i]),
+              eq(multiProductListingItems.listingId, input.listingId),
+            ));
+        }
+        return { listingId: input.listingId, count: input.orderedIds.length };
+      }),
+  }),
+
+  // ============ VIDEO BANK (global) ============
+  videoBank: router({
+    listVideos: protectedProcedure
+      .input(z.object({
+        activeOnly: z.boolean().optional(),
+        source: z.enum(["external_url", "manual_upload", "baselinker"]).optional(),
+      }))
+      .query(async ({ input }) => {
+        const conditions: any[] = [];
+        if (input.activeOnly) conditions.push(eq(videoBank.isActive, 1));
+        if (input.source) conditions.push(eq(videoBank.source, input.source));
+        const query = sharedDb
+          .select()
+          .from(videoBank)
+          .orderBy(desc(videoBank.createdAt));
+        const rows = conditions.length > 0
+          ? await query.where(and(...conditions))
+          : await query;
+        return rows;
+      }),
+
+    getVideo: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const [row] = await sharedDb
+          .select()
+          .from(videoBank)
+          .where(eq(videoBank.id, input.id))
+          .limit(1);
+        if (!row) throw new Error("Vídeo não encontrado.");
+        return row;
+      }),
+
+    createVideo: protectedProcedure
+      .input(z.object({
+        title: z.string().min(1, "Título é obrigatório"),
+        url: z.string().min(1, "URL é obrigatória"),
+        source: z.enum(["external_url", "manual_upload", "baselinker"]),
+        durationSeconds: z.number().optional(),
+        thumbnailUrl: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const result = await sharedDb.insert(videoBank).values({
+          title: input.title,
+          url: input.url,
+          source: input.source,
+          durationSeconds: input.durationSeconds ?? null,
+          thumbnailUrl: input.thumbnailUrl ?? null,
+          isActive: 1,
+        });
+        const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
+        return { id: Number(insertedId) };
+      }),
+
+    updateVideo: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        title: z.string().optional(),
+        url: z.string().optional(),
+        durationSeconds: z.number().nullable().optional(),
+        thumbnailUrl: z.string().nullable().optional(),
+        isActive: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const [existing] = await sharedDb
+          .select({ id: videoBank.id })
+          .from(videoBank)
+          .where(eq(videoBank.id, input.id))
+          .limit(1);
+        if (!existing) throw new Error("Vídeo não encontrado.");
+
+        const { id, ...fields } = input;
+        const updateFields: Record<string, any> = {};
+        for (const [k, v] of Object.entries(fields)) {
+          if (v !== undefined) updateFields[k] = v;
+        }
+        if (Object.keys(updateFields).length === 0) return { id, updated: false };
+
+        await sharedDb
+          .update(videoBank)
+          .set(updateFields)
+          .where(eq(videoBank.id, id));
+        return { id, updated: true };
+      }),
+
+    deleteVideo: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        // Soft delete
+        await sharedDb
+          .update(videoBank)
+          .set({ isActive: 0 })
+          .where(eq(videoBank.id, input.id));
+        return { id: input.id, deactivated: true };
       }),
   }),
 });
