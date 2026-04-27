@@ -4,9 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { TITLE_MAX, type Listing } from "./types";
 
@@ -21,6 +19,24 @@ export function StepB({ listing, onChange }: { listing: Listing; onChange: () =>
 
   const updateMutation = trpc.multiProduct.updateMultiProductListing.useMutation({
     onSuccess: () => onChange(),
+    onError: (e) => toast.error(e.message),
+  });
+
+  const generateTitleMutation = trpc.multiProduct.generateTitleWithAI.useMutation({
+    onSuccess: (data) => {
+      setTitle(data.title);
+      onChange();
+      toast.success("Título gerado pela IA.");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const generateDescMutation = trpc.multiProduct.generateDescriptionWithAI.useMutation({
+    onSuccess: (data) => {
+      setDescription(data.description);
+      onChange();
+      toast.success("Descrição gerada pela IA.");
+    },
     onError: (e) => toast.error(e.message),
   });
 
@@ -59,18 +75,24 @@ export function StepB({ listing, onChange }: { listing: Listing; onChange: () =>
             <span className={`text-xs ${titleColor}`}>
               {titleLen}/{TITLE_MAX} caracteres
             </span>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span tabIndex={0}>
-                    <Button variant="outline" size="sm" disabled>
-                      Gerar com IA
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Disponível na Fase E</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={generateTitleMutation.isPending}
+              onClick={() => generateTitleMutation.mutate({ id: listing.id })}
+            >
+              {generateTitleMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Gerando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Gerar com IA
+                </>
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -94,18 +116,24 @@ export function StepB({ listing, onChange }: { listing: Listing; onChange: () =>
             <span className="text-xs text-muted-foreground">
               {description.length} caracteres
             </span>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span tabIndex={0}>
-                    <Button variant="outline" size="sm" disabled>
-                      Gerar com IA
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Disponível na Fase E</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={generateDescMutation.isPending}
+              onClick={() => generateDescMutation.mutate({ id: listing.id })}
+            >
+              {generateDescMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Gerando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Gerar com IA
+                </>
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>

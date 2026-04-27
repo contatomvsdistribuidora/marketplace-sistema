@@ -18,6 +18,7 @@ import * as shopee from "./shopee";
 import * as shopeeExport from "./shopee-export";
 import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
+import * as multiProductAi from "./multi-product-ai";
 import { eq, and, desc, asc } from "drizzle-orm";
 import {
   multiProductListings,
@@ -3916,6 +3917,34 @@ export const appRouter = router({
             ));
         }
         return { listingId: input.listingId, count: input.orderedIds.length };
+      }),
+
+    generateTitleWithAI: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const title = await multiProductAi.generateMultiProductTitle(input.id, ctx.user.id);
+        await sharedDb
+          .update(multiProductListings)
+          .set({ title })
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ));
+        return { title };
+      }),
+
+    generateDescriptionWithAI: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const description = await multiProductAi.generateMultiProductDescription(input.id, ctx.user.id);
+        await sharedDb
+          .update(multiProductListings)
+          .set({ description })
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ));
+        return { description };
       }),
   }),
 
