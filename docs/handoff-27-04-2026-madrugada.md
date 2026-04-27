@@ -176,3 +176,51 @@ Decisão: NÃO aplicar fix de madrugada. Bug é pré-existente desde 6c9bb18 (17
 4. Commits pequenos e separados
 5. Validação manual no site após push
 6. Logs em código removidos antes de fechar a sessão
+
+---
+
+## 🚦 ESTADO FINAL DA SESSÃO ESTENDIDA — encerrada ~03:00
+
+Commit final: 84412ea (Fase A da feature de canais de envio).
+
+### Trabalho commitado e pronto para uso
+
+- 3db91c0, 4982f2b, 94628f4 — fix Shopee attribute_info bug
+- 4969d0b — limpeza de logs temp
+- 27890a4 — fix dimensões inteiras na IA
+- 16a7572 — docs investigação shipping API
+- 0ed2a48 — docs connection leak no background worker
+- 84412ea — Fase A canais de envio (schema + SQL + script)
+
+### Pendências MAIS IMPORTANTES para o dev original
+
+🔴 **Aplicar migration 0019** — script `scripts/apply-0019-manually.ts` está pronto mas NÃO foi executado em produção. Tabela `shopee_shipping_channels` ainda NÃO existe no MySQL. Para aplicar:
+
+```bash
+# Com DATABASE_URL do Railway no .env (mesma usada nos scripts apply-0017/0018):
+pnpm tsx scripts/apply-0019-manually.ts
+```
+
+O script é idempotente (`CREATE TABLE IF NOT EXISTS`) — re-executar é seguro. Confirma criação via `SHOW TABLES LIKE 'shopee_shipping_channels'` no final. Sem isso aplicado, qualquer Fase B/C/D vai falhar com "table doesn't exist".
+
+🔴 **Connection leak no background worker** — investigado e documentado em `docs/incident-2026-04-26-db-connection-leak.md`. NÃO corrigido nesta sessão (madrugada + infra crítica). Estratégia recomendada (pool dedicada, limit=5) + 11 call sites + ajuste de mock dos testes detalhados no doc. Provável causa raiz do "Too many connections" da sessão anterior.
+
+🔴 **Reset da senha MySQL** — continua pendente da sessão original 26/04. Senha exposta em prints.
+
+🔴 **Bugs novos não consertados (1, 2, 3)** — listados na seção "BUGS NOVOS DESCOBERTOS" no topo deste handoff. Bug 4 já resolvido (commit 27890a4).
+
+### Próximas fases da feature de canais de envio
+
+Fase A (DDL) commitada e pronta. Fases pendentes:
+
+- **Fase B** — CRUD: helpers em `server/db.ts` (listShippingChannels, createShippingChannel, updateShippingChannel, deleteShippingChannel) + endpoints tRPC em `server/routers.ts`. Lógica de `MAX(price)` ativa por conta como helper isolado, reusável.
+- **Fase C** — UI de cadastro: tela nova (sugestão: `/shopee-shipping-channels` ou aba dentro da tela da conta Shopee). Listar canais, criar, editar, ativar/desativar. Padrão visual das outras páginas Shopee.
+- **Fase D** — Integração no wizard: substituir o `shippingCost = 0` atual no cálculo de preço pelo `MAX(price)` dos canais ativos da conta selecionada. Cuidado com o bug latente identificado no doc shipping API: modo "margem" subestima custo quando shippingCost = 0 — esta feature resolve isso quando há canais cadastrados, mas o fallback 0 mantém o bug latente para contas sem canais.
+
+### Decisões registradas
+
+- Tarifa fixa por canal (1 valor), múltiplos canais por conta (sem regras de peso, sem CEP). Cadastro 100% manual.
+- Fallback 0 mantido (não breaking change para contas sem canais).
+- Padrão de schema novo (snake_case no DB, camelCase no export) — alinhado com migrations 0017/0018.
+- FK lógica (sem `references()`) — alinhado com o padrão do projeto (zero FKs físicas).
+- Migration aplicada manualmente via script tsx — alinhado com 0017/0018, evita conflito do `_journal.json` desincronizado.
