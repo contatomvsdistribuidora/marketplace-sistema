@@ -131,6 +131,9 @@ export const productCache = mysqlTable("product_cache", {
   tags: json("tags").$type<string[]>(),
   description: text("description"),
   imageUrl: varchar("imageUrl", { length: 1024 }),
+  videoUrl: varchar("videoUrl", { length: 1024 }),
+  videoTitle: varchar("videoTitle", { length: 256 }),
+  videoLinkUrl: varchar("videoLinkUrl", { length: 1024 }),
   cachedAt: timestamp("cachedAt").defaultNow().notNull(),
 });
 
