@@ -30,23 +30,40 @@ const EXPECTED_COLUMNS = ["videoUrl", "videoTitle", "videoLinkUrl"];
 
 /**
  * Divide o conteúdo SQL em statements pelo marker `--> statement-breakpoint`
- * (padrão drizzle-kit). Statements vazios ou só com whitespace/comentário
- * de linha são ignorados.
+ * (padrão drizzle-kit). Strippa comentários `-- ...` ANTES de splitar para
+ * evitar que o texto literal `--> statement-breakpoint` dentro de um
+ * comentário SQL dispare split no lugar errado (bug observado na primeira
+ * execução desta migration).
+ *
+ * Limitação conhecida: `--` dentro de string literal entre aspas seria
+ * tratado como comentário também. Não é problema nas migrations atuais
+ * (todas só fazem DDL), mas se um dia houver INSERT com strings contendo
+ * `--`, o splitter precisa ficar mais inteligente (state machine de aspas).
  */
 function splitByBreakpoint(sql: string): string[] {
-  return sql
-    .split(/-->\s*statement-breakpoint\s*/g)
+  const SENTINEL = "\x00BREAK\x00";
+  // 1) Substitui linhas que SÃO o marker `--> statement-breakpoint` por um
+  //    sentinel único antes de tocar nos comentários. Evita que o marker
+  //    `-->` (que começa com `--`) seja confundido com comentário SQL.
+  const markerLine = /^[ \t]*-->\s*statement-breakpoint[ \t]*$/gm;
+  const withSentinel = sql.replace(markerLine, SENTINEL);
+
+  // 2) Strippa comentários SQL `-- ...` (até fim da linha) — agora seguro
+  //    porque o marker já virou SENTINEL. Comentários inline também são
+  //    cortados (preservando o que vem antes do `--`).
+  const stripped = withSentinel
+    .split("\n")
+    .map((line) => {
+      const idx = line.indexOf("--");
+      return idx >= 0 ? line.substring(0, idx) : line;
+    })
+    .join("\n");
+
+  // 3) Divide pelos sentinels e descarta segmentos vazios.
+  return stripped
+    .split(SENTINEL)
     .map((s) => s.trim())
-    .filter((s) => {
-      if (s.length === 0) return false;
-      // Ignora bloco que é só comentário de linha
-      const noComments = s
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("--"))
-        .join("\n")
-        .trim();
-      return noComments.length > 0;
-    });
+    .filter((s) => s.length > 0);
 }
 
 function summarize(stmt: string): string {
