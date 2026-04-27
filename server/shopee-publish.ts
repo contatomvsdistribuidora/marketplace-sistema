@@ -78,42 +78,12 @@ async function shopeePost(
   shopId: number
 ) {
   const url = buildUrl(path, {}, accessToken, shopId);
-  // TEMP DEBUG — remover após validação.
-  // Loga só campos diagnósticos do bug de atributos. NÃO loga url/accessToken/
-  // shopId/headers nem o body completo do produto (dados do cliente).
-  const isPublishEndpoint =
-    path === "/api/v2/product/add_item" || path === "/api/v2/product/update_item";
-  if (isPublishEndpoint) {
-    console.log(
-      "[SHOPEE-PUBLISH-DEBUG request]",
-      JSON.stringify({
-        endpoint: path,
-        category_id: body.category_id,
-        attribute_list: body.attribute_list,
-        brand: body.brand,
-      }, null, 2),
-    );
-  }
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  // TEMP DEBUG — remover após validação.
-  if (isPublishEndpoint) {
-    console.log(
-      "[SHOPEE-PUBLISH-DEBUG response]",
-      JSON.stringify({
-        endpoint: path,
-        httpStatus: res.status,
-        error: data.error,
-        message: data.message,
-        request_id: data.request_id,
-        warning: data.warning,
-      }, null, 2),
-    );
-  }
   if (data.error && data.error !== "") {
     console.error(`[Shopee Publish] POST ${path} error:`, JSON.stringify(data));
     throw new Error(`Shopee API [${path}]: ${data.error} - ${data.message || JSON.stringify(data)}`);
