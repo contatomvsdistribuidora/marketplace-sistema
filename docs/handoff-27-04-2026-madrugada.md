@@ -124,6 +124,32 @@ Dados verificados em produção:
 
 ---
 
+## 🔬 SESSÃO ESTENDIDA — 27/04 madrugada (continuação)
+
+Após o handoff inicial, dev novo continuou a sessão (~01:00 a ~02:00).
+
+### Bug 4 — RESOLVIDO
+
+Bug 4 do handoff (dimensões com .0 na descrição IA): resolvido pelo commit `27890a4`.
+Helper `dim()` em ShopeeCriador.tsx normaliza dimensões para inteiro string (string ou number → "16" em vez de "16.0").
+Aplicado em `handleGenerateAll` e `generateAdSection`. Não toca peso (decimais legítimos).
+Validado com pnpm check (zero erros novos).
+
+### Feature nova investigada e bloqueada — INTEGRAÇÃO TAXAS DE ENVIO
+
+Dev solicitou implementar busca automática das taxas de envio dos canais Shopee, usando o maior valor como base de cálculo de preço.
+
+Investigação completa em `docs/feature-shipping-api-investigation.md`. Resumo:
+- Endpoint oficial `v2.logistics.get_channel_list` não retorna preço pra canais `SIZE_INPUT` (que é o caso da loja 1311085163)
+- Endpoint sugerido por chatbot Shopee (`getlogisticprice`) não foi encontrado em docs oficiais
+- Os preços do Seller Center vêm de endpoint interno não documentado
+
+Feature **bloqueada por decisão de produto**. 5 opções listadas no doc, dev original precisa decidir antes de implementar.
+
+Bug latente identificado: modo "margem" no cálculo de preço subestima custo quando `shippingCost = 0` (silenciosamente).
+
+---
+
 ## 💡 PROCESSO DA SESSÃO
 
 - Duração: ~3h (23:00–02:00 madrugada)
