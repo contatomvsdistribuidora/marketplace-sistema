@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, json, bigint, boolean } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, json, bigint, boolean, decimal } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -590,3 +590,23 @@ export const shopeeCategoryAttributeSyncProgress = mysqlTable(
 
 export type ShopeeCategoryAttributeSyncProgress = typeof shopeeCategoryAttributeSyncProgress.$inferSelect;
 export type InsertShopeeCategoryAttributeSyncProgress = typeof shopeeCategoryAttributeSyncProgress.$inferInsert;
+
+/**
+ * Manually-curated shipping channels per Shopee account. Each row is a single
+ * fixed shipping fee the user wants to factor into pricing calculations. No
+ * weight rules, no zip-code lookup — flat price per channel. The pricing
+ * pipeline picks the highest active price across all channels for the account
+ * (falls back to 0 when none exist).
+ */
+export const shopeeShippingChannels = mysqlTable("shopee_shipping_channels", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  shopeeAccountId: bigint("shopee_account_id", { mode: "number" }).notNull(),
+  channelName: varchar("channel_name", { length: 128 }).notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  isActive: int("is_active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeShippingChannel = typeof shopeeShippingChannels.$inferSelect;
+export type InsertShopeeShippingChannel = typeof shopeeShippingChannels.$inferInsert;
