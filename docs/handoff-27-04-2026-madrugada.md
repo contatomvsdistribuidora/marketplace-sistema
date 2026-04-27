@@ -150,6 +150,16 @@ Bug latente identificado: modo "margem" no cálculo de preço subestima custo qu
 
 ---
 
+### Achado — Connection leak no background worker (não corrigido)
+
+Durante investigação de erros recorrentes nos logs Railway, descoberta a causa raiz do "Too many connections" da sessão anterior: getDbInstance() em server/background-worker.ts:22 cria nova pool mysql2 a cada chamada, sem reuso. Polling a cada 30s + 8 call sites tRPC + refresh de tokens horário acumulam conexões vazadas.
+
+Detalhes técnicos completos em docs/incident-2026-04-26-db-connection-leak.md (estratégia de fix, todas as 11 call sites, comparação com pool canônica, opções consideradas).
+
+Decisão: NÃO aplicar fix de madrugada. Bug é pré-existente desde 6c9bb18 (17/03/2026), não introduzido nesta sessão. Dev original implementa de manhã com calma.
+
+---
+
 ## 💡 PROCESSO DA SESSÃO
 
 - Duração: ~3h (23:00–02:00 madrugada)
