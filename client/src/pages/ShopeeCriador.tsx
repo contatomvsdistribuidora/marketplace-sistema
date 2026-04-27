@@ -3373,6 +3373,8 @@ function VariationWizard({
                         display_attribute_name: string;
                         is_mandatory: boolean;
                         input_type: string;
+                        format_type?: number;
+                        attribute_unit_list?: string[];
                         attribute_value_list: Array<{ value_id: number; display_value_name: string }>;
                       }>).map(attr => {
                         const current = attributeValues[attr.attribute_id];
@@ -3421,6 +3423,41 @@ function VariationWizard({
                                   <option key={opt.value_id} value={opt.value_id}>{opt.display_value_name}</option>
                                 ))}
                               </select>
+                            ) : (attr.format_type === 2 && Array.isArray(attr.attribute_unit_list) && attr.attribute_unit_list.length > 0) ? (
+                              // QUANTITATIVE_WITH_UNIT: número + select de unidade.
+                              // Espelha o Bloco 1 (etapa Detalhes) — Shopee exige
+                              // value_unit no payload (ex: "60" + "cm").
+                              <div className="flex gap-1.5">
+                                <input type="number" step="any"
+                                  value={current?.originalValue ?? ""}
+                                  onChange={e => setAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_id]: {
+                                      valueId: 0,
+                                      originalValue: e.target.value,
+                                      valueUnit: prev[attr.attribute_id]?.valueUnit ?? attr.attribute_unit_list![0],
+                                    },
+                                  }))}
+                                  placeholder="0"
+                                  className={`flex-1 text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                                />
+                                <select
+                                  value={current?.valueUnit ?? attr.attribute_unit_list[0]}
+                                  onChange={e => setAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_id]: {
+                                      valueId: 0,
+                                      originalValue: prev[attr.attribute_id]?.originalValue ?? "",
+                                      valueUnit: e.target.value,
+                                    },
+                                  }))}
+                                  className={`text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
+                                >
+                                  {attr.attribute_unit_list.map(u => (
+                                    <option key={u} value={u}>{u}</option>
+                                  ))}
+                                </select>
+                              </div>
                             ) : attr.input_type === "INT_TYPE" ? (
                               <input
                                 type="number"
