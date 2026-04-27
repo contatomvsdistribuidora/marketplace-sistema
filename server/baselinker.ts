@@ -571,6 +571,27 @@ export async function startProductSync(
           const imageEntries = Object.values(product.images || {}) as string[];
           const imageUrl = imageEntries.length > 0 ? imageEntries[0] : "";
 
+          // Vídeos do BaseLinker (Fase G)
+          // extra_field_101404: vídeo arquivo {title, url} — apto Shopee
+          // extra_field_97122: vídeo URL externa — não vai pra Shopee, só referência
+          const videoFile = product.text_fields?.extra_field_101404;
+          const videoFileObj = (videoFile && typeof videoFile === "object" && !Array.isArray(videoFile))
+            ? videoFile as { title?: string; url?: string }
+            : null;
+          const videoUrl = videoFileObj?.url ? String(videoFileObj.url).substring(0, 1024) : null;
+          const videoTitle = videoFileObj?.title ? String(videoFileObj.title).substring(0, 256) : null;
+
+          const videoLink = product.text_fields?.extra_field_97122;
+          let videoLinkUrl: string | null = null;
+          if (videoLink && typeof videoLink === "object" && !Array.isArray(videoLink)) {
+            // Caso futuro: {url, title} igual o 101404
+            const linkObj = videoLink as { url?: string };
+            if (linkObj.url) videoLinkUrl = String(linkObj.url).substring(0, 1024);
+          } else if (typeof videoLink === "string" && videoLink.length > 0) {
+            // Caso simples: string com URL direta
+            videoLinkUrl = videoLink.substring(0, 1024);
+          }
+
           rows.push({
             userId,
             inventoryId,
@@ -586,6 +607,9 @@ export async function startProductSync(
             tags: tags,
             description: product.text_fields?.description || "",
             imageUrl: (imageUrl || "").substring(0, 1024),
+            videoUrl,
+            videoTitle,
+            videoLinkUrl,
           });
         }
 
