@@ -2,7 +2,24 @@ import sharp from "sharp";
 import { ENV } from "./env";
 import { storagePut } from "../storage";
 
-const MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
+const MODEL_MAP = {
+  "flux-klein-4b": "@cf/black-forest-labs/flux-2-klein-4b",
+  "flux-klein-9b": "@cf/black-forest-labs/flux-2-klein-9b",
+  "flux-dev":      "@cf/black-forest-labs/flux-2-dev",
+} as const;
+
+type ImageModelKey = keyof typeof MODEL_MAP;
+
+function resolveModel(): { slug: string; isDev: boolean } {
+  const key = ENV.imageModel as ImageModelKey;
+  const slug = MODEL_MAP[key];
+  if (!slug) {
+    console.warn(`[imageGeneration] IMAGE_MODEL inválido: "${ENV.imageModel}". Usando flux-klein-4b.`);
+    return { slug: MODEL_MAP["flux-klein-4b"], isDev: false };
+  }
+  return { slug, isDev: key === "flux-dev" };
+}
+
 const MAX_REF_IMAGES = 4;
 const MAX_REF_BYTES = 5 * 1024 * 1024; // 5MB cap antes de resize
 const REF_MAX_DIM = 512; // limite da API
@@ -94,12 +111,16 @@ export async function generateImage(
   form.append("prompt", prompt);
   form.append("width", String(OUTPUT_W));
   form.append("height", String(OUTPUT_H));
+  const { slug, isDev } = resolveModel();
+  if (isDev) {
+    form.append("steps", "25");
+  }
   refBuffers.forEach((buf, i) => {
     const blob = new Blob([new Uint8Array(buf)], { type: "image/jpeg" });
     form.append(`input_image_${i}`, blob, `ref_${i}.jpg`);
   });
 
-  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${MODEL}`;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${slug}`;
   const res = await fetch(url, {
     method: "POST",
     headers: {
