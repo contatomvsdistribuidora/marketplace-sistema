@@ -49,6 +49,7 @@ export type Listing = {
   thumbUrl: string | null;
   videoUrl: string | null;
   videoBankId: number | null;
+  lastError: string | null;
 };
 
 export function itemKey(source: string, sourceId: number | string): string {

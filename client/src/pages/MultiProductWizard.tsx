@@ -126,7 +126,12 @@ export default function MultiProductWizard() {
         {step === "B" && <StepB listing={listing} onChange={invalidate} />}
         {step === "C" && <StepC listing={listing} onChange={invalidate} />}
         {step === "D" && (
-          <StepD listing={listing} items={items} onEditStep={(s) => setStep(s)} />
+          <StepD
+            listing={listing}
+            items={items}
+            onEditStep={(s) => setStep(s)}
+            onChange={invalidate}
+          />
         )}
       </div>
 

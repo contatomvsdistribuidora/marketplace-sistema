@@ -19,6 +19,7 @@ import * as shopeeExport from "./shopee-export";
 import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
 import * as multiProductAi from "./multi-product-ai";
+import * as multiProductPublish from "./multi-product-publish";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
 import {
   multiProductListings,
@@ -3958,6 +3959,16 @@ export const appRouter = router({
           input.id,
           ctx.user.id,
           input.extraPrompt,
+        );
+        return result;
+      }),
+
+    publishToShopee: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await multiProductPublish.publishMultiProductListing(
+          input.id,
+          ctx.user.id,
         );
         return result;
       }),
