@@ -47,6 +47,11 @@ function InfoField({
   );
 }
 
+function formatCurrencyBRL(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(Number(n))) return "—";
+  return Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 function formatDateTime(d: Date | string | null | undefined): string {
   if (!d) return "—";
   try {
@@ -138,6 +143,85 @@ export default function ProductDetail() {
   const description =
     fullProduct?.text_fields?.description || cached?.description || "";
 
+  // ============ Live derived state (BL ao vivo, com fallback pro cache) ============
+
+  const liveStock = useMemo(() => {
+    if (fullProduct?.stock && typeof fullProduct.stock === "object") {
+      return Object.values(fullProduct.stock).reduce(
+        (s: number, v: any) => s + (Number(v) || 0),
+        0,
+      );
+    }
+    return cached?.totalStock ?? 0;
+  }, [fullProduct, cached]);
+
+  const livePrice = useMemo(() => {
+    if (fullProduct?.prices && typeof fullProduct.prices === "object") {
+      const vals = Object.values(fullProduct.prices) as number[];
+      if (vals.length > 0) return Number(vals[0]);
+    }
+    return cached?.mainPrice ? Number(cached.mainPrice) : 0;
+  }, [fullProduct, cached]);
+
+  const priceGroupCount = useMemo(() => {
+    if (fullProduct?.prices && typeof fullProduct.prices === "object") {
+      return Object.keys(fullProduct.prices).length;
+    }
+    return 1;
+  }, [fullProduct]);
+
+  const stockWarehouseCount = useMemo(() => {
+    if (fullProduct?.stock && typeof fullProduct.stock === "object") {
+      return Object.keys(fullProduct.stock).length;
+    }
+    return 0;
+  }, [fullProduct]);
+
+  const liveDimensions = useMemo(() => {
+    const fp = fullProduct as any;
+    const h = fp?.height;
+    const w = fp?.width;
+    const l = fp?.length;
+    if (h || w || l) return `${h ?? "?"} × ${w ?? "?"} × ${l ?? "?"} cm`;
+    return null;
+  }, [fullProduct]);
+
+  const liveManufacturer = useMemo(() => {
+    const name = (fullProduct as any)?.man_name;
+    if (name) return String(name);
+    return cached?.manufacturerId ? `ID: ${cached.manufacturerId}` : "—";
+  }, [fullProduct, cached]);
+
+  const liveVideoFile = useMemo(() => {
+    const ef = fullProduct?.text_fields?.extra_field_101404;
+    if (ef && typeof ef === "object" && !Array.isArray(ef)) {
+      return { url: (ef as any).url ?? null, title: (ef as any).title ?? null };
+    }
+    return null;
+  }, [fullProduct]);
+
+  const liveVideoLink = useMemo(() => {
+    const ef = fullProduct?.text_fields?.extra_field_97122;
+    if (typeof ef === "string") return ef;
+    if (ef && typeof ef === "object" && !Array.isArray(ef)) {
+      return (ef as any).url ?? null;
+    }
+    return null;
+  }, [fullProduct]);
+
+  const extraFields = useMemo(() => {
+    const tf = fullProduct?.text_fields;
+    if (!tf || typeof tf !== "object") return {} as Record<string, any>;
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(tf)) {
+      if (!k.startsWith("extra_field_")) continue;
+      // Vídeos têm bloco dedicado na coluna esquerda — não duplicar aqui.
+      if (k === "extra_field_101404" || k === "extra_field_97122") continue;
+      out[k] = v;
+    }
+    return out;
+  }, [fullProduct]);
+
   function copyToClipboard(text: string, field: string) {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedField(field);
@@ -206,7 +290,12 @@ export default function ProductDetail() {
     );
   }
 
-  const hasVideo = !!(cached.videoUrl || cached.videoLinkUrl);
+  const effectiveVideoUrl = cached.videoUrl ?? liveVideoFile?.url ?? null;
+  const effectiveVideoTitle = cached.videoTitle ?? liveVideoFile?.title ?? null;
+  const effectiveVideoLinkUrl = cached.videoLinkUrl ?? liveVideoLink ?? null;
+  const hasVideo = !!(effectiveVideoUrl || effectiveVideoLinkUrl);
+  const descExtra1 = (fullProduct as any)?.description_extra1 || null;
+  const descExtra2 = (fullProduct as any)?.description_extra2 || null;
 
   return (
     <div className="container mx-auto p-4 lg:p-6 max-w-7xl">
@@ -251,10 +340,20 @@ export default function ProductDetail() {
             {cached.sku && <Badge variant="outline">SKU: {cached.sku}</Badge>}
             {cached.ean && <Badge variant="outline">EAN: {cached.ean}</Badge>}
             <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
-              Preço: R$ {cached.mainPrice.toFixed(2)}
+              Preço: {formatCurrencyBRL(livePrice)}
+              {priceGroupCount > 1 && (
+                <span className="text-[10px] text-muted-foreground ml-1">
+                  +{priceGroupCount - 1} grupos
+                </span>
+              )}
             </Badge>
             <Badge variant="outline" className="border-blue-300 bg-blue-50 text-blue-700">
-              Estoque: {cached.totalStock ?? 0}
+              Estoque: {liveStock} unid
+              {stockWarehouseCount > 1 && (
+                <span className="text-[10px] text-muted-foreground ml-1">
+                  ({stockWarehouseCount} depósitos)
+                </span>
+              )}
             </Badge>
           </div>
         </div>
@@ -337,18 +436,18 @@ export default function ProductDetail() {
                   <Video className="h-4 w-4" />
                   Vídeo do produto
                 </div>
-                {cached.videoUrl && (
+                {effectiveVideoUrl && (
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700 text-xs">
                         ✅ Apto Shopee
                       </Badge>
                       <span className="text-xs text-muted-foreground truncate">
-                        {cached.videoTitle ?? "(sem título)"}
+                        {effectiveVideoTitle ?? "(sem título)"}
                       </span>
                     </div>
                     <a
-                      href={cached.videoUrl}
+                      href={effectiveVideoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs underline text-blue-600 hover:text-blue-800 flex items-center gap-1"
@@ -358,19 +457,19 @@ export default function ProductDetail() {
                     </a>
                   </div>
                 )}
-                {cached.videoLinkUrl && (
+                {effectiveVideoLinkUrl && (
                   <div className="space-y-1">
                     <Badge variant="outline" className="border-blue-300 bg-blue-50 text-blue-700 text-xs">
                       🔗 Link externo
                     </Badge>
                     <a
-                      href={cached.videoLinkUrl}
+                      href={effectiveVideoLinkUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs underline text-blue-600 hover:text-blue-800 flex items-center gap-1 break-all"
                     >
                       <ExternalLink className="h-3 w-3 shrink-0" />
-                      {cached.videoLinkUrl}
+                      {effectiveVideoLinkUrl}
                     </a>
                   </div>
                 )}
@@ -393,7 +492,7 @@ export default function ProductDetail() {
               </TabsTrigger>
               <TabsTrigger value="features" className="gap-1.5">
                 <Tag className="h-3.5 w-3.5" />
-                Atributos ({Object.keys(features).length})
+                Atributos ({Object.keys(features).length + Object.keys(extraFields).length})
               </TabsTrigger>
               <TabsTrigger value="raw" className="gap-1.5">
                 <Code className="h-3.5 w-3.5" />
@@ -421,26 +520,43 @@ export default function ProductDetail() {
                   onCopy={cached.ean ? () => copyToClipboard(cached.ean, "ean") : undefined}
                   copied={copiedField === "ean"}
                 />
-                <InfoField
-                  label="Preço"
-                  value={cached.mainPrice ? `R$ ${cached.mainPrice.toFixed(2)}` : "—"}
-                />
-                <InfoField
-                  label="Estoque"
-                  value={cached.totalStock != null ? String(cached.totalStock) : "—"}
-                />
+                <div className="space-y-0.5">
+                  <div className="text-xs text-muted-foreground">Preço</div>
+                  <div className="text-sm font-medium">
+                    {formatCurrencyBRL(livePrice)}
+                    {priceGroupCount > 1 && (
+                      <span className="text-xs text-muted-foreground ml-1">
+                        +{priceGroupCount - 1} grupos
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-0.5">
+                  <div className="text-xs text-muted-foreground">Estoque</div>
+                  <div className="text-sm font-medium">{liveStock} unidades</div>
+                  {fullProduct?.stock &&
+                    typeof fullProduct.stock === "object" &&
+                    Object.keys(fullProduct.stock).length > 1 && (
+                      <div className="text-[11px] space-y-0.5 mt-1">
+                        {Object.entries(fullProduct.stock).map(([wh, qty]) => (
+                          <div key={wh} className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">Depósito {wh}:</span>
+                            <span>{Number(qty) || 0}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                </div>
                 <InfoField
                   label="Peso"
                   value={cached.weight ? `${cached.weight} kg` : "—"}
                 />
+                <InfoField label="Dimensões" value={liveDimensions ?? "—"} />
                 <InfoField
                   label="Categoria BL"
                   value={cached.categoryId ? String(cached.categoryId) : "—"}
                 />
-                <InfoField
-                  label="Fabricante BL"
-                  value={cached.manufacturerId ? String(cached.manufacturerId) : "—"}
-                />
+                <InfoField label="Fabricante" value={liveManufacturer} />
                 <InfoField
                   label="Cache atualizado"
                   value={formatDateTime(cached.cachedAt)}
@@ -474,22 +590,85 @@ export default function ProductDetail() {
             </TabsContent>
 
             <TabsContent value="features" className="mt-0">
-              {Object.keys(features).length === 0 ? (
-                <div className="text-sm text-muted-foreground py-6 text-center">
-                  {detailsQuery.isLoading
-                    ? "Carregando atributos..."
-                    : "Nenhum atributo cadastrado no BaseLinker."}
-                </div>
-              ) : (
-                <div className="rounded border divide-y">
-                  {Object.entries(features).map(([k, v]) => (
-                    <div key={k} className="flex items-start gap-4 px-4 py-2 text-sm">
-                      <span className="text-muted-foreground min-w-32 shrink-0">{k}</span>
-                      <span className="font-medium flex-1 break-words">{String(v)}</span>
-                    </div>
-                  ))}
+              {detailsQuery.isLoading &&
+                Object.keys(features).length === 0 &&
+                Object.keys(extraFields).length === 0 &&
+                !descExtra1 &&
+                !descExtra2 && (
+                  <div className="text-sm text-muted-foreground py-6 text-center">
+                    Carregando atributos...
+                  </div>
+                )}
+
+              {Object.keys(features).length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium mb-2">Atributos</h3>
+                  <div className="rounded border divide-y">
+                    {Object.entries(features).map(([k, v]) => (
+                      <div key={k} className="flex items-start gap-4 px-4 py-2 text-sm">
+                        <span className="text-muted-foreground min-w-32 shrink-0">{k}</span>
+                        <span className="font-medium flex-1 break-words">{String(v)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
+
+              {Object.keys(extraFields).length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium mb-2">Campos extras (BL)</h3>
+                  <div className="rounded border divide-y">
+                    {Object.entries(extraFields).map(([k, v]) => {
+                      let displayValue: string;
+                      if (v === null || v === undefined) displayValue = "—";
+                      else if (typeof v === "object") displayValue = JSON.stringify(v);
+                      else displayValue = String(v);
+                      return (
+                        <div key={k} className="flex items-start gap-4 px-4 py-2 text-sm">
+                          <span className="text-muted-foreground font-mono text-xs min-w-40 shrink-0">
+                            {k}
+                          </span>
+                          <span className="font-medium flex-1 break-all text-right">
+                            {displayValue}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {(descExtra1 || descExtra2) && (
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Descrições extras</h3>
+                  {descExtra1 && (
+                    <div className="mb-3">
+                      <div className="text-xs text-muted-foreground mb-1">Descrição extra 1</div>
+                      <div className="rounded border p-3 text-sm whitespace-pre-wrap">
+                        {descExtra1}
+                      </div>
+                    </div>
+                  )}
+                  {descExtra2 && (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Descrição extra 2</div>
+                      <div className="rounded border p-3 text-sm whitespace-pre-wrap">
+                        {descExtra2}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!detailsQuery.isLoading &&
+                Object.keys(features).length === 0 &&
+                Object.keys(extraFields).length === 0 &&
+                !descExtra1 &&
+                !descExtra2 && (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    Nenhum atributo encontrado.
+                  </p>
+                )}
             </TabsContent>
 
             <TabsContent value="raw" className="mt-0">
