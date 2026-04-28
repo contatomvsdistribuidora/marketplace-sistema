@@ -391,6 +391,10 @@ export type IndexedProduct = {
   totalStock: number;
   description: string;
   imageUrl: string;
+  videoUrl?: string | null;
+  videoTitle?: string | null;
+  videoLinkUrl?: string | null;
+  cachedAt?: Date;
 };
 
 export type ScanProgress = {
@@ -859,6 +863,10 @@ export async function getProductsByIdsFromCache(
     totalStock: row.totalStock,
     description: row.description || "",
     imageUrl: row.imageUrl || "",
+    videoUrl: row.videoUrl || null,
+    videoTitle: row.videoTitle || null,
+    videoLinkUrl: row.videoLinkUrl || null,
+    cachedAt: row.cachedAt,
   }));
 }
 

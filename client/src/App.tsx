@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import DashboardLayout from "./components/DashboardLayout";
 import Home from "./pages/Home";
 import Products from "./pages/Products";
+import ProductDetail from "./pages/ProductDetail";
 import Marketplaces from "./pages/Marketplaces";
 import Export from "./pages/Export";
 import Logs from "./pages/Logs";
@@ -38,6 +39,7 @@ function DashboardRouter() {
       <Switch>
         <Route path="/" component={Home} />
         <Route path="/products" component={Products} />
+        <Route path="/product" component={ProductDetail} />
         <Route path="/marketplaces" component={Marketplaces} />
         <Route path="/export" component={Export} />
         <Route path="/logs" component={Logs} />

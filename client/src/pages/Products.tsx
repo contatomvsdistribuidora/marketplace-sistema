@@ -16,7 +16,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
-import { ProductDetailModal } from "@/components/ProductDetailModal";
 
 type Filters = {
   tagName?: string;
@@ -271,8 +270,6 @@ export default function ProductsPage() {
   }, [rawProducts, exportStatusFilter, exportMarketplaceFilter, exportListingTypeFilter, exportedSet, exportDetailsMap, exportedDetails]);
 
   const [allFilteredSelected, setAllFilteredSelected] = useState(false);
-  const [detailProduct, setDetailProduct] = useState<any>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
 
   const toggleProduct = (id: string) => {
     setAllFilteredSelected(false);
@@ -826,7 +823,7 @@ export default function ProductsPage() {
                         </TableCell>
                         <TableCell>
                           {product.imageUrl ? (
-                            <img src={product.imageUrl} alt={product.name} className="h-10 w-10 rounded-md object-cover border cursor-pointer hover:ring-2 ring-primary/30 transition" onClick={() => { setDetailProduct(product); setDetailOpen(true); }} />
+                            <img src={product.imageUrl} alt={product.name} className="h-10 w-10 rounded-md object-cover border cursor-pointer hover:ring-2 ring-primary/30 transition" onClick={() => setLocation(`/product?id=${product.id}`)} />
                           ) : (
                             <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center">
                               <Package className="h-4 w-4 text-muted-foreground" />
@@ -837,7 +834,7 @@ export default function ProductsPage() {
                         <TableCell>
                           <button
                             className="text-left hover:underline cursor-pointer"
-                            onClick={() => { setDetailProduct(product); setDetailOpen(true); }}
+                            onClick={() => setLocation(`/product?id=${product.id}`)}
                           >
                             <span className="font-medium max-w-[300px] truncate block" title={product.name}>
                               {product.name || "—"}
@@ -896,7 +893,7 @@ export default function ProductsPage() {
                           })()}
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setDetailProduct(product); setDetailOpen(true); }}>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setLocation(`/product?id=${product.id}`)}>
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
                         </TableCell>
@@ -937,13 +934,6 @@ export default function ProductsPage() {
           )}
         </CardContent>
       </Card>
-      {/* Product Detail Modal */}
-      <ProductDetailModal
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-        product={detailProduct}
-        inventoryId={inventoryId || 0}
-      />
     </div>
   );
 }
