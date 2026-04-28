@@ -27,10 +27,6 @@ export default function MultiProductWizard() {
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [urlSearch]);
 
-  const [step, setStep] = useState<WizardStep>("A");
-  const [combinedOpen, setCombinedOpen] = useState(false);
-  const currentStepIndex = STEPS.findIndex((s) => s.key === step);
-
   const utils = trpc.useUtils();
   const listingQuery = trpc.multiProduct.getMultiProductListing.useQuery(
     { id: listingId! },
@@ -66,6 +62,22 @@ export default function MultiProductWizard() {
 
   const invalidate = () =>
     utils.multiProduct.getMultiProductListing.invalidate({ id: listing.id });
+
+  return <WizardInner listing={listing} items={items} invalidate={invalidate} />;
+}
+
+function WizardInner({
+  listing,
+  items,
+  invalidate,
+}: {
+  listing: Listing;
+  items: ListingItem[];
+  invalidate: () => void;
+}) {
+  const [step, setStep] = useState<WizardStep>("A");
+  const [combinedOpen, setCombinedOpen] = useState(false);
+  const currentStepIndex = STEPS.findIndex((s) => s.key === step);
 
   const { productMap, isResolving } = useResolvedProducts(listing, items);
 
