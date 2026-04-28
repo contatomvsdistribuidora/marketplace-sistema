@@ -124,7 +124,7 @@ export default function MultiProductWizard() {
       {/* Step content */}
       <div className="py-4">
         {step === "A" && <StepA listing={listing} items={items} onChange={invalidate} />}
-        {step === "V2" && <StepV2 listing={listing} onChange={invalidate} />}
+        {step === "V2" && <StepV2 listing={listing} items={items} onChange={invalidate} />}
         {step === "B" && <StepB listing={listing} onChange={invalidate} />}
         {step === "C" && <StepC listing={listing} onChange={invalidate} />}
         {step === "D" && (
