@@ -3947,6 +3947,20 @@ export const appRouter = router({
           ));
         return { description };
       }),
+
+    generateThumbWithAI: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        extraPrompt: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await multiProductAi.generateMultiProductThumb(
+          input.id,
+          ctx.user.id,
+          input.extraPrompt,
+        );
+        return result;
+      }),
   }),
 
   // ============ VIDEO BANK (global) ============

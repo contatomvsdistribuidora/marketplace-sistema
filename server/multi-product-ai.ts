@@ -1,7 +1,8 @@
 import { invokeLLM, type InvokeResult } from "./_core/llm";
 import { loadAiProviderFromDb } from "./lib/ai-provider";
+import { generateImage } from "./_core/imageGeneration";
 import { db as sharedDb } from "./db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   multiProductListings,
   multiProductListingItems,
@@ -270,4 +271,110 @@ ${variationsText}`;
   const description = extractTextFromResponse(response).trim();
   if (!description) throw new Error("IA não retornou descrição.");
   return description;
+}
+
+/**
+ * Gera a thumb (imagem de capa) do anúncio combinado via IA.
+ *
+ * Usa até 4 imagens dos produtos do listing como referência visual:
+ * o principal primeiro, depois os 3 primeiros não-principais. A IA
+ * gera uma imagem 1:1 estilo Shopee Brasil (vibrante, vermelho/laranja/
+ * amarelo) e o resultado é salvo via storagePut, retornando URL pública.
+ *
+ * Auto-aplica em multi_product_listings.thumbUrl + thumbStatus='generated'.
+ */
+export async function generateMultiProductThumb(
+  listingId: number,
+  userId: number,
+  extraPrompt?: string,
+): Promise<{ thumbUrl: string; promptUsed: string }> {
+  const { resolved, principal, category } = await resolveListingContext(listingId, userId);
+
+  // Coleta até 4 imagens de referência: principal primeiro + até 3 outros
+  const others = resolved
+    .filter((r) => !(r.source === principal.source && r.sourceId === principal.sourceId))
+    .slice(0, 3);
+  const refItems = [principal, ...others];
+
+  // resolveListingContext não retorna imageUrl — busca caso a caso aqui.
+  const referenceImages: Array<{ url: string }> = [];
+  for (const item of refItems) {
+    if (item.source === "baselinker") {
+      const [p] = await sharedDb
+        .select({ imageUrl: productCache.imageUrl })
+        .from(productCache)
+        .where(eq(productCache.productId, item.sourceId))
+        .limit(1);
+      if (p?.imageUrl) referenceImages.push({ url: p.imageUrl });
+    } else {
+      const [p] = await sharedDb
+        .select({ imageUrl: shopeeProducts.imageUrl })
+        .from(shopeeProducts)
+        .where(eq(shopeeProducts.itemId, item.sourceId))
+        .limit(1);
+      if (p?.imageUrl) referenceImages.push({ url: p.imageUrl });
+    }
+  }
+
+  const numVariations = resolved.length;
+  const principalName = principal.name;
+  const categoryHint = category ? `\nCategoria: ${category}` : "";
+  const extraInstructions = extraPrompt ? `\n\nINSTRUÇÕES EXTRAS DO USUÁRIO:\n${extraPrompt.trim()}` : "";
+
+  const prompt = `Você está criando uma imagem de capa (thumb) para um anúncio Shopee Brasil que combina múltiplos produtos como variações dentro de uma única listagem.
+
+OBJETIVO:
+Criar uma imagem quadrada (1:1, 800x800 ou 1000x1000 pixels) que mostre os produtos de referência de forma atraente e que aumente o CTR (taxa de cliques) em listagens Shopee Brasil.
+
+ESTILO VISUAL:
+- Formato 1:1 (quadrado), aspecto adequado para listagem Shopee
+- Estilo brilhante e vibrante padrão Shopee Brasil
+- Paleta de cores: branco predominante com destaques em vermelho, laranja, amarelo
+- Fundo limpo: branco, gradient suave, ou colorido vibrante
+- Produtos centralizados e bem visíveis (não cortar, não distorcer formas reais)
+- Iluminação clara e profissional (estilo e-commerce)
+- Composição organizada: dispor produtos em arranjo equilibrado (lado a lado, em grade, ou círculo)
+
+ELEMENTOS GRÁFICOS PERMITIDOS:
+- Texto curto em destaque ("KIT", "${numVariations} EM 1", "PRONTA ENTREGA", número de variações) — tipografia bold sans-serif
+- Selos circulares ou em fita ("OFERTA", "NOVO")
+- Linhas e formas geométricas simples para destacar produtos
+- Use texto com moderação — NUNCA mais que 2-3 palavras na imagem inteira
+
+PROIBIDO:
+- NÃO inventar produtos diferentes dos fornecidos nas imagens de referência
+- NÃO usar texto longo, parágrafos ou descrições completas
+- NÃO usar logotipos de marcas (Shopee, Mercado Livre, etc) — apenas estilo visual genérico
+- NÃO usar elementos que pareçam falsos (selos premium fictícios, certificações inventadas)
+- NÃO adicionar pessoas, mãos, modelos humanos
+- NÃO criar fundos cheios de elementos decorativos que distraiam dos produtos
+
+USO DAS IMAGENS DE REFERÊNCIA:
+As imagens fornecidas são fotos REAIS dos produtos do anúncio. Use-as como referência visual fiel — produtos na thumb final devem corresponder aos da referência (mesma forma, cor, tipo). Você pode estilizar (ângulo, iluminação, fundo, posicionamento), mas não invente produtos novos.
+
+CONTEXTO DO ANÚNCIO:
+Produto Principal: ${principalName}
+Número de variações: ${numVariations}${categoryHint}${extraInstructions}
+
+SAÍDA:
+Uma imagem quadrada de alta qualidade pronta para uso como capa de anúncio Shopee.`;
+
+  const result = await generateImage({
+    prompt,
+    originalImages: referenceImages,
+  });
+
+  if (!result.url) {
+    throw new Error("Geração de thumb falhou — IA não retornou URL.");
+  }
+
+  await sharedDb
+    .update(multiProductListings)
+    .set({ thumbUrl: result.url, thumbStatus: "generated" })
+    .where(and(
+      eq(multiProductListings.id, listingId),
+      eq(multiProductListings.userId, userId),
+    ));
+
+  return { thumbUrl: result.url, promptUsed: prompt };
 }

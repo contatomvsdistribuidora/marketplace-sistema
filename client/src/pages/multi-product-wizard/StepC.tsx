@@ -1,19 +1,21 @@
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
   SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Loader2, Image as ImageIcon, Video, Package } from "lucide-react";
+import { Loader2, Image as ImageIcon, Video, Package, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { type Listing } from "./types";
 
 export function StepC({ listing, onChange }: { listing: Listing; onChange: () => void }) {
+  const [extraPrompt, setExtraPrompt] = useState("");
+
   const { data: invData } = trpc.settings.getInventoryId.useQuery();
   const inventoryId = invData?.inventoryId;
 
@@ -31,6 +33,14 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     onSuccess: () => {
       onChange();
       toast.success("Mídia atualizada.");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const generateThumbMutation = trpc.multiProduct.generateThumbWithAI.useMutation({
+    onSuccess: () => {
+      onChange();
+      toast.success("Thumb gerada com sucesso.");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -106,20 +116,45 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
                 Status: {listing.thumbStatus}
               </Badge>
               <div>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0}>
-                        <Button variant="outline" size="sm" disabled>
-                          Gerar thumb
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>Disponível na Fase F</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={generateThumbMutation.isPending}
+                  onClick={() =>
+                    generateThumbMutation.mutate({
+                      id: listing.id,
+                      extraPrompt: extraPrompt.trim() || undefined,
+                    })
+                  }
+                >
+                  {generateThumbMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Gerando...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      {listing.thumbUrl ? "Regenerar thumb" : "Gerar thumb"}
+                    </>
+                  )}
+                </Button>
               </div>
             </div>
+          </div>
+          <div className="mt-3 space-y-1">
+            <Label htmlFor="extra-prompt" className="text-xs text-muted-foreground">
+              Instruções extras (opcional)
+            </Label>
+            <Textarea
+              id="extra-prompt"
+              rows={2}
+              value={extraPrompt}
+              onChange={(e) => setExtraPrompt(e.target.value)}
+              placeholder='Ex: "use fundo amarelo", "destaque a palavra KIT"'
+              className="text-xs"
+              disabled={generateThumbMutation.isPending}
+            />
           </div>
         </CardContent>
       </Card>
