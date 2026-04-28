@@ -10,6 +10,7 @@ import {
   STEPS, type WizardStep, type Listing, type ListingItem,
 } from "./multi-product-wizard/types";
 import { StepA } from "./multi-product-wizard/StepA";
+import { StepV2 } from "./multi-product-wizard/StepV2";
 import { StepB } from "./multi-product-wizard/StepB";
 import { StepC } from "./multi-product-wizard/StepC";
 import { StepD } from "./multi-product-wizard/StepD";
@@ -123,6 +124,7 @@ export default function MultiProductWizard() {
       {/* Step content */}
       <div className="py-4">
         {step === "A" && <StepA listing={listing} items={items} onChange={invalidate} />}
+        {step === "V2" && <StepV2 listing={listing} onChange={invalidate} />}
         {step === "B" && <StepB listing={listing} onChange={invalidate} />}
         {step === "C" && <StepC listing={listing} onChange={invalidate} />}
         {step === "D" && (
@@ -140,7 +142,7 @@ export default function MultiProductWizard() {
         <Button
           variant="outline"
           onClick={() => {
-            const prev: Record<WizardStep, WizardStep> = { A: "A", B: "A", C: "B", D: "C" };
+            const prev: Record<WizardStep, WizardStep> = { A: "A", V2: "A", B: "V2", C: "B", D: "C" };
             setStep(prev[step]);
           }}
           disabled={step === "A"}
@@ -150,7 +152,7 @@ export default function MultiProductWizard() {
         </Button>
         <Button
           onClick={() => {
-            const next: Record<WizardStep, WizardStep> = { A: "B", B: "C", C: "D", D: "D" };
+            const next: Record<WizardStep, WizardStep> = { A: "V2", V2: "B", B: "C", C: "D", D: "D" };
             setStep(next[step]);
           }}
           disabled={step === "D"}
