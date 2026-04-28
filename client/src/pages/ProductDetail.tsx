@@ -179,12 +179,38 @@ export default function ProductDetail() {
 
   const liveDimensions = useMemo(() => {
     const fp = fullProduct as any;
-    const h = fp?.height;
-    const w = fp?.width;
-    const l = fp?.length;
-    if (h || w || l) return `${h ?? "?"} × ${w ?? "?"} × ${l ?? "?"} cm`;
+    return {
+      height: fp?.height != null ? Number(fp.height) : null,
+      width: fp?.width != null ? Number(fp.width) : null,
+      length: fp?.length != null ? Number(fp.length) : null,
+    };
+  }, [fullProduct]);
+
+  const hasDimensions = useMemo(() => {
+    return !!(liveDimensions.height || liveDimensions.width || liveDimensions.length);
+  }, [liveDimensions]);
+
+  const liveCostPriceFromExtras = useMemo(() => {
+    const tf = fullProduct?.text_fields;
+    if (!tf || typeof tf !== "object") return null;
+    for (const [k, v] of Object.entries(tf)) {
+      const kLower = k.toLowerCase();
+      if (kLower.includes("cost") || kLower.includes("custo")) {
+        const num = Number(v);
+        if (Number.isFinite(num) && num > 0) return num;
+      }
+    }
     return null;
   }, [fullProduct]);
+
+  const liveCostPrice = useMemo(() => {
+    const fp = fullProduct as any;
+    const candidates = [fp?.price_cost, fp?.cost_price, fp?.purchase_price, fp?.price_purchase];
+    for (const c of candidates) {
+      if (c != null && Number.isFinite(Number(c)) && Number(c) > 0) return Number(c);
+    }
+    return liveCostPriceFromExtras;
+  }, [fullProduct, liveCostPriceFromExtras]);
 
   const liveManufacturer = useMemo(() => {
     const name = (fullProduct as any)?.man_name;
@@ -532,6 +558,12 @@ export default function ProductDetail() {
                   </div>
                 </div>
                 <div className="space-y-0.5">
+                  <div className="text-xs text-muted-foreground">Preço de custo</div>
+                  <div className="text-sm font-medium">
+                    {liveCostPrice != null ? formatCurrencyBRL(liveCostPrice) : "—"}
+                  </div>
+                </div>
+                <div className="space-y-0.5">
                   <div className="text-xs text-muted-foreground">Estoque</div>
                   <div className="text-sm font-medium">{liveStock} unidades</div>
                   {fullProduct?.stock &&
@@ -551,7 +583,33 @@ export default function ProductDetail() {
                   label="Peso"
                   value={cached.weight ? `${cached.weight} kg` : "—"}
                 />
-                <InfoField label="Dimensões" value={liveDimensions ?? "—"} />
+                <div className="col-span-2 sm:col-span-3 space-y-1">
+                  <div className="text-xs text-muted-foreground">Dimensões</div>
+                  {hasDimensions ? (
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded border p-2 text-center bg-muted/30">
+                        <div className="text-[10px] text-muted-foreground uppercase">Altura</div>
+                        <div className="text-sm font-medium">
+                          {liveDimensions.height != null ? `${liveDimensions.height} cm` : "—"}
+                        </div>
+                      </div>
+                      <div className="rounded border p-2 text-center bg-muted/30">
+                        <div className="text-[10px] text-muted-foreground uppercase">Largura</div>
+                        <div className="text-sm font-medium">
+                          {liveDimensions.width != null ? `${liveDimensions.width} cm` : "—"}
+                        </div>
+                      </div>
+                      <div className="rounded border p-2 text-center bg-muted/30">
+                        <div className="text-[10px] text-muted-foreground uppercase">Comprimento</div>
+                        <div className="text-sm font-medium">
+                          {liveDimensions.length != null ? `${liveDimensions.length} cm` : "—"}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">—</div>
+                  )}
+                </div>
                 <InfoField
                   label="Categoria BL"
                   value={cached.categoryId ? String(cached.categoryId) : "—"}
