@@ -29,7 +29,7 @@ export type GenerateImageResponse = {
   url?: string;
 };
 
-const MODEL_NAME = "gemini-2.5-flash-image-preview";
+const MODEL_NAME = "gemini-2.5-flash-image";
 const MAX_REF_IMAGES = 4;
 const MAX_REF_BYTES = 5 * 1024 * 1024;
 
@@ -100,6 +100,9 @@ export async function generateImage(
   const model = getModel();
   const result = await model.generateContent({
     contents: [{ role: "user", parts }],
+    generationConfig: {
+      responseModalities: ["IMAGE", "TEXT"],
+    },
   } as any);
 
   const candidates: any[] = (result.response as any)?.candidates ?? [];
