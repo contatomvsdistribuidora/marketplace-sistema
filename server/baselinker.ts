@@ -99,11 +99,20 @@ export async function getInventoryProductsList(
   return { products: data.products || {}, total: Object.keys(data.products || {}).length };
 }
 
-export async function getInventoryProductsData(token: string, inventoryId: number, productIds: number[]) {
-  const data = await rateLimitedRequest(token, "getInventoryProductsData", {
+export async function getInventoryProductsData(
+  token: string,
+  inventoryId: number,
+  productIds: number[],
+  options: { includeSuppliers?: boolean } = {},
+) {
+  const params: Record<string, unknown> = {
     inventory_id: inventoryId,
     products: productIds,
-  });
+  };
+  // include_suppliers só vale a pena pra calls single-product (UI de detalhe).
+  // O sync bulk de 148k produtos NÃO passa essa flag pra evitar response inflado.
+  if (options.includeSuppliers) params.include_suppliers = true;
+  const data = await rateLimitedRequest(token, "getInventoryProductsData", params);
   return data.products || {};
 }
 

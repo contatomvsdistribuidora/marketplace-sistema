@@ -305,7 +305,9 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         const token = await db.getSetting(ctx.user.id, "baselinker_token");
         if (!token) throw new Error("Token do BaseLinker não configurado");
-        return baselinker.getInventoryProductsData(token, input.inventoryId, input.productIds);
+        return baselinker.getInventoryProductsData(token, input.inventoryId, input.productIds, {
+          includeSuppliers: true,
+        });
       }),
 
     getExternalStorages: protectedProcedure.query(async ({ ctx }) => {

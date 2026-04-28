@@ -205,7 +205,15 @@ export default function ProductDetail() {
 
   const liveCostPrice = useMemo(() => {
     const fp = fullProduct as any;
-    const candidates = [fp?.price_cost, fp?.cost_price, fp?.purchase_price, fp?.price_purchase];
+    // Prioridade: average_cost (BL doc) > average_landed_cost > variantes legadas
+    const candidates = [
+      fp?.average_cost,
+      fp?.average_landed_cost,
+      fp?.price_cost,
+      fp?.cost_price,
+      fp?.purchase_price,
+      fp?.price_purchase,
+    ];
     for (const c of candidates) {
       if (c != null && Number.isFinite(Number(c)) && Number(c) > 0) return Number(c);
     }
@@ -217,6 +225,59 @@ export default function ProductDetail() {
     if (name) return String(name);
     return cached?.manufacturerId ? `ID: ${cached.manufacturerId}` : "—";
   }, [fullProduct, cached]);
+
+  const liveSuppliers = useMemo(() => {
+    const fp = fullProduct as any;
+    const sup = fp?.suppliers;
+    if (!sup) return [] as Array<{ name: string; code: string; cost: number | null }>;
+    if (Array.isArray(sup)) {
+      return sup
+        .map((s: any) => ({
+          name: String(s?.name ?? s?.supplier_name ?? "—"),
+          code: String(s?.code ?? s?.supplier_code ?? ""),
+          cost: s?.cost != null ? Number(s.cost) : null,
+        }))
+        .filter((s) => s.name !== "—");
+    }
+    return [];
+  }, [fullProduct]);
+
+  // Cache+live fallback nos campos básicos (eliminam assimetria — antes só vinham do cache)
+  const liveName = useMemo(() => {
+    return (fullProduct as any)?.name || cached?.name || "";
+  }, [fullProduct, cached]);
+
+  const liveSku = useMemo(() => {
+    return (fullProduct as any)?.sku || cached?.sku || "";
+  }, [fullProduct, cached]);
+
+  const liveEan = useMemo(() => {
+    return (fullProduct as any)?.ean || cached?.ean || "";
+  }, [fullProduct, cached]);
+
+  const liveWeight = useMemo(() => {
+    const fp = fullProduct as any;
+    if (fp?.weight != null) return Number(fp.weight);
+    if (cached?.weight) return Number(cached.weight);
+    return null;
+  }, [fullProduct, cached]);
+
+  const liveCategoryId = useMemo(() => {
+    return (fullProduct as any)?.category_id || cached?.categoryId || null;
+  }, [fullProduct, cached]);
+
+  const liveTags = useMemo(() => {
+    const fp = fullProduct as any;
+    if (Array.isArray(fp?.tags)) return fp.tags as string[];
+    if (Array.isArray(cached?.tags)) return cached!.tags as string[];
+    return [];
+  }, [fullProduct, cached]);
+
+  const liveTaxRate = useMemo(() => {
+    const tr = (fullProduct as any)?.tax_rate;
+    if (tr != null && Number.isFinite(Number(tr))) return Number(tr);
+    return null;
+  }, [fullProduct]);
 
   const liveVideoFile = useMemo(() => {
     const ef = fullProduct?.text_fields?.extra_field_101404;
@@ -344,7 +405,7 @@ export default function ProductDetail() {
               <BreadcrumbSeparator />
               <BreadcrumbItem>
                 <BreadcrumbPage className="line-clamp-1 max-w-md">
-                  {cached.name || `(produto ${productId})`}
+                  {liveName || `(produto ${productId})`}
                 </BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
@@ -360,11 +421,11 @@ export default function ProductDetail() {
         </div>
 
         <div className="space-y-1">
-          <h1 className="text-xl font-bold line-clamp-2">{cached.name}</h1>
+          <h1 className="text-xl font-bold line-clamp-2">{liveName}</h1>
           <div className="flex flex-wrap gap-2 text-xs">
             <Badge variant="outline">ID: {String(productId)}</Badge>
-            {cached.sku && <Badge variant="outline">SKU: {cached.sku}</Badge>}
-            {cached.ean && <Badge variant="outline">EAN: {cached.ean}</Badge>}
+            {liveSku && <Badge variant="outline">SKU: {liveSku}</Badge>}
+            {liveEan && <Badge variant="outline">EAN: {liveEan}</Badge>}
             <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
               Preço: {formatCurrencyBRL(livePrice)}
               {priceGroupCount > 1 && (
@@ -397,7 +458,7 @@ export default function ProductDetail() {
                 <>
                   <img
                     src={allImages[selectedImageIndex]}
-                    alt={cached.name}
+                    alt={liveName}
                     className="w-full h-full object-contain p-2"
                   />
                   {allImages.length > 1 && (
@@ -536,14 +597,14 @@ export default function ProductDetail() {
                 />
                 <InfoField
                   label="SKU"
-                  value={cached.sku || "—"}
-                  onCopy={cached.sku ? () => copyToClipboard(cached.sku, "sku") : undefined}
+                  value={liveSku || "—"}
+                  onCopy={liveSku ? () => copyToClipboard(liveSku, "sku") : undefined}
                   copied={copiedField === "sku"}
                 />
                 <InfoField
                   label="EAN"
-                  value={cached.ean || "—"}
-                  onCopy={cached.ean ? () => copyToClipboard(cached.ean, "ean") : undefined}
+                  value={liveEan || "—"}
+                  onCopy={liveEan ? () => copyToClipboard(liveEan, "ean") : undefined}
                   copied={copiedField === "ean"}
                 />
                 <div className="space-y-0.5">
@@ -581,7 +642,11 @@ export default function ProductDetail() {
                 </div>
                 <InfoField
                   label="Peso"
-                  value={cached.weight ? `${cached.weight} kg` : "—"}
+                  value={liveWeight != null ? `${liveWeight} kg` : "—"}
+                />
+                <InfoField
+                  label="Taxa de imposto"
+                  value={liveTaxRate != null ? `${liveTaxRate}%` : "—"}
                 />
                 <div className="col-span-2 sm:col-span-3 space-y-1">
                   <div className="text-xs text-muted-foreground">Dimensões</div>
@@ -612,7 +677,7 @@ export default function ProductDetail() {
                 </div>
                 <InfoField
                   label="Categoria BL"
-                  value={cached.categoryId ? String(cached.categoryId) : "—"}
+                  value={liveCategoryId ? String(liveCategoryId) : "—"}
                 />
                 <InfoField label="Fabricante" value={liveManufacturer} />
                 <InfoField
@@ -621,11 +686,37 @@ export default function ProductDetail() {
                 />
               </div>
 
-              {cached.tags && cached.tags.length > 0 && (
+              {liveSuppliers.length > 0 && (
+                <div className="col-span-2 sm:col-span-3 space-y-1">
+                  <div className="text-xs text-muted-foreground">Fornecedores</div>
+                  <div className="space-y-1">
+                    {liveSuppliers.map((s, idx) => (
+                      <div
+                        key={idx}
+                        className="rounded border p-2 text-sm flex items-center justify-between gap-3"
+                      >
+                        <div className="flex flex-col">
+                          <span className="font-medium">{s.name}</span>
+                          {s.code && (
+                            <span className="text-xs text-muted-foreground">Código: {s.code}</span>
+                          )}
+                        </div>
+                        {s.cost != null && (
+                          <span className="text-sm font-medium text-green-700">
+                            {formatCurrencyBRL(s.cost)}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {liveTags.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-xs text-muted-foreground">Tags</div>
                   <div className="flex flex-wrap gap-1.5">
-                    {cached.tags.map((t) => (
+                    {liveTags.map((t) => (
                       <Badge key={t} variant="secondary" className="text-xs">
                         {t}
                       </Badge>
