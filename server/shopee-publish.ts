@@ -565,6 +565,12 @@ export async function createProduct(
 export interface KitVariation {
   name: string; // e.g., "Quantidade"
   options: string[]; // e.g., ["1 Unidade", "Kit 2", "Kit 3"]
+  /**
+   * Imagem por opção (paralelo a `options`). Se presente, len === options.length.
+   * Cada string é um image_id retornado por uploadImageFromUrl. Shopee aceita
+   * `image: { image_id }` dentro de cada `option_list[i]` no init_tier_variation.
+   */
+  optionImageIds?: string[];
   models: Array<{
     tierIndex: number[];
     price: number;
@@ -583,12 +589,27 @@ export async function initTierVariation(
   itemId: number,
   variation: KitVariation
 ): Promise<void> {
+  if (
+    variation.optionImageIds &&
+    variation.optionImageIds.length !== variation.options.length
+  ) {
+    throw new Error(
+      `optionImageIds length (${variation.optionImageIds.length}) mismatch with options (${variation.options.length})`
+    );
+  }
+
   const body = {
     item_id: itemId,
     tier_variation: [
       {
         name: variation.name,
-        option_list: variation.options.map((opt) => ({ option: opt })),
+        option_list: variation.options.map((opt, i) => {
+          const entry: Record<string, any> = { option: opt };
+          if (variation.optionImageIds && variation.optionImageIds[i]) {
+            entry.image = { image_id: variation.optionImageIds[i] };
+          }
+          return entry;
+        }),
       },
     ],
     model: variation.models.map((m) => ({
@@ -743,6 +764,9 @@ export interface PromoteInput {
     price: number;
     stock: number;
     sku?: string;
+    /** Imagem opcional pra esta variação (image_id já uploaded). Vai pra
+     *  option_list[i].image.image_id no payload init_tier_variation. */
+    imageId?: string;
   }>;
 }
 
@@ -798,7 +822,11 @@ export async function promoteSimpleToVariated(
     tier_variation: [
       {
         name: input.variationTypeName,
-        option_list: input.variations.map((v) => ({ option: v.label })),
+        option_list: input.variations.map((v) => {
+          const entry: Record<string, any> = { option: v.label };
+          if (v.imageId) entry.image = { image_id: v.imageId };
+          return entry;
+        }),
       },
     ],
     model: input.variations.map((v, i) => ({
