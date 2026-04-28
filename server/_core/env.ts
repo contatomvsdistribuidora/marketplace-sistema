@@ -23,6 +23,7 @@ export const ENV = {
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   geminiApiKey2: process.env.GEMINI_API_KEY_2 ?? "",
   geminiImageApiKey: process.env.GEMINI_IMAGE_API_KEY ?? "",
+  cloudflareAiApiToken: process.env.CLOUDFLARE_AI_API_TOKEN ?? "",
   r2: {
     accountId: process.env.R2_ACCOUNT_ID ?? "",
     accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
