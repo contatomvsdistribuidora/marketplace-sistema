@@ -10,6 +10,9 @@ import {
   STEPS, type WizardStep, type Listing, type ListingItem,
 } from "./multi-product-wizard/types";
 import { StepA } from "./multi-product-wizard/StepA";
+import { CombinedWizard } from "./multi-product-wizard/CombinedWizard";
+import { useResolvedProducts } from "./multi-product-wizard/useResolvedProducts";
+import { itemKey, type ResolvedProduct } from "./multi-product-wizard/types";
 import { StepB } from "./multi-product-wizard/StepB";
 import { StepC } from "./multi-product-wizard/StepC";
 import { StepD } from "./multi-product-wizard/StepD";
@@ -25,6 +28,7 @@ export default function MultiProductWizard() {
   }, [urlSearch]);
 
   const [step, setStep] = useState<WizardStep>("A");
+  const [combinedOpen, setCombinedOpen] = useState(false);
   const currentStepIndex = STEPS.findIndex((s) => s.key === step);
 
   const utils = trpc.useUtils();
@@ -62,6 +66,20 @@ export default function MultiProductWizard() {
 
   const invalidate = () =>
     utils.multiProduct.getMultiProductListing.invalidate({ id: listing.id });
+
+  const { productMap, isResolving } = useResolvedProducts(listing, items);
+
+  const products: ResolvedProduct[] = items
+    .map(it => productMap.get(itemKey(it.source, Number(it.sourceId))))
+    .filter((p): p is ResolvedProduct => p !== undefined);
+
+  const principalIndex = Math.max(
+    0,
+    items.findIndex(it =>
+      it.source === listing?.mainProductSource &&
+      Number(it.sourceId) === Number(listing?.mainProductSourceId)
+    )
+  );
 
   return (
     <div className="container mx-auto p-4 lg:p-6 max-w-5xl">
@@ -122,7 +140,18 @@ export default function MultiProductWizard() {
 
       {/* Step content */}
       <div className="py-4">
-        {step === "A" && <StepA listing={listing} items={items} onChange={invalidate} />}
+        {step === "A" && (
+          <StepA
+            listing={listing}
+            items={items}
+            onChange={invalidate}
+            onContinue={() => {
+              if (!isResolving && products.length >= 2) {
+                setCombinedOpen(true);
+              }
+            }}
+          />
+        )}
         {step === "B" && <StepB listing={listing} onChange={invalidate} />}
         {step === "C" && <StepC listing={listing} onChange={invalidate} />}
         {step === "D" && (
@@ -159,6 +188,20 @@ export default function MultiProductWizard() {
           <ChevronRight className="h-4 w-4 ml-1" />
         </Button>
       </div>
+
+      {combinedOpen && products.length >= 2 && (
+        <CombinedWizard
+          products={products}
+          multiListingId={listing.id}
+          accountId={listing.shopeeAccountId}
+          principalIndex={principalIndex}
+          onSave={() => {
+            setCombinedOpen(false);
+            invalidate();
+          }}
+          onClose={() => setCombinedOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -30,10 +30,12 @@ export function StepA({
   listing,
   items,
   onChange,
+  onContinue,
 }: {
   listing: Listing;
   items: ListingItem[];
   onChange: () => void;
+  onContinue?: () => void;
 }) {
   const [, setLocation] = useLocation();
   const [editItem, setEditItem] = useState<ListingItem | null>(null);
@@ -305,6 +307,18 @@ export function StepA({
           </div>
         </DialogContent>
       </Dialog>
+
+      {onContinue && items.length >= 2 && (
+        <div className="flex justify-end pt-4 border-t mt-6">
+          <Button
+            onClick={onContinue}
+            size="lg"
+            className="bg-orange-500 hover:bg-orange-600 text-white"
+          >
+            Configurar variações e publicar
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
