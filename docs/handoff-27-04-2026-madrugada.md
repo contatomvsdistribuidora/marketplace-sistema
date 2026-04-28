@@ -224,3 +224,52 @@ Fase A (DDL) commitada e pronta. Fases pendentes:
 - Padrão de schema novo (snake_case no DB, camelCase no export) — alinhado com migrations 0017/0018.
 - FK lógica (sem `references()`) — alinhado com o padrão do projeto (zero FKs físicas).
 - Migration aplicada manualmente via script tsx — alinhado com 0017/0018, evita conflito do `_journal.json` desincronizado.
+
+---
+
+## Sessão estendida — feature multi-produto completa (27/04)
+
+Entrega: feature de anúncio combinado (multi-produto) na Shopee, do início ao fim.
+
+### Commits (12 total no main)
+
+| Fase | Commit | Entrega |
+|------|--------|---------|
+| A | a87660e | DDL: 3 tabelas (multi_product_listings, multi_product_listing_items, video_bank) |
+| B | 71d07a5 | 14 endpoints tRPC (multiProduct.* e videoBank.*) |
+| C | 3049c19 | Tela /multi-product (seleção misturada BL+Shopee) |
+| D | 0c1b9cd | Wizard /multi-product-wizard?id=N (4 steps) |
+| E | 6a14d53 | IA gera título + descrição (prompts dedicados Shopee BR) |
+| F | 1d69570 | IA gera thumb estilo Shopee BR (Forge interno + storagePut) |
+| G.1 | b6ca9ec | DDL cache vídeos no productCache |
+| G.fix | 5fe9ef0 | Splitter de migration 0023 |
+| G.2 | 51e4ee9 | Sync BL extrai extra_field_101404 e 97122 |
+| G.3 | 87e4378 | Step C lista vídeos do BL |
+| H1.1 | 1507473 | Função publishMultiProductListing + imagem por variação |
+| H1.2 | 1d65f7e | Endpoint publishToShopee + UI Step D |
+
+### Decisões registradas
+
+1. Publicação exige principal=Shopee (BL bloqueado, Estratégia A)
+2. Brand: sempre "No Brand" (brand_id: 0)
+3. SKU por variação: ${listingId}-V${i+1}
+4. Imagem por variação: option_list[i].image (não model[i].image)
+5. Vídeo: Fase H2 futura (doc Shopee só cobre Shopee Video TikTok, não item video)
+6. Stock por variação: do produto-fonte (productCache.totalStock ou shopeeProducts.stock)
+
+### Pendências críticas pra produção
+
+1. Forçar sync completo em /products (sem isso, Step C mostra lista vazia)
+2. Testar fluxo end-to-end (criar listing real, gerar IA, publicar)
+
+### Pendências antigas — não tocadas
+
+- Connection leak em background-worker
+- Shipping API SIZE_INPUT bloqueado
+- Reset MySQL password
+- Bugs do screenshot inicial
+
+### Migration 0023
+
+Aplicada em produção (Railway MySQL 9.4.0). 3 colunas em product_cache:
+videoUrl, videoTitle, videoLinkUrl. 148k produtos precisam de re-sync pra popular.
