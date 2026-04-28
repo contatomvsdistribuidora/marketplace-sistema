@@ -15,6 +15,15 @@ import {
 } from "../components/shopee/FiltersPanel";
 import { BrandPicker, type BrandValue } from "../components/shopee/BrandPicker";
 import {
+  shopeeCommission,
+  shopeeCommissionLabel,
+  solvePriceByMargin,
+  solvePriceByMinProfit,
+  extractQty,
+} from "@/lib/shopee-pricing";
+import { GradeBadge, ScoreBar } from "@/components/shopee/atoms/QualityIndicators";
+import { InfoBox } from "@/components/shopee/atoms/InfoBox";
+import {
   Package, ChevronRight, Star, Loader2,
   Plus, Trash2, Sparkles, Hash, Ruler, Layers,
   Palette, PenLine, ArrowLeft, ArrowRight, Check,
@@ -406,31 +415,6 @@ export default function ShopeeCriador() {
 }
 
 // ─── Tela 2 – Detalhe do produto ──────────────────────────────────────────────
-
-function GradeBadge({ grade }: { grade: string }) {
-  const colors: Record<string, string> = {
-    A: "bg-green-100 text-green-700 border-green-300",
-    B: "bg-blue-100 text-blue-700 border-blue-300",
-    C: "bg-yellow-100 text-yellow-700 border-yellow-300",
-    D: "bg-orange-100 text-orange-700 border-orange-300",
-    F: "bg-red-100 text-red-700 border-red-300",
-  };
-  return (
-    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full border-2 text-xs font-bold ${colors[grade] ?? colors.F}`}>
-      {grade}
-    </span>
-  );
-}
-
-function ScoreBar({ score, max }: { score: number; max: number }) {
-  const pct = max > 0 ? Math.round((score / max) * 100) : 0;
-  const color = pct >= 85 ? "bg-green-500" : pct >= 70 ? "bg-blue-500" : pct >= 50 ? "bg-yellow-500" : pct >= 30 ? "bg-orange-500" : "bg-red-500";
-  return (
-    <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1">
-      <div className={`${color} h-1.5 rounded-full transition-all`} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
 
 function ProductDetail({ product, accountId, onBack, showBreadcrumb = false }: { product: any; accountId: number; onBack: () => void; showBreadcrumb?: boolean }) {
   // — existing wizard/publish state —
@@ -1434,69 +1418,6 @@ interface ComputedPricing {
   factor: number;
   effectiveDisc: number;
   minMarginAdjusted: boolean;
-}
-
-function extractQty(label: string): number {
-  const m = label.match(/\d+(\.\d+)?/);
-  return m ? parseFloat(m[0]) : 1;
-}
-
-// Shopee Brazil 2026 commission tiers (taxa % + valor fixo)
-function shopeeCommission(price: number): { rate: number; fixed: number } {
-  if (price <   8) return { rate: 0.50, fixed:  0 };
-  if (price <  80) return { rate: 0.20, fixed:  4 };
-  if (price < 100) return { rate: 0.14, fixed: 16 };
-  if (price < 200) return { rate: 0.14, fixed: 20 };
-  return              { rate: 0.14, fixed: 26 };
-}
-
-function shopeeCommissionLabel(price: number): string {
-  if (price <   8) return "50% + R$0 (< R$8)";
-  if (price <  80) return "20% + R$4 (R$8–79)";
-  if (price < 100) return "14% + R$16 (R$80–99)";
-  if (price < 200) return "14% + R$20 (R$100–199)";
-  return              "14% + R$26 (R$200+)";
-}
-
-// Mode 2: iterate until price converges to hit desired margin %
-function solvePriceByMargin(
-  totalCost: number, packaging: number, shipping: number,
-  txFee: number, desiredMarginPct: number
-): number {
-  if (totalCost <= 0 || desiredMarginPct >= 100) return 0;
-  const margin = desiredMarginPct / 100;
-  const tx = txFee / 100;
-  let price = totalCost * 3;
-  for (let i = 0; i < 80; i++) {
-    const { rate: commission, fixed } = shopeeCommission(price);
-    const denom = 1 - commission - tx - margin;
-    if (denom <= 0) return 0;
-    const next = (totalCost + packaging + shipping + fixed) / denom;
-    if (Math.abs(next - price) < 0.001) return Math.max(next, 0);
-    price = next;
-    if (!isFinite(price)) return 0;
-  }
-  return Math.max(price, 0);
-}
-
-// Mode 3: iterate until price converges to guarantee minProfit R$
-function solvePriceByMinProfit(
-  totalCost: number, packaging: number, shipping: number,
-  txFee: number, minProfit: number
-): number {
-  if (totalCost <= 0) return 0;
-  const tx = txFee / 100;
-  let price = totalCost + minProfit + packaging + shipping;
-  for (let i = 0; i < 80; i++) {
-    const { rate: commission, fixed } = shopeeCommission(price);
-    const denom = 1 - commission - tx;
-    if (denom <= 0) return 0;
-    const next = (totalCost + packaging + shipping + fixed + minProfit) / denom;
-    if (Math.abs(next - price) < 0.001) return Math.max(next, 0);
-    price = next;
-    if (!isFinite(price)) return 0;
-  }
-  return Math.max(price, 0);
 }
 
 function VariationWizard({
@@ -4067,13 +3988,3 @@ function VariationWizard({
   );
 }
 
-// ─── Componente auxiliar ──────────────────────────────────────────────────────
-
-function InfoBox({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-      <p className="text-xs text-gray-400">{label}</p>
-      <p className="text-sm font-medium text-gray-800 mt-0.5">{value}</p>
-    </div>
-  );
-}
