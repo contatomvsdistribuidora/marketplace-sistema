@@ -1,25 +1,16 @@
 import { Badge } from "@/components/ui/badge";
 import { Package, Store } from "lucide-react";
 
-export type WizardStep = "A" | "V2" | "B" | "C" | "D";
+export type WizardStep = "A" | "B" | "C" | "D";
 
 export const STEPS: { key: WizardStep; label: string }[] = [
-  { key: "A",  label: "Produtos" },
-  { key: "V2", label: "Variação 2" },
-  { key: "B",  label: "Conteúdo" },
-  { key: "C",  label: "Mídia" },
-  { key: "D",  label: "Revisão" },
+  { key: "A", label: "Produtos" },
+  { key: "B", label: "Conteúdo" },
+  { key: "C", label: "Mídia" },
+  { key: "D", label: "Revisão" },
 ];
 
 export const TITLE_MAX = 100;
-
-export const VARIATION_TYPES: { key: string; label: string; examples: string }[] = [
-  { key: "quantidade",    label: "Quantidade",    examples: "ex: 50un, 100un, 200un" },
-  { key: "tamanho",       label: "Tamanho",       examples: "ex: P, M, G, GG" },
-  { key: "cor",           label: "Cor",           examples: "ex: Azul, Vermelho, Preto" },
-  { key: "material",      label: "Material",      examples: "ex: Algodão, Poliéster" },
-  { key: "personalizado", label: "Personalizado", examples: "ex: Sabor, Modelo, Estilo" },
-];
 
 export type Source = "baselinker" | "shopee";
 
@@ -62,9 +53,6 @@ export type Listing = {
   thumbUrl: string | null;
   videoUrl: string | null;
   videoBankId: number | null;
-  variation2Type: string | null;
-  variation2OptionsJson: string | null;
-  variation2CellsJson: string | null;
   lastError: string | null;
 };
 
