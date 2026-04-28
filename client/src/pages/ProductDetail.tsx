@@ -95,6 +95,15 @@ export default function ProductDetail() {
     { enabled: !!inventoryId && productId !== null },
   );
 
+  const manufacturersQuery = trpc.baselinker.getManufacturers.useQuery(
+    { inventoryId: inventoryId ?? 0 },
+    {
+      enabled: !!inventoryId,
+      staleTime: 60 * 60 * 1000, // 1h — fabricantes mudam raramente
+      refetchOnWindowFocus: false,
+    },
+  );
+
   const cached = cacheQuery.data?.[0];
   const fullProduct = detailsQuery.data
     ? (Object.values(detailsQuery.data)[0] as any)
@@ -220,11 +229,36 @@ export default function ProductDetail() {
     return liveCostPriceFromExtras;
   }, [fullProduct, liveCostPriceFromExtras]);
 
+  const manufacturerMap = useMemo(() => {
+    const map = new Map<number, string>();
+    const list = (manufacturersQuery.data ?? []) as any[];
+    for (const m of list) {
+      const id = Number(m?.manufacturer_id ?? m?.id);
+      const name = String(m?.name ?? m?.manufacturer_name ?? "");
+      if (id && name) map.set(id, name);
+    }
+    return map;
+  }, [manufacturersQuery.data]);
+
   const liveManufacturer = useMemo(() => {
-    const name = (fullProduct as any)?.man_name;
-    if (name) return String(name);
-    return cached?.manufacturerId ? `ID: ${cached.manufacturerId}` : "—";
-  }, [fullProduct, cached]);
+    // 1. Tenta man_name do live (caso BL popule em outras lojas — confirmado vazio na MVS)
+    const liveName = (fullProduct as any)?.man_name;
+    if (liveName) return String(liveName);
+
+    // 2. Lookup pelo ID via mapa cacheado de getInventoryManufacturers
+    const liveId =
+      (fullProduct as any)?.manufacturer_id ?? cached?.manufacturerId ?? null;
+    if (liveId) {
+      const name = manufacturerMap.get(Number(liveId));
+      if (name) return name;
+      // Mapa ainda carregando — sinaliza
+      if (manufacturersQuery.isLoading) return `Carregando... (ID ${liveId})`;
+      // Mapa carregado mas id não bate — fallback
+      return `ID: ${liveId}`;
+    }
+
+    return "—";
+  }, [fullProduct, cached, manufacturerMap, manufacturersQuery.isLoading]);
 
   const liveSuppliers = useMemo(() => {
     const fp = fullProduct as any;
