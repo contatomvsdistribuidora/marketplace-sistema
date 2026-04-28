@@ -3754,6 +3754,9 @@ export const appRouter = router({
         status: z.enum(["draft", "ready", "publishing", "published", "error"]).optional(),
         mainProductSource: z.enum(["baselinker", "shopee"]).optional(),
         mainProductSourceId: z.number().optional(),
+        variation2Type: z.string().max(32).nullable().optional(),
+        variation2OptionsJson: z.string().nullable().optional(),
+        variation2CellsJson: z.string().nullable().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         // Garante ownership
