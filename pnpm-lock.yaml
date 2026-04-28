@@ -20,7 +20,7 @@ importers:
         specifier: ^0.90.0
         version: 0.90.0(zod@4.1.12)
       '@aws-sdk/client-s3':
-        specifier: ^3.693.0
+        specifier: ^3.907.0
         version: 3.907.0
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.693.0

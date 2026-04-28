@@ -22,6 +22,15 @@ export const ENV = {
   // Google Gemini API
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   geminiApiKey2: process.env.GEMINI_API_KEY_2 ?? "",
+  geminiImageApiKey: process.env.GEMINI_IMAGE_API_KEY ?? "",
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID ?? "",
+    accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
+    bucketName: process.env.R2_BUCKET_NAME ?? "",
+    publicUrl: process.env.R2_PUBLIC_URL ?? "",
+    endpoint: process.env.R2_ENDPOINT ?? "",
+  },
   // Groq
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   // Anthropic Claude
