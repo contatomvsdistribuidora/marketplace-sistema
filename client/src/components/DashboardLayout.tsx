@@ -51,6 +51,7 @@ import {
   Gauge,
   Sparkles,
   PlusCircle,
+  Boxes,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -106,6 +107,7 @@ const menuGroups: MenuGroup[] = [
       { icon: FileSpreadsheet, label: "Planilha", path: "/shopee-spreadsheet" },
       { icon: Sparkles,    label: "Otimizar IA",   path: "/shopee-optimizer" },
       { icon: PlusCircle, label: "Criar Anúncio", path: "/shopee-criador" },
+      { icon: Boxes, label: "Anúncios Combinados", path: "/multi-product" },
     ],
   },
   {
