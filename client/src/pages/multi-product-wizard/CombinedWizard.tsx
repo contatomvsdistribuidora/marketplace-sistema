@@ -33,23 +33,41 @@ const VARIATION_TYPES: { type: VariationType; label: string; icon: React.ReactNo
   { type: "personalizado", label: "Personalizado", icon: <PenLine className="w-5 h-5" />, examples: "Campo livre" },
 ];
 
+import type { ResolvedProduct } from "./types";
+
 export function CombinedWizard({
-  product,
+  products,
+  multiListingId,
   accountId,
+  principalIndex = 0,
   onSave,
   onClose,
-  createNewMode = false,
 }: {
-  product: any;
+  products: ResolvedProduct[];
+  multiListingId: number;
   accountId: number;
+  principalIndex?: number;
   onSave: (group: VariationGroup) => void;
   onClose: () => void;
-  /** When true, the wizard's final publish call uses publishAsNewProduct
-   *  (which preserves the old itemId in shopeeItemIdLegacy). Used when the
-   *  source product already has variations on Shopee and the user picked
-   *  "Criar como novo produto" on the main product screen. */
-  createNewMode?: boolean;
 }) {
+  // ============================================================
+  // Helpers do produto principal (modo combinado)
+  // ============================================================
+  const principalProduct = products[principalIndex] ?? products[0];
+  const productIds = products.map(p => `${p.source}:${p.sourceId}`);
+
+  const getBaseName = () => principalProduct?.name ?? "";
+  const getBaseSku = () => principalProduct?.sku ?? "";
+  const getBaseWeight = () => principalProduct?.weight ?? "";
+  const getBaseLength = () => principalProduct?.dimensionLength ?? "";
+  const getBaseWidth = () => principalProduct?.dimensionWidth ?? "";
+  const getBaseHeight = () => principalProduct?.dimensionHeight ?? "";
+
+  // No modo combinado, sempre cria novo produto
+  const createNewMode = true;
+
+  // ============================================================
+
   const [step, setStep]                   = useState<WizardStep>("A");
   const [selectedType, setSelectedType]   = useState<VariationType | null>(null);
   const [optionLabels, setOptionLabels]   = useState<string[]>([""]);
@@ -106,12 +124,12 @@ export function CombinedWizard({
   // Categoria efetiva: começa do produto e fica editável no fluxo CREATE.
   // Em UPDATE/PROMOTE a Shopee bloqueia mudança (CATEGORY_CHANGED), então o
   // picker aparece desabilitado com tooltip explicativo.
-  const initialCategoryId = product.categoryId ? Number(product.categoryId) : null;
+  const initialCategoryId = null; // modo combinado: operador escolhe categoria
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(initialCategoryId);
-  // product.categoryName é o nome da folha (sem hierarquia) ou null pra
+  // categoryName é o nome da folha (sem hierarquia) ou null pra
   // produtos sincronizados antes do cache de árvore. Resolvemos o
   // breadcrumb completo via tRPC abaixo quando há ID mas falta breadcrumb.
-  const [selectedCategoryBreadcrumb, setSelectedCategoryBreadcrumb] = useState<string>(product.categoryName || "");
+  const [selectedCategoryBreadcrumb, setSelectedCategoryBreadcrumb] = useState<string>("");
   const { data: resolvedBreadcrumb } = trpc.shopee.resolveCategoryBreadcrumb.useQuery(
     { accountId, categoryId: selectedCategoryId! },
     {
@@ -133,8 +151,8 @@ export function CombinedWizard({
   // "Criar novo" in the decision modal, overrideMode="create" also makes
   // this a CREATE — category becomes editable in both cases.
   const { data: publishModeData } = trpc.shopee.getPublishMode.useQuery(
-    { productId: product.id },
-    { staleTime: 60_000 },
+    { productId: 0 },
+    { enabled: false, staleTime: 60_000 },
   );
   // Pre-flight: does the Shopee listing already carry tier_variation? If so,
   // we lack a UI for editing existing variations (init_tier_variation rejects
@@ -142,8 +160,8 @@ export function CombinedWizard({
   // show a banner directing the user to the Shopee seller dashboard.
   const { data: existingVariation, isLoading: variationCheckLoading } =
     trpc.shopee.checkExistingVariation.useQuery(
-      { productId: product.id },
-      { staleTime: 30_000 },
+      { productId: 0 },
+      { enabled: false, staleTime: 30_000 },
     );
   // hasExistingVariation bloqueia o botão Publicar do wizard SOMENTE quando
   // o usuário NÃO escolheu o modo "createNew" — nesse modo é exatamente o
@@ -256,10 +274,10 @@ export function CombinedWizard({
     const profitPct       = price > 0 ? (marginContribution / price) * 100 : 0;
 
     // Dimensions
-    const baseL         = parseFloat(baseLengthOverride || product.dimensionLength) || 0;
-    const baseW         = parseFloat(baseWidthOverride  || product.dimensionWidth)  || 0;
-    const baseH         = parseFloat(baseHeightOverride || product.dimensionHeight) || 0;
-    const baseWeight    = parseFloat(baseWeightOverride || product.weight)          || 0;
+    const baseL         = parseFloat(baseLengthOverride || getBaseLength()) || 0;
+    const baseW         = parseFloat(baseWidthOverride  || getBaseWidth())  || 0;
+    const baseH         = parseFloat(baseHeightOverride || getBaseHeight()) || 0;
+    const baseWeight    = parseFloat(baseWeightOverride || getBaseWeight())          || 0;
     const baseProductQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
     const dimRatio      = isQty ? qty / baseProductQty : 1;
     const scaleF        = Math.cbrt(dimRatio);
@@ -387,8 +405,8 @@ export function CombinedWizard({
 
   async function suggestWithAI() {
     try {
-      const result = await optimizeMutation.mutateAsync({ productId: product.id });
-      setAiSuggestions(result.keywords?.slice(0, 5) ?? []);
+      // No modo combinado, sem product.id unico — pular sugestao IA
+      setAiSuggestions([]);
     } catch { setAiSuggestions([]); }
   }
 
@@ -404,7 +422,7 @@ export function CombinedWizard({
   function goBtoC() {
     const filled = optionLabels.filter(l => l.trim() !== "");
     if (filled.length === 0) return;
-    const baseName = product.itemName || "produto";
+    const baseName = getBaseName() || "produto";
     const transformed = selectedType === "quantidade"
       ? filled.map(l => {
           const n = parseFloat(l);
@@ -434,10 +452,10 @@ export function CombinedWizard({
       const isQty = selectedType === "quantidade";
       const qty = isQty ? extractQty(o.label) : 1;
       const baseProductQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
-      const baseWeight = parseFloat(baseWeightOverride || product.weight) || 0.5;
-      const baseL = parseFloat(baseLengthOverride || product.dimensionLength) || 20;
-      const baseW = parseFloat(baseWidthOverride  || product.dimensionWidth)  || 15;
-      const baseH = parseFloat(baseHeightOverride || product.dimensionHeight) || 10;
+      const baseWeight = parseFloat(baseWeightOverride || getBaseWeight()) || 0.5;
+      const baseL = parseFloat(baseLengthOverride || getBaseLength()) || 20;
+      const baseW = parseFloat(baseWidthOverride  || getBaseWidth())  || 15;
+      const baseH = parseFloat(baseHeightOverride || getBaseHeight()) || 10;
       const ratio = isQty ? qty / baseProductQty : 1;
       const scale = Math.cbrt(ratio);
       return {
@@ -508,8 +526,8 @@ export function CombinedWizard({
       });
 
       const result = await generateAllMutation.mutateAsync({
-        productName: product.itemName || "Produto",
-        category: product.categoryName ?? undefined,
+        productName: getBaseName() || "Produto",
+        category: selectedCategoryBreadcrumb || undefined,
         // Marca escolhida no BrandPicker (Etapa 3). brandId=0 com nome "No Brand"
         // significa "Sem marca" — não passa nada pra IA pra evitar alucinação.
         brand:
@@ -588,8 +606,8 @@ export function CombinedWizard({
         };
       });
       const result = await generateAdMutation.mutateAsync({
-        productName: product.itemName || "Produto",
-        category: product.categoryName ?? undefined,
+        productName: getBaseName() || "Produto",
+        category: selectedCategoryBreadcrumb || undefined,
         variationType: typeName,
         variations,
       });
@@ -687,8 +705,8 @@ export function CombinedWizard({
     const validOpts = opts.filter(v => v.price > 0);
     if (validOpts.length === 0) return;
 
-    const title = selectedTitle || adContent?.titulo_principal || product.itemName || "";
-    const description = editedDesc || adContent?.descricao || product.description || "";
+    const title = selectedTitle || adContent?.titulo_principal || getBaseName() || "";
+    const description = editedDesc || adContent?.descricao || "";
     const hashtags: string[] = adContent?.hashtags ?? [];
 
     // Build attribute_list from Ficha Técnica values. attribute_id<=0 é o
@@ -733,7 +751,7 @@ export function CombinedWizard({
     try {
       const commonPayload = {
         accountId,
-        sourceProductId: product.id,
+        sourceProductId: products[principalIndex]?.sourceId ?? 0,
         variationTypeName: typeName,
         variations: validOpts,
         title,
@@ -845,10 +863,10 @@ export function CombinedWizard({
       }>;
       const suggestions = await fillAttrsMutation.mutateAsync({
         product: {
-          name: product.itemName || "",
-          description: (product.description || "").slice(0, 2000),
+          name: getBaseName() || "",
+          description: "",
           features: {},
-          category: product.categoryName || "",
+          category: selectedCategoryBreadcrumb || "",
         },
         // Pula o BRAND sintético: marca é controlada pelo BrandPicker
         // dedicado, não pelo preenchimento de atributos.
@@ -1062,7 +1080,7 @@ export function CombinedWizard({
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                   <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Produto base cadastrado</p>
                   <p className="text-xs text-blue-500 mb-3">
-                    Quantas unidades o produto "{product.itemName}" representa? Peso e dimensões serão calculados proporcionalmente.
+                    Quantas unidades o produto "{getBaseName()}" representa? Peso e dimensões serão calculados proporcionalmente.
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
@@ -1089,16 +1107,16 @@ export function CombinedWizard({
                       )}
                     </div>
                     <div className="text-xs text-blue-600 space-y-0.5 pt-5">
-                      {product.weight       && <p>Peso base: <b>{product.weight} kg</b></p>}
-                      {product.dimensionLength && <p>Dims: <b>{product.dimensionLength}×{product.dimensionWidth}×{product.dimensionHeight} cm</b></p>}
+                      {getBaseWeight()       && <p>Peso base: <b>{getBaseWeight()} kg</b></p>}
+                      {getBaseLength() && <p>Dims: <b>{getBaseLength()}×{getBaseWidth()}×{getBaseHeight()} cm</b></p>}
                     </div>
                   </div>
                   {(() => {
                     const bq = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
-                    const bw = parseFloat(baseWeightOverride || product.weight) || 0;
-                    const bl = parseFloat(baseLengthOverride || product.dimensionLength) || 0;
-                    const bwi = parseFloat(baseWidthOverride  || product.dimensionWidth)  || 0;
-                    const bh = parseFloat(baseHeightOverride  || product.dimensionHeight) || 0;
+                    const bw = parseFloat(baseWeightOverride || getBaseWeight()) || 0;
+                    const bl = parseFloat(baseLengthOverride || getBaseLength()) || 0;
+                    const bwi = parseFloat(baseWidthOverride  || getBaseWidth())  || 0;
+                    const bh = parseFloat(baseHeightOverride  || getBaseHeight()) || 0;
                     const exampleQty = extractQty(optionDetails[0]?.label ?? "") || bq;
                     const ratio = exampleQty / bq;
                     const sc = Math.cbrt(ratio);
@@ -1212,7 +1230,7 @@ export function CombinedWizard({
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Peso (kg)</label>
                       <input type="number" min="0" step="0.001"
-                        placeholder={product.weight || "0.5"}
+                        placeholder={getBaseWeight() || "0.5"}
                         value={baseWeightOverride}
                         onChange={e => setBaseWeightOverride(e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
@@ -1220,7 +1238,7 @@ export function CombinedWizard({
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Comp. (cm)</label>
                       <input type="number" min="0" step="0.1"
-                        placeholder={product.dimensionLength || "20"}
+                        placeholder={getBaseLength() || "20"}
                         value={baseLengthOverride}
                         onChange={e => setBaseLengthOverride(e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
@@ -1228,7 +1246,7 @@ export function CombinedWizard({
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Larg. (cm)</label>
                       <input type="number" min="0" step="0.1"
-                        placeholder={product.dimensionWidth || "15"}
+                        placeholder={getBaseWidth() || "15"}
                         value={baseWidthOverride}
                         onChange={e => setBaseWidthOverride(e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
@@ -1236,7 +1254,7 @@ export function CombinedWizard({
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Alt. (cm)</label>
                       <input type="number" min="0" step="0.1"
-                        placeholder={product.dimensionHeight || "10"}
+                        placeholder={getBaseHeight() || "10"}
                         value={baseHeightOverride}
                         onChange={e => setBaseHeightOverride(e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
@@ -1577,7 +1595,7 @@ export function CombinedWizard({
                           <input
                             type="text"
                             maxLength={64}
-                            placeholder={product.itemSku ? `${product.itemSku}-${idx + 1}` : "Ex: SAC-15L-100"}
+                            placeholder={getBaseSku() ? `${getBaseSku()}-${idx + 1}` : "Ex: SAC-15L-100"}
                             value={opt.sku}
                             onChange={(e) => updateDetail(opt.id, "sku", e.target.value)}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 font-mono"
@@ -2500,7 +2518,7 @@ export function CombinedWizard({
 
             <button
               onClick={() => {
-                setNewItemName(suggestNewName(product.itemName || ""));
+                setNewItemName(suggestNewName(getBaseName() || ""));
                 setShowNameEditor(true);
               }}
               className="w-full text-left border-2 border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded-xl p-4 transition"
