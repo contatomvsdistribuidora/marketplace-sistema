@@ -43,6 +43,10 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
           sku: p.sku ?? "",
           price: String(p.mainPrice ?? "0"),
           imageUrl: p.imageUrl ?? null,
+          weight: p.weight != null ? String(p.weight) : null,
+          dimensionLength: null,
+          dimensionWidth: null,
+          dimensionHeight: null,
         });
       }
     }
@@ -57,6 +61,10 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
           sku: p.itemSku ?? "",
           price: String(p.price ?? "0"),
           imageUrl: p.imageUrl ?? null,
+          weight: p.weight ?? null,
+          dimensionLength: p.dimensionLength ?? null,
+          dimensionWidth: p.dimensionWidth ?? null,
+          dimensionHeight: p.dimensionHeight ?? null,
         });
       }
     }

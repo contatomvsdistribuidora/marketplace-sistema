@@ -30,6 +30,10 @@ export type ResolvedProduct = {
   sku: string;
   price: string;
   imageUrl: string | null;
+  weight: string | null;
+  dimensionLength: string | null;
+  dimensionWidth: string | null;
+  dimensionHeight: string | null;
 };
 
 export type ListingItem = {
