@@ -1823,172 +1823,55 @@ export function CombinedWizard({
             </div>
           )}
 
-          {/* ── ETAPA D – Revisão + Geração IA ── */}
+          {/* ── ETAPA D – Revisão (resumo do anuncio combinado) ── */}
           {step === "D" && (
             <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                📋 Resumo do Anuncio Combinado
+              </h3>
 
-              {/* Banner azul: usuário escolheu "Criar como novo produto"
-                  na tela principal. Suprime o banner âmbar e o read-only
-                  abaixo (não faz sentido mostrar a variação antiga ao
-                  criar item novo). */}
-              {createNewMode && existingVariation?.itemId && (
-                <div className="bg-blue-50 border border-blue-300 rounded-xl p-4 flex gap-3 items-start">
-                  <span className="text-2xl flex-shrink-0">ℹ️</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-blue-900 mb-1">
-                      Você está criando um produto NOVO na Shopee
-                    </p>
-                    <p className="text-xs text-blue-800 leading-relaxed">
-                      O item existente (<span className="font-mono">{existingVariation.itemId}</span>) NÃO será alterado.
-                      Após a publicação, o registro local vai apontar pro novo item, e o id antigo
-                      ficará preservado como <b>legacy</b>.
-                    </p>
-                  </div>
-                </div>
-              )}
+              {/* Resumo das combinacoes 2D */}
+              <div className="border border-gray-200 rounded-xl bg-white p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                  VARIACOES — {products.length} produto{products.length > 1 ? "s" : ""} × varias opcoes = {optionDetailsMatrix.reduce((acc, row) => acc + row.length, 0)} combinacoes
+                </h4>
 
-              {/* Banner: produto já tem variação na Shopee (modo edição não disponível) */}
-              {!createNewMode && hasExistingVariation && existingVariation && (() => {
-                // modelCount agora é authoritative (vem do get_model_list).
-                // Para o headline pegamos o maior entre modelCount e a soma
-                // das opções por tier — defensa contra resposta crua estranha.
-                const tiers = existingVariation.tierVariation ?? [];
-                const optionsSum = tiers.reduce((sum, t) => sum + (t.optionList?.length ?? 0), 0);
-                const displayCount = Math.max(existingVariation.modelCount ?? 0, optionsSum);
-                const firstTierName = tiers[0]?.name || "Variação";
-                return (
-                  <>
-                    <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex gap-3 items-start">
-                      <span className="text-2xl flex-shrink-0">⚠️</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-amber-900 mb-1">
-                          Este produto já tem variação na Shopee
-                        </p>
-                        <p className="text-xs text-amber-800 leading-relaxed">
-                          Variação atual:&nbsp;
-                          <b>{firstTierName}</b>
-                          &nbsp;com&nbsp;
-                          <b>{displayCount} opção(ões)</b>.
-                          O modo de edição de variações existentes ainda não está implementado.
-                          Pra alterar variações deste produto, use o painel oficial da Shopee.
-                        </p>
-                        {existingVariation.itemId && (
-                          <a
-                            href={`https://seller.shopee.com.br/portal/product/${existingVariation.itemId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-700 hover:text-amber-900 underline"
-                          >
-                            Abrir na Shopee →
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    {/* Read-only block com tiers + tabela de models */}
-                    <VariationsReadOnly
-                      itemId={existingVariation.itemId!}
-                      tierVariation={existingVariation.tierVariation ?? []}
-                      models={existingVariation.models ?? []}
-                    />
-                  </>
-                );
-              })()}
-
-              {/* Resumo das variações */}
-              <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
-                    {typeName} · {optionDetails.length} opção(ões)
-                  </p>
-                  <span className="text-xs text-gray-500 bg-white border border-gray-200 rounded px-2 py-0.5">
-                    {pricingMode === "multiplier" ? "Multiplicador" : pricingMode === "margin" ? "Margem %" : "Lucro R$"}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {optionDetails.map((opt, idx) => {
-                    const c = computePricing(opt, idx);
-                    const badge = profitBadge(c.profitPct);
+                <div className="space-y-3">
+                  {optionDetailsMatrix.map((row, productIdx) => {
+                    const product = products[productIdx];
+                    if (!product) return null;
                     return (
-                      <div key={opt.id} className="bg-white rounded-lg border border-orange-100 p-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          {/* Label editável inline */}
-                          <div className="flex-1 min-w-0">
-                            {inlineLabelEdits[opt.id] !== undefined ? (
-                              <div className="flex items-center gap-1">
-                                <span className="text-orange-500 text-sm font-bold flex-shrink-0">{idx + 1}.</span>
-                                <input
-                                  type="text" maxLength={20}
-                                  value={inlineLabelEdits[opt.id]}
-                                  onChange={e => setInlineLabelEdits(p => ({ ...p, [opt.id]: e.target.value.slice(0, 20) }))}
-                                  onBlur={() => {
-                                    const v = inlineLabelEdits[opt.id].trim();
-                                    if (v) setOptionDetails(opts => opts.map(o => o.id === opt.id ? { ...o, label: v } : o));
-                                    setInlineLabelEdits(p => { const n = { ...p }; delete n[opt.id]; return n; });
-                                  }}
-                                  onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                  className="flex-1 min-w-0 text-sm font-semibold text-gray-800 border border-orange-400 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-orange-400"
-                                  autoFocus
-                                />
-                                <span className="text-xs text-gray-400 font-mono">{inlineLabelEdits[opt.id].length}/20</span>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setInlineLabelEdits(p => ({ ...p, [opt.id]: opt.label }))}
-                                className="text-sm font-semibold text-gray-800 hover:text-orange-600 text-left truncate w-full"
-                                title="Clique para editar o nome"
-                              >
-                                <span className="text-orange-500">{idx + 1}.</span> {opt.label}
-                                <span className="ml-1 text-gray-300 text-xs">✏️</span>
-                              </button>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            {c.effectiveDisc > 0 && (
-                              <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-semibold">
-                                -{c.effectiveDisc.toFixed(1)}%
-                              </span>
-                            )}
-                            {hasPricing && (
-                              <>
-                                {inlinePriceEdits[opt.id] !== undefined ? (
-                                  <input
-                                    type="number" min="0" step="0.01"
-                                    value={inlinePriceEdits[opt.id]}
-                                    onChange={e => setInlinePriceEdits(p => ({ ...p, [opt.id]: e.target.value }))}
-                                    onBlur={() => {
-                                      if (!inlinePriceEdits[opt.id]) {
-                                        setInlinePriceEdits(p => { const n = { ...p }; delete n[opt.id]; return n; });
-                                      }
-                                    }}
-                                    className="w-24 px-2 py-1 border border-orange-400 rounded text-sm font-bold text-orange-600 focus:outline-none focus:ring-1 focus:ring-orange-400"
-                                    autoFocus
-                                  />
-                                ) : (
-                                  <button
-                                    onClick={() => setInlinePriceEdits(p => ({ ...p, [opt.id]: c.price.toFixed(2) }))}
-                                    className="text-sm font-bold text-orange-600 hover:underline hover:text-orange-700 transition"
-                                    title="Clique para editar o preço"
-                                  >
-                                    R$ {c.price.toFixed(2)}
-                                  </button>
-                                )}
-                                <span className={`text-xs px-1.5 py-0.5 rounded-full border font-semibold ${badge.bg}`}>{c.profitPct.toFixed(1)}%</span>
-                              </>
-                            )}
-                            <button
-                              onClick={() => removeVariationInReview(opt.id)}
-                              className="text-gray-300 hover:text-red-500 transition"
-                              title="Remover variação"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
+                      <div key={`rev-${productIdx}`} className="border-l-2 border-orange-300 pl-3">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          {product.imageUrl && (
+                            <img src={product.imageUrl} alt={product.name} className="w-8 h-8 rounded object-cover flex-shrink-0" />
+                          )}
+                          <span className="text-sm font-semibold text-gray-800 truncate">{product.name}</span>
                         </div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs text-gray-400">
-                          <span>{opt.weight || c.weight.toFixed(2)} kg</span>
-                          <span>{opt.length || c.length.toFixed(1)}×{opt.width || c.width.toFixed(1)}×{opt.height || c.height.toFixed(1)} cm</span>
-                          {opt.stock && <span>Estoque: {opt.stock}</span>}
-                          {hasPricing && <span className={c.marginContribution >= 0 ? "text-green-600" : "text-red-500"}>Margem: R${c.marginContribution.toFixed(2)}</span>}
+                        <div className="space-y-1 ml-10">
+                          {row.map((opt, idx) => {
+                            const c = computePricing(opt, idx, productIdx);
+                            const pp = pricingPerProduct[productIdx];
+                            const hasPricingForRow = parseFloat(pp?.unitCost ?? "") > 0;
+                            const isNeg = c.marginContribution < 0;
+                            return (
+                              <div key={opt.id} className="flex items-center gap-3 text-xs">
+                                <span className="text-gray-700 font-medium w-16">{opt.label || "—"}</span>
+                                <span className="text-gray-500 w-32 truncate">
+                                  {opt.weight && `${opt.weight}kg `}
+                                  {opt.length && opt.width && opt.height && `${opt.length}×${opt.width}×${opt.height}cm`}
+                                </span>
+                                <span className="text-gray-500 font-mono w-32 truncate">{opt.sku || "—"}</span>
+                                <span className="text-gray-800 font-semibold w-20">R$ {parseFloat(opt.price || c.price.toFixed(2) || "0").toFixed(2)}</span>
+                                <span className="text-gray-500 w-16">Est: {opt.stock || pp?.globalStock || "0"}</span>
+                                {hasPricingForRow && (
+                                  <span className={`font-semibold ${isNeg ? "text-red-600" : "text-green-600"}`}>
+                                    {isNeg ? "PREJ" : `${c.profitPct.toFixed(0)}%`}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -1996,544 +1879,48 @@ export function CombinedWizard({
                 </div>
               </div>
 
-              {/* ── Metadados do anúncio (categoria, marca futura) ──────────── */}
-              {(() => {
-                // CREATE when: product has no item_id OR user picked "Criar novo".
-                const isCreateFlow =
-                  !publishModeData?.itemId || overrideMode === "create";
-                const categoryDisabledReason = !isCreateFlow
-                  ? "Para mudar a categoria, recrie o produto na Shopee (a API bloqueia mudança de categoria em update)."
-                  : undefined;
-                return (
-                  <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50">
-                    <p className="text-sm font-semibold text-gray-700">🏷️ Metadados do anúncio</p>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Categoria Shopee</label>
-                      <CategoryPicker
-                        accountId={accountId}
-                        value={selectedCategoryId}
-                        valueBreadcrumb={selectedCategoryBreadcrumb}
-                        disabled={!isCreateFlow}
-                        disabledReason={categoryDisabledReason}
-                        onChange={(id, crumb) => {
-                          setSelectedCategoryId(id);
-                          setSelectedCategoryBreadcrumb(crumb);
-                        }}
-                      />
-                    </div>
-                    {/* Marca foi removida daqui — vira atributo de categoria
-                        na Etapa 3 (Especificações), seguindo a UX da Shopee. */}
-                  </div>
-                );
-              })()}
+              {/* Categoria */}
+              <div className="border border-gray-200 rounded-xl bg-white p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">🏷️ Categoria Shopee</h4>
+                <p className="text-xs text-gray-600">
+                  {selectedCategoryBreadcrumb || (selectedCategoryId ? `ID: ${selectedCategoryId}` : "Nao selecionada")}
+                </p>
+              </div>
 
-              {/* Ficha Técnica dinâmica */}
-              {categoryId && (
-                <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-700">📋 Ficha Técnica</span>
-                    {selectedCategoryBreadcrumb && (
-                      <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full truncate max-w-[60%]">{selectedCategoryBreadcrumb}</span>
-                    )}
-                    {attrLoading && <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin ml-auto" />}
-                    {attrError && <span className="text-xs text-red-500 ml-auto">Erro ao carregar atributos</span>}
-                  </div>
+              {/* Resumo Ficha Tecnica */}
+              <div className="border border-gray-200 rounded-xl bg-white p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 Ficha Tecnica</h4>
+                <p className="text-xs text-gray-600">
+                  {Object.keys(attributeValues).length > 0
+                    ? `${Object.keys(attributeValues).length} atributo(s) preenchido(s)`
+                    : "Nenhum atributo preenchido"}
+                </p>
+              </div>
 
-                  {!attrLoading && !attrError && categoryAttributes && categoryAttributes.length > 0 && (
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {(categoryAttributes as Array<{
-                        attribute_id: number;
-                        display_attribute_name: string;
-                        is_mandatory: boolean;
-                        input_type: string;
-                        format_type?: number;
-                        attribute_unit_list?: string[];
-                        attribute_value_list: Array<{ value_id: number; display_value_name: string }>;
-                      }>).map(attr => {
-                        const current = attributeValues[attr.attribute_id];
-                        const isEmpty = !current || current.originalValue.trim() === "";
-                        const isMandatory = attr.is_mandatory;
-                        const borderClass = isMandatory && isEmpty ? "border-red-400" : "border-gray-200";
-                        const values: Array<{ value_id: number; display_value_name: string; original_value_name?: string }> =
-                          (attr.attribute_value_list as any) ?? (attr as any).options_list ?? [];
+              {/* Acoes */}
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  onClick={() => setStep("C")}
+                  className="flex items-center gap-2 px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-xl text-sm font-medium transition"
+                >
+                  <ArrowLeft className="w-4 h-4" /> Voltar
+                </button>
 
-                        return (
-                          <div key={attr.attribute_id} className="space-y-1">
-                            <label className="text-xs font-medium text-gray-600">
-                              {attr.display_attribute_name}
-                              {isMandatory && <span className="text-red-500 ml-0.5">*</span>}
-                            </label>
-
-                            {attr.input_type === "BRAND" ? (
-                              <BrandPicker
-                                accountId={accountId}
-                                categoryId={categoryId}
-                                value={brandValue}
-                                onChange={setBrandValue}
-                              />
-                            ) : attr.input_type === "DROP_DOWN" ? (
-                              <select
-                                value={current?.valueId ?? ""}
-                                onChange={e => {
-                                  const opt = values.find(o => o.value_id === Number(e.target.value));
-                                  if (opt) {
-                                    setAttributeValues(prev => ({
-                                      ...prev,
-                                      [attr.attribute_id]: { valueId: opt.value_id, originalValue: opt.display_value_name },
-                                    }));
-                                  } else {
-                                    setAttributeValues(prev => {
-                                      const next = { ...prev };
-                                      delete next[attr.attribute_id];
-                                      return next;
-                                    });
-                                  }
-                                }}
-                                className={`w-full text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
-                              >
-                                <option value="">Selecionar…</option>
-                                {values.map(opt => (
-                                  <option key={opt.value_id} value={opt.value_id}>{opt.display_value_name}</option>
-                                ))}
-                              </select>
-                            ) : (attr.format_type === 2 && Array.isArray(attr.attribute_unit_list) && attr.attribute_unit_list.length > 0) ? (
-                              // QUANTITATIVE_WITH_UNIT: número + select de unidade.
-                              // Espelha o Bloco 1 (etapa Detalhes) — Shopee exige
-                              // value_unit no payload (ex: "60" + "cm").
-                              <div className="flex gap-1.5">
-                                <input type="number" step="any"
-                                  value={current?.originalValue ?? ""}
-                                  onChange={e => setAttributeValues(prev => ({
-                                    ...prev,
-                                    [attr.attribute_id]: {
-                                      valueId: 0,
-                                      originalValue: e.target.value,
-                                      valueUnit: prev[attr.attribute_id]?.valueUnit ?? attr.attribute_unit_list![0],
-                                    },
-                                  }))}
-                                  placeholder="0"
-                                  className={`flex-1 text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
-                                />
-                                <select
-                                  value={current?.valueUnit ?? attr.attribute_unit_list[0]}
-                                  onChange={e => setAttributeValues(prev => ({
-                                    ...prev,
-                                    [attr.attribute_id]: {
-                                      valueId: 0,
-                                      originalValue: prev[attr.attribute_id]?.originalValue ?? "",
-                                      valueUnit: e.target.value,
-                                    },
-                                  }))}
-                                  className={`text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
-                                >
-                                  {attr.attribute_unit_list.map(u => (
-                                    <option key={u} value={u}>{u}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            ) : attr.input_type === "INT_TYPE" ? (
-                              <input
-                                type="number"
-                                step={1}
-                                value={current?.originalValue ?? ""}
-                                onChange={e => setAttributeValues(prev => ({
-                                  ...prev,
-                                  [attr.attribute_id]: { valueId: 0, originalValue: e.target.value },
-                                }))}
-                                placeholder="0"
-                                className={`w-full text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
-                              />
-                            ) : attr.input_type === "FLOAT_TYPE" ? (
-                              <input
-                                type="number"
-                                step={0.01}
-                                value={current?.originalValue ?? ""}
-                                onChange={e => setAttributeValues(prev => ({
-                                  ...prev,
-                                  [attr.attribute_id]: { valueId: 0, originalValue: e.target.value },
-                                }))}
-                                placeholder="0.00"
-                                className={`w-full text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
-                              />
-                            ) : (
-                              /* TEXT_FIELD, COMBO_BOX, and anything else */
-                              <input
-                                type="text"
-                                value={current?.originalValue ?? ""}
-                                onChange={e => setAttributeValues(prev => ({
-                                  ...prev,
-                                  [attr.attribute_id]: { valueId: 0, originalValue: e.target.value },
-                                }))}
-                                placeholder="Digitar…"
-                                className={`w-full text-xs rounded-lg border ${borderClass} bg-white px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-orange-400`}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {!attrLoading && !attrError && (!categoryAttributes || categoryAttributes.length === 0) && (
-                    <p className="text-xs text-gray-400">Nenhum atributo disponível para esta categoria.</p>
-                  )}
-                </div>
-              )}
-
-              {/* Botões de geração IA */}
-              {!adContent && adLoadingSection === null && (() => {
-                // "Variações preenchidas" = all local options have a label
-                // AND at least one option exists. This gates the main button.
-                const variationsReady =
-                  optionDetails.length >= 1 &&
-                  optionDetails.every((o) => o.label.trim().length > 0);
-                return (
-                <div className="space-y-2">
-                  {/* Botão principal — gera título + descrição + nomes das variações em 1 chamada */}
-                  <button
-                    onClick={handleGenerateAll}
-                    disabled={!variationsReady}
-                    title={variationsReady ? "" : "Preencha as variações primeiro"}
-                    className="w-full flex items-center justify-center gap-3 py-4 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white font-bold text-base transition shadow-lg shadow-orange-200 disabled:shadow-none">
-                    <Sparkles className="w-5 h-5" /> ✨ Gerar tudo com IA
-                  </button>
-                  {/* Botões individuais — caso o usuário queira regerar só 1 seção */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { key: "title" as const, label: "✨ Gerar Título" },
-                      { key: "desc"  as const, label: "✨ Gerar Descrição" },
-                      { key: "tags"  as const, label: "✨ Gerar Tags" },
-                    ].map(b => (
-                      <button key={b.key} onClick={() => generateAdSection(b.key)}
-                        className="flex items-center justify-center gap-1 py-2 rounded-xl border border-orange-300 text-orange-600 bg-orange-50 hover:bg-orange-100 text-xs font-semibold transition">
-                        {b.label}
-                      </button>
-                    ))}
-                  </div>
-                  {/* Publicar sem IA */}
-                  <button
-                    onClick={() => handlePublishToShopee()}
-                    disabled={publishStatus === "loading" || optionDetails.length === 0 || variationCheckLoading || hasExistingVariation}
-                    title={hasExistingVariation ? "Produto já tem variação na Shopee — edição não disponível ainda." : ""}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition">
-                    {publishStatus === "loading" || variationCheckLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    {publishStatus === "loading"
-                      ? "Publicando..."
-                      : variationCheckLoading
-                      ? "Verificando..."
-                      : hasExistingVariation
-                      ? "Bloqueado (já tem variação)"
-                      : "Publicar sem conteúdo IA"}
-                  </button>
-                  {publishStatus === "success" && publishResult && (
-                    <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
-                      <div className="text-sm text-green-800">
-                        <p className="font-semibold">Produto {publishResult.mode === "promote" ? "promovido" : publishResult.mode === "update" ? "atualizado" : "publicado"} com sucesso!</p>
-                        <a href={publishResult.itemUrl} target="_blank" rel="noopener noreferrer"
-                          className="text-green-700 underline hover:text-green-900 flex items-center gap-1 mt-1">
-                          Ver produto na Shopee <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    </div>
-                  )}
-                  {publishStatus === "error" && (
-                    <div className="bg-red-50 border border-red-300 rounded-xl p-3 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-                      <div className="text-sm text-red-800">
-                        <p className="font-semibold">Erro ao publicar</p>
-                        <p className="mt-0.5 text-red-700">{publishError}</p>
-                        <button onClick={() => setPublishStatus("idle")} className="text-xs text-red-600 underline mt-1">Tentar novamente</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                );
-              })()}
-
-              {/* Loading */}
-              {adLoadingSection === "all" && (
-                <div className="flex flex-col items-center justify-center py-12 gap-4 bg-orange-50 border border-orange-100 rounded-xl">
-                  <Loader2 className="w-10 h-10 text-orange-500 animate-spin" />
-                  <p className="text-sm font-semibold text-orange-700">✨ A IA está criando seu anúncio profissional...</p>
-                  <p className="text-xs text-gray-400">Analisando produto e variações, aguarde alguns segundos</p>
-                </div>
-              )}
-              {adLoadingSection !== null && adLoadingSection !== "all" && (
-                <div className="flex items-center justify-center gap-2 py-3 bg-orange-50 border border-orange-100 rounded-xl text-sm text-orange-700 font-medium">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Gerando {adLoadingSection === "title" ? "título" : adLoadingSection === "desc" ? "descrição" : "tags"}...
-                </div>
-              )}
-
-              {/* Erro */}
-              {generateAdMutation.isError && adLoadingSection === null && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  Erro ao gerar conteúdo. Tente novamente.
-                </div>
-              )}
-
-              {/* Conteúdo gerado */}
-              {adContent && adLoadingSection !== "all" && (
-                <div className="space-y-3">
-
-                  {/* Abas */}
-                  <div className="flex rounded-xl overflow-hidden border border-gray-200 text-xs font-semibold">
-                    {([
-                      { key: "titulo"    as const, label: "📝 Título"     },
-                      { key: "descricao" as const, label: "📄 Descrição"  },
-                      { key: "tags"      as const, label: "🏷️ Tags"       },
-                      { key: "keywords"  as const, label: "🔑 Keywords"   },
-                      { key: "score"     as const, label: "📊 Score"      },
-                    ]).map(t => (
-                      <button key={t.key} onClick={() => setAdTab(t.key)}
-                        className={`flex-1 py-2.5 transition-all ${adTab === t.key ? "bg-orange-500 text-white" : "bg-white text-gray-500 hover:bg-orange-50"}`}>
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* ── ABA TÍTULO ── */}
-                  {adTab === "titulo" && (
-                    <div className="space-y-3">
-                      {[adContent.titulo_principal, ...(adContent.titulos_alternativos ?? [])].map((t: string, i: number) => {
-                        const len = t?.length ?? 0;
-                        const lenColor = len >= 80 && len <= 100 ? "text-green-600" : len < 80 ? "text-yellow-600" : "text-red-600";
-                        const isSelected = selectedTitle === t;
-                        return (
-                          <div key={i} className={`border rounded-xl p-3 transition-all ${isSelected ? "border-orange-400 bg-orange-50" : "border-gray-200 bg-white"}`}>
-                            <div className="flex items-start justify-between gap-2 mb-2">
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${i === 0 ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-600"}`}>
-                                {i === 0 ? "Principal" : `Alt. ${i}`}
-                              </span>
-                              <span className={`text-xs font-bold ${lenColor}`}>{len} chars {len >= 80 && len <= 100 ? "✓" : len < 80 ? "⚠ curto" : "⚠ longo"}</span>
-                            </div>
-                            <p className="text-sm text-gray-800 font-medium leading-snug mb-3">{t}</p>
-                            <div className="flex gap-2">
-                              <button onClick={() => navigator.clipboard?.writeText(t)}
-                                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg px-2 py-1 bg-white transition">
-                                📋 Copiar
-                              </button>
-                              <button onClick={() => setSelectedTitle(t)}
-                                className={`flex items-center gap-1 text-xs font-semibold rounded-lg px-2 py-1 transition border ${isSelected ? "bg-orange-500 text-white border-orange-500" : "border-orange-300 text-orange-600 hover:bg-orange-50"}`}>
-                                {isSelected ? "✅ Selecionado" : "Selecionar"}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* ── ABA DESCRIÇÃO ── */}
-                  {adTab === "descricao" && (
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <p className="text-xs text-gray-500">{(editedDesc || adContent.descricao)?.length ?? 0} caracteres</p>
-                        <div className="flex gap-2">
-                          <button onClick={() => navigator.clipboard?.writeText(editedDesc || adContent.descricao)}
-                            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg px-2 py-1 bg-white transition">
-                            📋 Copiar descrição
-                          </button>
-                          <button onClick={() => { setEditingDesc(v => !v); if (!editingDesc) setEditedDesc(adContent.descricao); }}
-                            className="text-xs text-orange-600 hover:text-orange-700 border border-orange-200 rounded-lg px-2 py-1 bg-white transition">
-                            {editingDesc ? "👁 Preview" : "✏️ Editar"}
-                          </button>
-                        </div>
-                      </div>
-                      {editingDesc ? (
-                        <textarea
-                          value={editedDesc}
-                          onChange={e => setEditedDesc(e.target.value)}
-                          rows={14}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none font-mono"
-                        />
-                      ) : (
-                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
-                          {editedDesc || adContent.descricao}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ── ABA TAGS ── */}
-                  {adTab === "tags" && (
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Hashtags ({adContent.hashtags?.length ?? 0})</p>
-                          <button onClick={() => navigator.clipboard?.writeText((adContent.hashtags ?? []).join(" "))}
-                            className="text-xs text-orange-600 hover:text-orange-700 border border-orange-200 rounded-lg px-2 py-1 bg-white transition">
-                            📋 Copiar hashtags
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {(adContent.hashtags ?? []).map((h: string) => (
-                            <span key={h} className="px-2.5 py-1 bg-orange-500 text-white text-xs rounded-full font-medium">{h}</span>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Tags SEO ({adContent.tags_seo?.length ?? 0})</p>
-                          <button onClick={() => navigator.clipboard?.writeText((adContent.tags_seo ?? []).join(", "))}
-                            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg px-2 py-1 bg-white transition">
-                            📋 Copiar tags SEO
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {(adContent.tags_seo ?? []).map((t: string) => (
-                            <span key={t} className="px-2.5 py-1 bg-gray-100 text-gray-700 text-xs rounded-full border border-gray-200">{t}</span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── ABA KEYWORDS ── */}
-                  {adTab === "keywords" && (
-                    <div className="space-y-3">
-                      <p className="text-xs text-gray-500">Use estas palavras no título, descrição e tags para maximizar o ranking de busca.</p>
-                      {(adContent.keywords_principais ?? []).map((kw: string, i: number) => (
-                        <div key={kw} className="flex items-center gap-3 p-3 bg-orange-50 border border-orange-100 rounded-xl">
-                          <span className="w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold text-gray-800">{kw}</p>
-                            <p className="text-xs text-gray-400">Use no título e nas primeiras linhas da descrição</p>
-                          </div>
-                          <button onClick={() => navigator.clipboard?.writeText(kw)}
-                            className="text-xs text-gray-400 hover:text-gray-600 transition">📋</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* ── ABA SCORE ── */}
-                  {adTab === "score" && (() => {
-                    const s = adContent.score ?? {};
-                    const total: number = s.total ?? 0;
-                    const nivel: string = s.nivel ?? "C";
-                    const nivelColor = { A: "bg-green-500", B: "bg-blue-500", C: "bg-yellow-500", D: "bg-orange-500", F: "bg-red-500" }[nivel] ?? "bg-gray-400";
-                    const barColor = total >= 80 ? "bg-green-500" : total >= 60 ? "bg-yellow-500" : "bg-red-500";
-                    const cats = [
-                      { label: "Título",    val: s.titulo    ?? 0, max: 25 },
-                      { label: "Descrição", val: s.descricao ?? 0, max: 25 },
-                      { label: "Tags",      val: s.tags      ?? 0, max: 10 },
-                      { label: "Variações", val: s.variacoes ?? 0, max: 20 },
-                    ];
-                    return (
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-4 p-4 bg-gray-50 border border-gray-200 rounded-xl">
-                          <span className={`w-16 h-16 rounded-xl ${nivelColor} text-white text-3xl font-black flex items-center justify-center flex-shrink-0`}>{nivel}</span>
-                          <div className="flex-1">
-                            <div className="flex items-end justify-between mb-1">
-                              <p className="text-sm font-semibold text-gray-700">Score total</p>
-                              <p className="text-2xl font-black text-gray-800">{total}<span className="text-sm text-gray-400">/100</span></p>
-                            </div>
-                            <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                              <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${Math.min(total, 100)}%` }} />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {cats.map(c => (
-                            <div key={c.label} className="bg-white border border-gray-200 rounded-xl p-3">
-                              <div className="flex justify-between mb-1 text-xs">
-                                <span className="text-gray-600 font-medium">{c.label}</span>
-                                <span className="font-bold text-gray-800">{c.val}/{c.max}</span>
-                              </div>
-                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full ${c.val / c.max >= 0.8 ? "bg-green-500" : c.val / c.max >= 0.6 ? "bg-yellow-500" : "bg-red-400"}`}
-                                  style={{ width: `${(c.val / c.max) * 100}%` }} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        {(s.sugestoes ?? []).length > 0 && (
-                          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
-                            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Sugestões de melhoria</p>
-                            {(s.sugestoes ?? []).map((sg: string, i: number) => (
-                              <div key={i} className="flex items-start gap-2 text-xs text-blue-700">
-                                <span className="font-bold flex-shrink-0">{i + 1}.</span>
-                                <span>{sg}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* Botões globais */}
-                  <div className="space-y-2 pt-1">
-                    {/* Regenerar por seção */}
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {([
-                        { key: "title" as const, label: "✨ Título" },
-                        { key: "desc"  as const, label: "✨ Descrição" },
-                        { key: "tags"  as const, label: "✨ Tags" },
-                      ]).map(b => (
-                        <button key={b.key}
-                          onClick={() => generateAdSection(b.key)}
-                          disabled={adLoadingSection !== null}
-                          className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-orange-200 text-orange-600 bg-orange-50 hover:bg-orange-100 text-xs font-semibold disabled:opacity-50 transition">
-                          {adLoadingSection === b.key ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                          {b.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => generateAdSection("all")}
-                        disabled={adLoadingSection !== null}
-                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-orange-300 text-orange-600 text-sm font-semibold hover:bg-orange-50 disabled:opacity-50 transition">
-                        {adLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                        🔄 Regenerar tudo
-                      </button>
-                      <button
-                        onClick={() => handlePublishToShopee()}
-                        disabled={publishStatus === "loading" || optionDetails.length === 0 || variationCheckLoading || hasExistingVariation}
-                        title={hasExistingVariation ? "Produto já tem variação na Shopee — edição não disponível ainda." : ""}
-                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition">
-                        {publishStatus === "loading" || variationCheckLoading
-                          ? <Loader2 className="w-4 h-4 animate-spin" />
-                          : <CheckCircle2 className="w-4 h-4" />}
-                        {publishStatus === "loading"
-                          ? "Publicando..."
-                          : variationCheckLoading
-                          ? "Verificando..."
-                          : hasExistingVariation
-                          ? "Bloqueado (já tem variação)"
-                          : "Confirmar e Publicar"}
-                      </button>
-                    </div>
-                  </div>
-                  {publishStatus === "success" && publishResult && (
-                    <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
-                      <div className="text-sm text-green-800">
-                        <p className="font-semibold">Produto {publishResult.mode === "promote" ? "promovido" : publishResult.mode === "update" ? "atualizado" : "publicado"} com sucesso!</p>
-                        <a href={publishResult.itemUrl} target="_blank" rel="noopener noreferrer"
-                          className="text-green-700 underline hover:text-green-900 flex items-center gap-1 mt-1">
-                          Ver produto na Shopee <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    </div>
-                  )}
-                  {publishStatus === "error" && (
-                    <div className="bg-red-50 border border-red-300 rounded-xl p-3 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-                      <div className="text-sm text-red-800">
-                        <p className="font-semibold">Erro ao publicar</p>
-                        <p className="mt-0.5 text-red-700">{publishError}</p>
-                        <button onClick={() => setPublishStatus("idle")} className="text-xs text-red-600 underline mt-1">Tentar novamente</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                <button
+                  onClick={async () => {
+                    autoSaveWizardState();
+                    await new Promise(r => setTimeout(r, 300));
+                    if (onSave) onSave({ name: "rascunho", productSourceIds: [], options: [] } as any);
+                  }}
+                  disabled={updateListingMutation.isPending}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition"
+                >
+                  💾 Salvar Rascunho
+                </button>
+              </div>
             </div>
           )}
+
         </div>
 
         {/* Footer de navegação */}
@@ -2587,12 +1974,7 @@ export function CombinedWizard({
               </button>
             </div>
           )}
-          {step === "D" && (
-            <button onClick={handleSave}
-              className="flex items-center gap-1.5 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl transition">
-              <Check className="w-4 h-4" /> Salvar variação
-            </button>
-          )}
+          {/* step === "D": acoes ficam dentro do conteudo da revisao (Salvar Rascunho) */}
         </div>
       </div>
 
