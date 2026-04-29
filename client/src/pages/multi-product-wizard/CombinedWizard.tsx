@@ -920,8 +920,8 @@ export function CombinedWizard({
   const modeGlobalPlaceholder = pricingMode === "multiplier" ? "2.5" : pricingMode === "margin" ? "30" : "20";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div className="w-full">
+      <div className="bg-white rounded-2xl shadow-md border w-full flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">

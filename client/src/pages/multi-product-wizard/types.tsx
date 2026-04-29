@@ -1,10 +1,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Package, Store } from "lucide-react";
 
-export type WizardStep = "A" | "B" | "C" | "D";
+export type WizardStep = "A" | "V" | "B" | "C" | "D";
 
 export const STEPS: { key: WizardStep; label: string }[] = [
   { key: "A", label: "Produtos" },
+  { key: "V", label: "Variações" },
   { key: "B", label: "Conteúdo" },
   { key: "C", label: "Mídia" },
   { key: "D", label: "Revisão" },

@@ -76,7 +76,6 @@ function WizardInner({
   invalidate: () => void;
 }) {
   const [step, setStep] = useState<WizardStep>("A");
-  const [combinedOpen, setCombinedOpen] = useState(false);
   const currentStepIndex = STEPS.findIndex((s) => s.key === step);
 
   const { productMap, isResolving } = useResolvedProducts(listing, items);
@@ -157,11 +156,16 @@ function WizardInner({
             listing={listing}
             items={items}
             onChange={invalidate}
-            onContinue={() => {
-              if (!isResolving && products.length >= 2) {
-                setCombinedOpen(true);
-              }
-            }}
+          />
+        )}
+        {step === "V" && (
+          <CombinedWizard
+            products={products}
+            multiListingId={listing.id}
+            accountId={listing.shopeeAccountId}
+            principalIndex={principalIndex}
+            onSave={() => invalidate()}
+            onClose={() => setStep("A")}
           />
         )}
         {step === "B" && <StepB listing={listing} onChange={invalidate} />}
@@ -181,7 +185,7 @@ function WizardInner({
         <Button
           variant="outline"
           onClick={() => {
-            const prev: Record<WizardStep, WizardStep> = { A: "A", B: "A", C: "B", D: "C" };
+            const prev: Record<WizardStep, WizardStep> = { A: "A", V: "A", B: "V", C: "B", D: "C" };
             setStep(prev[step]);
           }}
           disabled={step === "A"}
@@ -191,7 +195,7 @@ function WizardInner({
         </Button>
         <Button
           onClick={() => {
-            const next: Record<WizardStep, WizardStep> = { A: "B", B: "C", C: "D", D: "D" };
+            const next: Record<WizardStep, WizardStep> = { A: "V", V: "B", B: "C", C: "D", D: "D" };
             setStep(next[step]);
           }}
           disabled={step === "D"}
@@ -201,19 +205,6 @@ function WizardInner({
         </Button>
       </div>
 
-      {combinedOpen && products.length >= 2 && (
-        <CombinedWizard
-          products={products}
-          multiListingId={listing.id}
-          accountId={listing.shopeeAccountId}
-          principalIndex={principalIndex}
-          onSave={() => {
-            setCombinedOpen(false);
-            invalidate();
-          }}
-          onClose={() => setCombinedOpen(false)}
-        />
-      )}
     </div>
   );
 }

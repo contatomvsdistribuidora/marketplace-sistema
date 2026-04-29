@@ -308,17 +308,6 @@ export function StepA({
         </DialogContent>
       </Dialog>
 
-      {onContinue && items.length >= 2 && (
-        <div className="flex justify-end pt-4 border-t mt-6">
-          <Button
-            onClick={onContinue}
-            size="lg"
-            className="bg-orange-500 hover:bg-orange-600 text-white"
-          >
-            Configurar variações e publicar
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
