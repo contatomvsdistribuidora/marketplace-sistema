@@ -21,6 +21,8 @@ import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
 import * as multiProductAi from "./multi-product-ai";
 import * as multiProductPublish from "./multi-product-publish";
+import { storagePut } from "./storage";
+import { randomUUID } from "node:crypto";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
 import {
   multiProductListings,
@@ -3785,6 +3787,37 @@ export const appRouter = router({
         }
 
         return { images: allImages };
+      }),
+
+    uploadProductImage: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+        dataBase64: z.string().min(1).max(8_000_000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "Anúncio combinado não encontrado." });
+
+        const buf = Buffer.from(input.dataBase64, "base64");
+        if (buf.length > 5 * 1024 * 1024) {
+          throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Arquivo maior que 5MB" });
+        }
+        if (buf.length < 100) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Arquivo inválido (muito pequeno)" });
+        }
+
+        const ext = input.contentType.split("/")[1];
+        const key = `multi-product/${ctx.user.id}/${input.id}/upload-${Date.now()}-${randomUUID().slice(0, 8)}.${ext}`;
+        const stored = await storagePut(key, buf, input.contentType);
+        return { url: stored.url, key: stored.key };
       }),
 
     createMultiProductListing: protectedProcedure

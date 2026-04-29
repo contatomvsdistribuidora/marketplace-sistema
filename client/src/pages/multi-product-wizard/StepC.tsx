@@ -32,6 +32,7 @@ type ImageOverrides = {
   primaryImageUrl: string | null;
   excludedImages: string[];
   imageOrder?: string[];
+  uploadedImages?: { url: string; uploadedAt: number }[];
 };
 
 type ProductImage = {
@@ -120,11 +121,13 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const [imageOverrides, setImageOverrides] = useState<ImageOverrides>(() => {
     try {
       const ws = listing.wizardStateJson ? JSON.parse(listing.wizardStateJson) : null;
-      return ws?.imageOverrides ?? { primaryImageUrl: null, excludedImages: [], imageOrder: [] };
+      return ws?.imageOverrides ?? { primaryImageUrl: null, excludedImages: [], imageOrder: [], uploadedImages: [] };
     } catch {
-      return { primaryImageUrl: null, excludedImages: [], imageOrder: [] };
+      return { primaryImageUrl: null, excludedImages: [], imageOrder: [], uploadedImages: [] };
     }
   });
+
+  const [uploadingCount, setUploadingCount] = useState(0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -135,6 +138,10 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const imageOverridesMutation = trpc.multiProduct.updateMultiProductListing.useMutation({
     onSuccess: () => onChange(),
     onError: (e) => toast.error(e.message),
+  });
+
+  const uploadMutation = trpc.multiProduct.uploadProductImage.useMutation({
+    onError: (e) => toast.error("Falha no upload: " + e.message),
   });
 
   function persistImageOverrides(next: ImageOverrides) {
@@ -173,8 +180,70 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     });
   }
 
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+
+    setUploadingCount(files.length);
+    const newUrls: { url: string; uploadedAt: number }[] = [];
+
+    for (const file of files) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error(`${file.name}: maior que 5MB`);
+        setUploadingCount(c => c - 1);
+        continue;
+      }
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+        toast.error(`${file.name}: tipo nao aceito (use JPG, PNG ou WEBP)`);
+        setUploadingCount(c => c - 1);
+        continue;
+      }
+
+      try {
+        const dataBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(",")[1] ?? "";
+            resolve(base64);
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+
+        const result = await uploadMutation.mutateAsync({
+          id: listing.id,
+          contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
+          dataBase64,
+        });
+        newUrls.push({ url: result.url, uploadedAt: Date.now() });
+      } catch (err: any) {
+        toast.error(`${file.name}: ${err?.message ?? "erro"}`);
+      }
+      setUploadingCount(c => c - 1);
+    }
+
+    if (newUrls.length > 0) {
+      persistImageOverrides({
+        ...imageOverrides,
+        uploadedImages: [...(imageOverrides.uploadedImages ?? []), ...newUrls],
+      });
+      toast.success(`${newUrls.length} foto(s) enviada(s)`);
+    }
+
+    e.target.value = "";
+  }
+
   function getOrderedVisible(allImages: ProductImage[]): ProductImage[] {
-    const visible = allImages.filter(img => !imageOverrides.excludedImages.includes(img.imageUrl));
+    const uploaded: ProductImage[] = (imageOverrides.uploadedImages ?? []).map(u => ({
+      productSource: "shopee" as const,
+      productSourceId: 0,
+      productName: "Upload do PC",
+      imageUrl: u.url,
+      isPrimary: false,
+    }));
+    const combined = [...allImages, ...uploaded];
+    const visible = combined.filter(img => !imageOverrides.excludedImages.includes(img.imageUrl));
     if (!imageOverrides.imageOrder || imageOverrides.imageOrder.length === 0) {
       return visible;
     }
@@ -260,17 +329,46 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   return (
     <div className="space-y-4">
       <div className="border border-gray-200 rounded-xl bg-white p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-          <ImageIcon className="h-4 w-4" />
-          Fotos dos Produtos Vinculados
-        </h3>
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <ImageIcon className="h-4 w-4" />
+            Fotos dos Produtos Vinculados
+          </h3>
+          <label className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded cursor-pointer flex items-center gap-1.5 shrink-0">
+            {uploadingCount > 0 ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Enviando {uploadingCount}...
+              </>
+            ) : (
+              <>+ Adicionar foto do PC</>
+            )}
+            <input
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleFileSelect}
+              className="hidden"
+              disabled={uploadingCount > 0}
+            />
+          </label>
+        </div>
+        <p className="text-[10px] text-gray-500 mb-3">JPG, PNG ou WEBP. Max 5MB por foto.</p>
 
         {imagesQuery.isLoading ? (
           <p className="text-xs text-gray-500">Carregando fotos...</p>
         ) : (() => {
-          const allImages: ProductImage[] = imagesQuery.data?.images ?? [];
-          const orderedVisible = getOrderedVisible(allImages);
-          const excludedImages = allImages.filter(img => imageOverrides.excludedImages.includes(img.imageUrl));
+          const queryImages: ProductImage[] = imagesQuery.data?.images ?? [];
+          const uploadedAsImages: ProductImage[] = (imageOverrides.uploadedImages ?? []).map(u => ({
+            productSource: "shopee" as const,
+            productSourceId: 0,
+            productName: "Upload do PC",
+            imageUrl: u.url,
+            isPrimary: false,
+          }));
+          const allImagesForExcl = [...queryImages, ...uploadedAsImages];
+          const orderedVisible = getOrderedVisible(queryImages);
+          const excludedImages = allImagesForExcl.filter(img => imageOverrides.excludedImages.includes(img.imageUrl));
 
           if (orderedVisible.length === 0 && excludedImages.length === 0) {
             return <p className="text-xs text-gray-500">Nenhuma foto encontrada nos produtos vinculados.</p>;
