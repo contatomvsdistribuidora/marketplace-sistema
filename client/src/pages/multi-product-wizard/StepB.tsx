@@ -11,6 +11,7 @@ import { TITLE_MAX, type Listing } from "./types";
 export function StepB({ listing, onChange }: { listing: Listing; onChange: () => void }) {
   const [title, setTitle] = useState(listing.title ?? "");
   const [description, setDescription] = useState(listing.description ?? "");
+  const [autoTriggered, setAutoTriggered] = useState(false);
 
   useEffect(() => {
     setTitle(listing.title ?? "");
@@ -39,6 +40,18 @@ export function StepB({ listing, onChange }: { listing: Listing; onChange: () =>
     },
     onError: (e) => toast.error(e.message),
   });
+
+  // Auto-disparar IA UMA vez ao entrar no step se titulo/descricao estao vazios
+  useEffect(() => {
+    if (autoTriggered) return;
+    const titleEmpty = !(listing.title ?? "").trim();
+    const descEmpty = !(listing.description ?? "").trim();
+    if (!titleEmpty && !descEmpty) { setAutoTriggered(true); return; }
+    setAutoTriggered(true);
+    if (titleEmpty) generateTitleMutation.mutate({ id: listing.id });
+    if (descEmpty) generateDescMutation.mutate({ id: listing.id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listing.id]);
 
   function saveTitle() {
     if (title === (listing.title ?? "")) return;

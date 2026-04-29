@@ -118,7 +118,52 @@ async function resolveListingContext(listingId: number, userId: number) {
   if (principal.category) category = principal.category;
   if (principal.brand) brand = principal.brand;
 
-  return { listing, items, resolved, principal, category, brand };
+  // ── Variação 2 (matriz N×M criada no CombinedWizard) ──
+  let variation2Type: string | null = null;
+  let variation2Options: string[] = [];
+  let optionDetailsMatrix: any[][] = [];
+
+  if (listing.variation2Type) {
+    variation2Type = listing.variation2Type;
+  }
+
+  if (listing.variation2OptionsJson) {
+    try {
+      const parsed = JSON.parse(listing.variation2OptionsJson);
+      if (Array.isArray(parsed)) {
+        variation2Options = parsed
+          .map((o: any) => (typeof o === "string" ? o : o?.label ?? ""))
+          .filter(Boolean);
+      }
+    } catch {}
+  }
+
+  if (listing.wizardStateJson) {
+    try {
+      const ws = JSON.parse(listing.wizardStateJson);
+      if (Array.isArray(ws.optionDetailsMatrix)) optionDetailsMatrix = ws.optionDetailsMatrix;
+      if (variation2Options.length === 0 && Array.isArray(optionDetailsMatrix[0])) {
+        variation2Options = optionDetailsMatrix[0]
+          .map((o: any) => o?.label ?? "")
+          .filter(Boolean);
+      }
+      if (!variation2Type && typeof ws.selectedType === "string") {
+        variation2Type = ws.selectedType;
+      }
+    } catch {}
+  }
+
+  return {
+    listing,
+    items,
+    resolved,
+    principal,
+    category,
+    brand,
+    variation2Type,
+    variation2Options,
+    optionDetailsMatrix,
+  };
 }
 
 export async function generateMultiProductTitle(
@@ -126,14 +171,16 @@ export async function generateMultiProductTitle(
   userId: number,
 ): Promise<string> {
   await loadAiProviderFromDb();
-  const { resolved, principal, category, brand } = await resolveListingContext(
-    listingId,
-    userId,
-  );
+  const { resolved, principal, category, brand, variation2Type, variation2Options } =
+    await resolveListingContext(listingId, userId);
 
   const variationsText = resolved
     .map((r) => `- ${r.name} (R$ ${r.price})`)
     .join("\n");
+
+  const v2Text = variation2Options.length > 0
+    ? `\n\nVariação 2 (${variation2Type ?? "personalizada"}): ${variation2Options.join(", ")}`
+    : "";
 
   const systemPrompt = `Atue como Especialista em SEO para Shopee Brasil focado em ALTA CONVERSÃO.
 
@@ -159,8 +206,8 @@ Apenas o título em uma linha. Nada mais. Sem aspas envolvendo. Sem prefixo "Tí
 ${category ? `Categoria Shopee: ${category}` : ""}
 ${brand ? `Marca: ${brand}` : ""}
 
-Variações (${resolved.length} produtos):
-${variationsText}`;
+Produtos do anúncio (${resolved.length}):
+${variationsText}${v2Text}`;
 
   const response = await invokeLLM({
     messages: [
@@ -184,7 +231,7 @@ export async function generateMultiProductDescription(
   userId: number,
 ): Promise<string> {
   await loadAiProviderFromDb();
-  const { listing, resolved, principal, category, brand } =
+  const { listing, resolved, principal, category, brand, variation2Type, variation2Options, optionDetailsMatrix } =
     await resolveListingContext(listingId, userId);
 
   const variationsText = resolved
@@ -195,6 +242,28 @@ export async function generateMultiProductDescription(
       return parts.join(" | ");
     })
     .join("\n");
+
+  // Matriz produto × variação 2 (preço/peso/dim por combinação)
+  let matrixText = "";
+  if (optionDetailsMatrix.length > 0 && variation2Options.length > 0) {
+    const lines: string[] = [];
+    optionDetailsMatrix.forEach((row, productIdx) => {
+      const product = resolved[productIdx];
+      if (!product || !Array.isArray(row)) return;
+      lines.push(`\n${product.name}:`);
+      row.forEach((cell: any) => {
+        if (!cell?.label) return;
+        const parts = [`  - ${cell.label}`];
+        if (cell.price) parts.push(`R$ ${cell.price}`);
+        if (cell.weight) parts.push(`${cell.weight}kg`);
+        if (cell.length && cell.width && cell.height) parts.push(`${cell.length}x${cell.width}x${cell.height}cm`);
+        lines.push(parts.join(" | "));
+      });
+    });
+    matrixText = `\n\nCombinações Produto × ${variation2Type ?? "Variação 2"}:${lines.join("\n")}`;
+  } else if (variation2Options.length > 0) {
+    matrixText = `\n\nVariação 2 (${variation2Type ?? "personalizada"}): ${variation2Options.join(", ")}`;
+  }
 
   const systemPrompt = `Atue como Copywriter Sênior especialista em Shopee Brasil.
 
@@ -257,8 +326,8 @@ ${category ? `Categoria Shopee: ${category}` : ""}
 ${brand ? `Marca: ${brand}` : ""}
 ${listing.title ? `Título do anúncio: ${listing.title}` : ""}
 
-Variações (${resolved.length} produtos):
-${variationsText}`;
+Produtos do anúncio (${resolved.length}):
+${variationsText}${matrixText}`;
 
   const response = await invokeLLM({
     messages: [
