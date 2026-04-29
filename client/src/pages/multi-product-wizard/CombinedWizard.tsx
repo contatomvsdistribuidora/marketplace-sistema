@@ -164,7 +164,9 @@ export function CombinedWizard({
         const gs = pricingPerProduct[productIdx]?.globalStock;
         if (!gs || gs === "") return row;
         return row.map(opt => {
-          if (opt.stock !== "" && opt.stock !== null && opt.stock !== undefined) return opt;
+          // Nao sobrescreve se ja foi editado manualmente para um valor != 0
+          const cur = opt.stock ?? "";
+          if (cur !== "" && cur !== "0") return opt;
           changed = true;
           return { ...opt, stock: gs };
         });
@@ -1470,47 +1472,21 @@ export function CombinedWizard({
                           ⚡ Propagar
                         </button>
                       )}
-                      {products.length > 1 && (
-                        <>
-                          <button onClick={() => replicateConfigToAll(productIdx)}
-                            className="text-[11px] text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
-                            title="Copiar custos/multiplicador/margem deste produto para os demais">
-                            ⚡ Config aos outros
-                          </button>
-                          <button onClick={() => replicateWeightDimToAll(productIdx)}
-                            className="text-[11px] text-purple-600 hover:text-purple-700 border border-purple-200 rounded px-2 py-1 bg-white"
-                            title="Copiar peso e dimensoes deste produto para os demais">
-                            📦 Peso/Dim
-                          </button>
-                          <button onClick={() => replicateSkusToAll(productIdx)}
-                            className="text-[11px] text-green-600 hover:text-green-700 border border-green-200 rounded px-2 py-1 bg-white"
-                            title="Replicar padrao de SKU para os demais produtos">
-                            🏷️ SKUs
-                          </button>
-                        </>
-                      )}
                     </div>
                   </div>
 
                   {/* Linha 1: Custos & taxas */}
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
                     <div>
-                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de uma unidade individual do produto.">Custo unit. (R$)</label>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo total da quantidade base. Ex: comprou 10 unidades por R$5? Coloque 5.">Custo (R$)</label>
                       <input type="number" min="0" step="0.01" placeholder="0.00"
                         value={pricingPerProduct[productIdx]?.unitCost ?? ""}
                         onChange={e => updateProductPricing(productIdx, "unitCost", e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Valor total pago pelo lote completo.">Custo lote (R$)</label>
-                      <input type="number" min="0" step="0.01" placeholder="0.00"
-                        value={pricingPerProduct[productIdx]?.batchCost ?? ""}
-                        onChange={e => updateProductPricing(productIdx, "batchCost", e.target.value)}
-                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Quantas unidades vem no lote.">Qtd lote</label>
-                      <input type="number" min="1" step="1" placeholder="100"
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Quantidade base do produto. Ex: comprou 10 unidades? Coloque 10. Ou 1 unidade individual? Coloque 1.">Qty base</label>
+                      <input type="number" min="1" step="1" placeholder="1"
                         value={pricingPerProduct[productIdx]?.baseProductQty ?? ""}
                         onChange={e => updateProductPricing(productIdx, "baseProductQty", e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
