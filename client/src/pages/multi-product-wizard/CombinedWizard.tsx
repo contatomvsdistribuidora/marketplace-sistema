@@ -71,7 +71,38 @@ export function CombinedWizard({
   const [step, setStep]                   = useState<WizardStep>("A");
   const [selectedType, setSelectedType]   = useState<VariationType | null>(null);
   const [optionLabels, setOptionLabels]   = useState<string[]>([""]);
-  const [optionDetails, setOptionDetails] = useState<VariationOption[]>([]);
+  // Matriz 2D: optionDetailsMatrix[productIdx][optionIdx] = VariationOption
+  // N produtos (linhas) x M opcoes (colunas)
+  const [optionDetailsMatrix, setOptionDetailsMatrix] = useState<VariationOption[][]>([]);
+
+  // Helpers de acesso
+  const getOptionDetails = (productIdx: number = 0): VariationOption[] => {
+    return optionDetailsMatrix[productIdx] ?? [];
+  };
+
+  const getCell = (productIdx: number, optionIdx: number): VariationOption | null => {
+    return optionDetailsMatrix[productIdx]?.[optionIdx] ?? null;
+  };
+
+  // Backwards compat: alias optionDetails pra primeira linha (usado em codigo legado)
+  const optionDetails = optionDetailsMatrix[0] ?? [];
+  const setOptionDetails = (updater: VariationOption[] | ((prev: VariationOption[]) => VariationOption[])) => {
+    setOptionDetailsMatrix(prev => {
+      const newRow = typeof updater === "function" ? updater(prev[0] ?? []) : updater;
+      const next = [...prev];
+      next[0] = newRow;
+      // Replicar para outras linhas se existirem
+      for (let i = 1; i < next.length; i++) {
+        if (next[i].length !== newRow.length) {
+          next[i] = newRow.map(o => ({ ...o, id: `${o.id}_p${i}` }));
+        }
+      }
+      return next;
+    });
+  };
+
+  // Per-row config: peso/dim/baseQty por produto
+  const [perRowBaseQty, setPerRowBaseQty] = useState<string[]>([]);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
   const [qtyFactors, setQtyFactors]       = useState<string[]>([]);
   const [pricingMode, setPricingMode]     = useState<PricingMode>("multiplier");
@@ -213,12 +244,14 @@ export function CombinedWizard({
 
   // ── Motor de precificação ──────────────────────────────────────────────────
 
-  function computePricing(opt: VariationOption, idx: number): ComputedPricing {
+  function computePricing(opt: VariationOption, idx: number, productIdx: number = 0): ComputedPricing {
     const isQty          = selectedType === "quantidade";
     const qty            = isQty ? extractQty(opt.label) : 1;
     // Custo efetivo: batchCost/baseProductQty ou unitCost direto
     const batchCostVal   = parseFloat(pricing.batchCost) || 0;
-    const batchQty       = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
+    const rowBaseQty     = parseFloat(perRowBaseQty[productIdx] ?? "") || 0;
+    const fallbackBatchQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
+    const batchQty       = rowBaseQty > 0 ? rowBaseQty : fallbackBatchQty;
     const unitCost       = batchCostVal > 0 ? batchCostVal / batchQty : (parseFloat(pricing.unitCost) || 0);
     const packaging      = parseFloat(pricing.packagingCost)  || 0;
     const shipping       = parseFloat(pricing.shippingCost)   || 0;
@@ -273,11 +306,12 @@ export function CombinedWizard({
     const marginContribution = price - totalProductCost - platformCost;
     const profitPct       = price > 0 ? (marginContribution / price) * 100 : 0;
 
-    // Dimensions
-    const baseL         = parseFloat(baseLengthOverride || getBaseLength()) || 0;
-    const baseW         = parseFloat(baseWidthOverride  || getBaseWidth())  || 0;
-    const baseH         = parseFloat(baseHeightOverride || getBaseHeight()) || 0;
-    const baseWeight    = parseFloat(baseWeightOverride || getBaseWeight())          || 0;
+    // Dimensions — per-row: prioriza products[productIdx] sobre getBase*() (fallback)
+    const product = products[productIdx];
+    const baseL         = parseFloat(baseLengthOverride || product?.dimensionLength || getBaseLength()) || 0;
+    const baseW         = parseFloat(baseWidthOverride  || product?.dimensionWidth  || getBaseWidth())  || 0;
+    const baseH         = parseFloat(baseHeightOverride || product?.dimensionHeight || getBaseHeight()) || 0;
+    const baseWeight    = parseFloat(baseWeightOverride || product?.weight          || getBaseWeight())          || 0;
     const baseProductQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
     const dimRatio      = isQty ? qty / baseProductQty : 1;
     const scaleF        = Math.cbrt(dimRatio);
@@ -429,8 +463,22 @@ export function CombinedWizard({
           return isNaN(n) ? l : `${n} Unidades de ${baseName}`;
         })
       : filled;
-    const opts = transformed.map(label => emptyOption(truncateVariationName(label)));
-    setOptionDetails(opts);
+    const labels = transformed.map(label => truncateVariationName(label));
+
+    // Criar matriz N x M: 1 row por produto, M opcoes por linha
+    const matrix: VariationOption[][] = products.map((_p, productIdx) =>
+      labels.map((label, optIdx) => ({
+        ...emptyOption(label),
+        id: `p${productIdx}_o${optIdx}_${uid()}`,
+      }))
+    );
+    setOptionDetailsMatrix(matrix);
+
+    // Inicializar perRowBaseQty (1 valor por produto)
+    setPerRowBaseQty(products.map(() => ""));
+
+    // Compatibilidade: opts agora referencia a primeira row (pra setters paralelos)
+    const opts = matrix[0] ?? [];
     setQtyFactors(opts.map(() => ""));
     setPerVarParam(opts.map(() => ""));
     setPerVarEnabled(opts.map(() => false));
