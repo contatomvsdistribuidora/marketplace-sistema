@@ -144,6 +144,18 @@ export function CombinedWizard({
     globalStock: "",
   });
 
+  // Per-product pricing: pricingPerProduct[productIdx] tem os parametros desse produto
+  const [pricingPerProduct, setPricingPerProduct] = useState<PricingGlobals[]>([]);
+
+  // Sincronizar pricingPerProduct quando products muda
+  useEffect(() => {
+    setPricingPerProduct(prev => {
+      if (prev.length === products.length) return prev;
+      return products.map((_, idx) => prev[idx] ?? { ...pricing });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products.length]);
+
   const optimizeMutation     = trpc.shopee.optimizeTitle.useMutation();
   const generateAdMutation   = trpc.shopee.generateAdContent.useMutation();
   const generateAllMutation  = trpc.shopee.generateAllContent.useMutation();
