@@ -341,7 +341,10 @@ export function CombinedWizard({
     const rowBaseQty     = parseFloat(perRowBaseQty[productIdx] ?? "") || 0;
     const fallbackBatchQty = Math.max(parseFloat(p.baseProductQty) || 1, 0.001);
     const batchQty       = rowBaseQty > 0 ? rowBaseQty : fallbackBatchQty;
-    const unitCost       = batchCostVal > 0 ? batchCostVal / batchQty : (parseFloat(p.unitCost) || 0);
+    // "Custo" representa custo TOTAL da quantidade base (matching tooltip).
+    // Ex: Custo=R$10 + Qty base=10 -> unitCost = R$1
+    // Ex: Custo=R$0.50 + Qty base=1 -> unitCost = R$0.50
+    const unitCost       = batchCostVal > 0 ? batchCostVal / batchQty : ((parseFloat(p.unitCost) || 0) / batchQty);
     const packaging      = parseFloat(p.packagingCost)  || 0;
     const shipping       = parseFloat(p.shippingCost)   || 0;
     const txFee          = parseFloat(p.transactionFee) || 0;
