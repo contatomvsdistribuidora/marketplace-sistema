@@ -165,6 +165,53 @@ export function CombinedWizard({
     });
   };
 
+  const replicateConfigToAll = (sourceIdx: number) => {
+    setPricingPerProduct(prev => {
+      const source = prev[sourceIdx];
+      if (!source) return prev;
+      return prev.map((_, i) => i === sourceIdx ? prev[i] : { ...source });
+    });
+  };
+
+  const replicateWeightDimToAll = (sourceIdx: number) => {
+    setOptionDetailsMatrix(matrix => {
+      const sourceRow = matrix[sourceIdx];
+      if (!sourceRow) return matrix;
+      return matrix.map((row, p) => {
+        if (p === sourceIdx) return row;
+        return row.map((opt, optIdx) => {
+          const sourceOpt = sourceRow[optIdx];
+          if (!sourceOpt) return opt;
+          return {
+            ...opt,
+            weight: sourceOpt.weight,
+            length: sourceOpt.length,
+            width: sourceOpt.width,
+            height: sourceOpt.height,
+          };
+        });
+      });
+    });
+  };
+
+  const replicateSkusToAll = (sourceIdx: number) => {
+    setOptionDetailsMatrix(matrix => {
+      const sourceRow = matrix[sourceIdx];
+      if (!sourceRow) return matrix;
+      return matrix.map((row, p) => {
+        if (p === sourceIdx) return row;
+        const targetProduct = products[p];
+        const targetSkuBase = targetProduct?.sku ?? "";
+        return row.map((opt, optIdx) => {
+          const sourceOpt = sourceRow[optIdx];
+          if (!sourceOpt) return opt;
+          const newSku = targetSkuBase ? `${targetSkuBase}-${optIdx + 1}` : sourceOpt.sku;
+          return { ...opt, sku: newSku };
+        });
+      });
+    });
+  };
+
   const optimizeMutation     = trpc.shopee.optimizeTitle.useMutation();
   const generateAdMutation   = trpc.shopee.generateAdContent.useMutation();
   const generateAllMutation  = trpc.shopee.generateAllContent.useMutation();
@@ -1375,49 +1422,60 @@ export function CombinedWizard({
                   <section key={`${product.source}:${product.sourceId}`} className="border rounded-xl overflow-hidden mb-4">
                     {/* Card de configuracoes especificas deste produto */}
                     <div className="border-b border-gray-200 bg-white p-4">
-                      <h4 className="text-xs font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                        <Settings className="w-3.5 h-3.5 text-gray-500" /> Configurações de {product.name}
-                      </h4>
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-xs font-semibold text-gray-700 flex items-center gap-2">
+                          <Settings className="w-3.5 h-3.5 text-gray-500" /> Configurações de {product.name}
+                        </h4>
+                        {products.length > 1 && (
+                          <button
+                            onClick={() => replicateConfigToAll(productIdx)}
+                            className="text-xs text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
+                            title="Copiar custos/multiplicador/margem deste produto para os demais"
+                          >
+                            ⚡ Replicar config aos outros
+                          </button>
+                        )}
+                      </div>
 
                       {/* Linha 1: Custos & taxas */}
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Custo unit. (R$)</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de uma unidade individual do produto. Use se compra unitario.">Custo unit. (R$)</label>
                           <input type="number" min="0" step="0.01" placeholder="0.00"
                             value={pricingPerProduct[productIdx]?.unitCost ?? ""}
                             onChange={e => updateProductPricing(productIdx, "unitCost", e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Custo lote (R$)</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Valor total pago pelo lote completo do produto.">Custo lote (R$)</label>
                           <input type="number" min="0" step="0.01" placeholder="0.00"
                             value={pricingPerProduct[productIdx]?.batchCost ?? ""}
                             onChange={e => updateProductPricing(productIdx, "batchCost", e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Qtd lote</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Quantas unidades vem no lote pago. Calcula custo/unidade automaticamente.">Qtd lote</label>
                           <input type="number" min="1" step="1" placeholder="100"
                             value={pricingPerProduct[productIdx]?.baseProductQty ?? ""}
                             onChange={e => updateProductPricing(productIdx, "baseProductQty", e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Embalagem (R$)</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo da embalagem da sua operacao por venda.">Embalagem (R$)</label>
                           <input type="number" min="0" step="0.01" placeholder="0.00"
                             value={pricingPerProduct[productIdx]?.packagingCost ?? ""}
                             onChange={e => updateProductPricing(productIdx, "packagingCost", e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Frete (R$)</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de envio estimado por unidade vendida.">Frete (R$)</label>
                           <input type="number" min="0" step="0.01" placeholder="0.00"
                             value={pricingPerProduct[productIdx]?.shippingCost ?? ""}
                             onChange={e => updateProductPricing(productIdx, "shippingCost", e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Taxa transação (%)</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Taxa da processadora de pagamento (geralmente 2%).">Taxa transação (%)</label>
                           <input type="number" min="0" step="0.1" placeholder="2"
                             value={pricingPerProduct[productIdx]?.transactionFee ?? ""}
                             onChange={e => updateProductPricing(productIdx, "transactionFee", e.target.value)}
@@ -1428,7 +1486,18 @@ export function CombinedWizard({
                       {/* Linha 2: Pricing mode params */}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">{modeParamLabel}</label>
+                          <label
+                            className="block text-[11px] text-gray-500 mb-0.5"
+                            title={
+                              pricingMode === "multiplier"
+                                ? "Quantas vezes o custo total vira preco. Ex: 2.5 = preco e 2.5x o custo."
+                                : pricingMode === "margin"
+                                ? "Margem percentual desejada apos descontar custos Shopee."
+                                : "Lucro minimo em reais por venda."
+                            }
+                          >
+                            {modeParamLabel}
+                          </label>
                           <input type="number" min="0" step={pricingMode === "multiplier" ? "0.1" : "1"}
                             placeholder={modeGlobalPlaceholder}
                             value={pricingPerProduct[productIdx]?.[modeGlobalKey] ?? ""}
@@ -1437,7 +1506,7 @@ export function CombinedWizard({
                         </div>
                         {pricingMode === "multiplier" && (
                           <div>
-                            <label className="block text-[11px] text-gray-500 mb-0.5">Desc. faixa (%)</label>
+                            <label className="block text-[11px] text-gray-500 mb-0.5" title="Desconto progressivo aplicado por faixa de quantidade.">Desc. faixa (%)</label>
                             <input type="number" min="0" max="100" step="0.1" placeholder="0"
                               value={pricingPerProduct[productIdx]?.defaultDiscount ?? ""}
                               onChange={e => updateProductPricing(productIdx, "defaultDiscount", e.target.value)}
@@ -1445,14 +1514,14 @@ export function CombinedWizard({
                           </div>
                         )}
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Margem mín. (%)</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Se o calculo der margem abaixo disso, sobe o preco automaticamente.">Margem mín. (%)</label>
                           <input type="number" min="0" max="100" step="0.1" placeholder="15"
                             value={pricingPerProduct[productIdx]?.minMarginPct ?? ""}
                             onChange={e => updateProductPricing(productIdx, "minMarginPct", e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">Estoque global</label>
+                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Estoque padrao aplicado a todas variacoes (pode sobrescrever em cada uma).">Estoque global</label>
                           <input type="number" min="0" placeholder="0"
                             value={pricingPerProduct[productIdx]?.globalStock ?? ""}
                             onChange={e => updateProductPricing(productIdx, "globalStock", e.target.value)}
@@ -1495,6 +1564,24 @@ export function CombinedWizard({
                           title="Replica peso/dim da 1a opcao para as demais"
                         >
                           ⚡ Propagar
+                        </button>
+                      )}
+                      {products.length > 1 && (
+                        <button
+                          onClick={() => replicateWeightDimToAll(productIdx)}
+                          className="text-xs text-purple-600 hover:text-purple-700 border border-purple-200 rounded px-2 py-1 bg-white ml-1"
+                          title="Copiar peso e dimensoes deste produto para os demais (mantendo a mesma proporcao)"
+                        >
+                          📦 Peso/Dim aos outros
+                        </button>
+                      )}
+                      {products.length > 1 && (
+                        <button
+                          onClick={() => replicateSkusToAll(productIdx)}
+                          className="text-xs text-green-600 hover:text-green-700 border border-green-200 rounded px-2 py-1 bg-white ml-1"
+                          title="Replicar padrao de SKU para os demais produtos (com prefixo de cada um)"
+                        >
+                          🏷️ SKUs aos outros
                         </button>
                       )}
                     </header>
