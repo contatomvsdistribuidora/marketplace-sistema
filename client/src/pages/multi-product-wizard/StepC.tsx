@@ -13,6 +13,11 @@ import { Loader2, Image as ImageIcon, Video, Package, Sparkles } from "lucide-re
 import { toast } from "sonner";
 import { type Listing } from "./types";
 
+type ImageOverrides = {
+  primaryImageUrl: string | null;
+  excludedImages: string[];
+};
+
 export function StepC({ listing, onChange }: { listing: Listing; onChange: () => void }) {
   const [extraPrompt, setExtraPrompt] = useState("");
 
@@ -23,6 +28,49 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     { id: listing.id },
     { enabled: !!listing.id },
   );
+
+  const [imageOverrides, setImageOverrides] = useState<ImageOverrides>(() => {
+    try {
+      const ws = listing.wizardStateJson ? JSON.parse(listing.wizardStateJson) : null;
+      return ws?.imageOverrides ?? { primaryImageUrl: null, excludedImages: [] };
+    } catch {
+      return { primaryImageUrl: null, excludedImages: [] };
+    }
+  });
+
+  const imageOverridesMutation = trpc.multiProduct.updateMultiProductListing.useMutation({
+    onSuccess: () => onChange(),
+    onError: (e) => toast.error(e.message),
+  });
+
+  function persistImageOverrides(next: ImageOverrides) {
+    setImageOverrides(next);
+    let ws: any = {};
+    try { ws = listing.wizardStateJson ? JSON.parse(listing.wizardStateJson) : {}; } catch {}
+    ws.imageOverrides = next;
+    imageOverridesMutation.mutate({ id: listing.id, wizardStateJson: JSON.stringify(ws) });
+  }
+
+  function setPrimary(url: string) {
+    persistImageOverrides({ ...imageOverrides, primaryImageUrl: url });
+    toast.success("Foto marcada como capa");
+  }
+
+  function excludeImage(url: string) {
+    if (imageOverrides.excludedImages.includes(url)) return;
+    persistImageOverrides({
+      ...imageOverrides,
+      excludedImages: [...imageOverrides.excludedImages, url],
+      primaryImageUrl: imageOverrides.primaryImageUrl === url ? null : imageOverrides.primaryImageUrl,
+    });
+  }
+
+  function restoreImage(url: string) {
+    persistImageOverrides({
+      ...imageOverrides,
+      excludedImages: imageOverrides.excludedImages.filter(u => u !== url),
+    });
+  }
 
   const { data: videos, isLoading: videosLoading } = trpc.videoBank.listVideos.useQuery({
     activeOnly: true,
@@ -105,30 +153,102 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
 
         {imagesQuery.isLoading ? (
           <p className="text-xs text-gray-500">Carregando fotos...</p>
-        ) : (imagesQuery.data?.images ?? []).length === 0 ? (
-          <p className="text-xs text-gray-500">Nenhuma foto encontrada nos produtos vinculados.</p>
-        ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-            {(imagesQuery.data?.images ?? []).map((img, idx) => (
-              <div key={idx} className="relative group border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                <img
-                  src={img.imageUrl}
-                  alt={img.productName}
-                  className="w-full h-24 object-cover"
-                  loading="lazy"
-                />
-                {img.isPrimary && (
-                  <span className="absolute top-1 left-1 text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded">
-                    Principal
-                  </span>
-                )}
-                <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 py-0.5 truncate">
-                  {img.productName}
+        ) : (() => {
+          const allImages = imagesQuery.data?.images ?? [];
+          const visibleImages = allImages.filter(img => !imageOverrides.excludedImages.includes(img.imageUrl));
+          const excludedImages = allImages.filter(img => imageOverrides.excludedImages.includes(img.imageUrl));
+
+          if (visibleImages.length === 0 && excludedImages.length === 0) {
+            return <p className="text-xs text-gray-500">Nenhuma foto encontrada nos produtos vinculados.</p>;
+          }
+
+          return (
+            <>
+              {visibleImages.length === 0 ? (
+                <p className="text-xs text-gray-500 italic">Todas as fotos foram excluidas.</p>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                  {visibleImages.map((img, idx) => {
+                    const isCustomPrimary = imageOverrides.primaryImageUrl === img.imageUrl;
+                    const isAutoPrimary = !imageOverrides.primaryImageUrl && img.isPrimary;
+                    const isPrimary = isCustomPrimary || isAutoPrimary;
+
+                    return (
+                      <div key={idx} className="relative group border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+                        <img
+                          src={img.imageUrl}
+                          alt={img.productName}
+                          className="w-full h-24 object-cover"
+                          loading="lazy"
+                        />
+                        {isPrimary && (
+                          <span className="absolute top-1 left-1 text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-semibold z-10">
+                            Principal
+                          </span>
+                        )}
+
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 z-20">
+                          {!isPrimary && (
+                            <button
+                              onClick={() => setPrimary(img.imageUrl)}
+                              className="text-[10px] bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded"
+                              title="Marcar como capa"
+                            >
+                              Capa
+                            </button>
+                          )}
+                          <button
+                            onClick={() => excludeImage(img.imageUrl)}
+                            className="text-[10px] bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded"
+                            title="Excluir foto"
+                          >
+                            Excluir
+                          </button>
+                        </div>
+
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 py-0.5 truncate">
+                          {img.productName}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+
+              {excludedImages.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <h4 className="text-xs font-semibold text-gray-500 mb-2">
+                    Fotos excluidas ({excludedImages.length})
+                  </h4>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                    {excludedImages.map((img, idx) => (
+                      <div key={idx} className="relative group border border-gray-200 rounded-lg overflow-hidden bg-gray-50 opacity-50">
+                        <img
+                          src={img.imageUrl}
+                          alt={img.productName}
+                          className="w-full h-24 object-cover grayscale"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
+                          <button
+                            onClick={() => restoreImage(img.imageUrl)}
+                            className="text-[10px] bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded"
+                            title="Restaurar foto"
+                          >
+                            Restaurar
+                          </button>
+                        </div>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 py-0.5 truncate">
+                          {img.productName}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <Card>
