@@ -3742,6 +3742,60 @@ export const appRouter = router({
         return { id: Number(insertedId) };
       }),
 
+    duplicateMultiProductListing: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const [original] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!original) throw new Error("Anúncio combinado não encontrado.");
+
+        const items = await sharedDb
+          .select()
+          .from(multiProductListingItems)
+          .where(eq(multiProductListingItems.listingId, input.id));
+
+        const result = await sharedDb.insert(multiProductListings).values({
+          userId: original.userId,
+          shopeeAccountId: original.shopeeAccountId,
+          mode: "new",
+          status: "draft",
+          mainProductSource: original.mainProductSource,
+          mainProductSourceId: original.mainProductSourceId,
+          title: original.title ? `${original.title} (cópia)` : null,
+          description: original.description,
+          thumbStatus: original.thumbStatus,
+          thumbUrl: original.thumbUrl,
+          videoUrl: original.videoUrl,
+          videoBankId: original.videoBankId,
+          variation2Type: original.variation2Type,
+          variation2OptionsJson: original.variation2OptionsJson,
+          variation2CellsJson: original.variation2CellsJson,
+          wizardStateJson: original.wizardStateJson,
+        });
+        const newId = Number((result as any)[0]?.insertId ?? (result as any).insertId);
+
+        if (items.length > 0) {
+          await sharedDb.insert(multiProductListingItems).values(
+            items.map((it) => ({
+              listingId: newId,
+              source: it.source,
+              sourceId: it.sourceId,
+              position: it.position,
+              customPrice: it.customPrice,
+              customSku: it.customSku,
+            })),
+          );
+        }
+
+        return { id: newId };
+      }),
+
     updateMultiProductListing: protectedProcedure
       .input(z.object({
         id: z.number(),

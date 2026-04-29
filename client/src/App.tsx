@@ -32,6 +32,7 @@ import ShopeeOptimizer from "./pages/ShopeeOptimizer";
 import ShopeeCriador from "./pages/ShopeeCriador";
 import MultiProduct from "./pages/MultiProduct";
 import MultiProductWizard from "./pages/MultiProductWizard";
+import CombinedListingsDrafts from "./pages/CombinedListingsDrafts";
 
 function DashboardRouter() {
   return (
@@ -62,6 +63,7 @@ function DashboardRouter() {
         <Route path="/shopee-criador" component={ShopeeCriador} />
         <Route path="/multi-product" component={MultiProduct} />
         <Route path="/multi-product-wizard" component={MultiProductWizard} />
+        <Route path="/rascunhos-combinados" component={CombinedListingsDrafts} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
