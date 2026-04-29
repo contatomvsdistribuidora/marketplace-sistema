@@ -257,18 +257,19 @@ export function CombinedWizard({
   // ── Motor de precificação ──────────────────────────────────────────────────
 
   function computePricing(opt: VariationOption, idx: number, productIdx: number = 0): ComputedPricing {
+    const p = pricingPerProduct[productIdx] ?? pricing;
     const isQty          = selectedType === "quantidade";
     const qty            = isQty ? extractQty(opt.label) : 1;
     // Custo efetivo: batchCost/baseProductQty ou unitCost direto
-    const batchCostVal   = parseFloat(pricing.batchCost) || 0;
+    const batchCostVal   = parseFloat(p.batchCost) || 0;
     const rowBaseQty     = parseFloat(perRowBaseQty[productIdx] ?? "") || 0;
-    const fallbackBatchQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
+    const fallbackBatchQty = Math.max(parseFloat(p.baseProductQty) || 1, 0.001);
     const batchQty       = rowBaseQty > 0 ? rowBaseQty : fallbackBatchQty;
-    const unitCost       = batchCostVal > 0 ? batchCostVal / batchQty : (parseFloat(pricing.unitCost) || 0);
-    const packaging      = parseFloat(pricing.packagingCost)  || 0;
-    const shipping       = parseFloat(pricing.shippingCost)   || 0;
-    const txFee          = parseFloat(pricing.transactionFee) || 0;
-    const autoDiscount   = (idx + 1) * (parseFloat(pricing.defaultDiscount) || 0);
+    const unitCost       = batchCostVal > 0 ? batchCostVal / batchQty : (parseFloat(p.unitCost) || 0);
+    const packaging      = parseFloat(p.packagingCost)  || 0;
+    const shipping       = parseFloat(p.shippingCost)   || 0;
+    const txFee          = parseFloat(p.transactionFee) || 0;
+    const autoDiscount   = (idx + 1) * (parseFloat(p.defaultDiscount) || 0);
     const hasQtyFactor   = qtyFactors[idx] !== undefined && qtyFactors[idx] !== "";
     const effectiveDisc  = hasQtyFactor ? (parseFloat(qtyFactors[idx]) || 0) : autoDiscount;
     // factor aplica em TODOS os modos como desconto sobre o preço final
@@ -281,19 +282,19 @@ export function CombinedWizard({
 
     let price = 0;
     if (pricingMode === "multiplier") {
-      const multiplier = parseFloat(paramOverride || pricing.marginMultiplier) || 1;
+      const multiplier = parseFloat(paramOverride || p.marginMultiplier) || 1;
       price = totalProductCost * multiplier;
     } else if (pricingMode === "margin") {
-      const desiredMarginPct = parseFloat(paramOverride || pricing.desiredMargin) || 0;
+      const desiredMarginPct = parseFloat(paramOverride || p.desiredMargin) || 0;
       price = solvePriceByMargin(totalProductCost, packaging, shipping, txFee, desiredMarginPct);
     } else {
-      const minProfit = parseFloat(paramOverride || pricing.minProfit) || 0;
+      const minProfit = parseFloat(paramOverride || p.minProfit) || 0;
       price = solvePriceByMinProfit(totalProductCost, packaging, shipping, txFee, minProfit);
     }
 
     // Aplica margem mínima desejada (piso) sobre o preço base
     let minMarginAdjusted = false;
-    const minMarginFloor = parseFloat(pricing.minMarginPct) || 0;
+    const minMarginFloor = parseFloat(p.minMarginPct) || 0;
     if (minMarginFloor > 0 && price > 0 && totalProductCost > 0) {
       const { rate: cr, fixed: cf } = shopeeCommission(price);
       const pc = price * (cr + txFee / 100) + cf + packaging + shipping;
@@ -324,7 +325,7 @@ export function CombinedWizard({
     const baseW         = parseFloat(baseWidthOverride  || product?.dimensionWidth  || getBaseWidth())  || 0;
     const baseH         = parseFloat(baseHeightOverride || product?.dimensionHeight || getBaseHeight()) || 0;
     const baseWeight    = parseFloat(baseWeightOverride || product?.weight          || getBaseWeight())          || 0;
-    const baseProductQty = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
+    const baseProductQty = Math.max(parseFloat(p.baseProductQty) || 1, 0.001);
     const dimRatio      = isQty ? qty / baseProductQty : 1;
     const scaleF        = Math.cbrt(dimRatio);
     let weight = opt.weight ? parseFloat(opt.weight) : (isQty ? baseWeight * dimRatio : baseWeight);
