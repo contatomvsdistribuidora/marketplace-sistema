@@ -12,11 +12,99 @@ import {
 import { Loader2, Image as ImageIcon, Video, Package, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { type Listing } from "./types";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 type ImageOverrides = {
   primaryImageUrl: string | null;
   excludedImages: string[];
+  imageOrder?: string[];
 };
+
+type ProductImage = {
+  productSource: "shopee" | "baselinker";
+  productSourceId: number;
+  productName: string;
+  imageUrl: string;
+  isPrimary: boolean;
+};
+
+function SortableImage({
+  img,
+  isPrimary,
+  onSetPrimary,
+  onExclude,
+}: {
+  img: ProductImage;
+  isPrimary: boolean;
+  onSetPrimary: () => void;
+  onExclude: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: img.imageUrl });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="relative group border border-gray-200 rounded-lg overflow-hidden bg-gray-50 cursor-grab active:cursor-grabbing"
+      {...attributes}
+      {...listeners}
+    >
+      <img
+        src={img.imageUrl}
+        alt={img.productName}
+        className="w-full h-24 object-cover pointer-events-none"
+        loading="lazy"
+      />
+      {isPrimary && (
+        <span className="absolute top-1 left-1 text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-semibold z-10">
+          Principal
+        </span>
+      )}
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 z-20">
+        {!isPrimary && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onSetPrimary(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="text-[10px] bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded"
+            title="Marcar como capa"
+          >
+            Capa
+          </button>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onExclude(); }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="text-[10px] bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded"
+          title="Excluir foto"
+        >
+          Excluir
+        </button>
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 py-0.5 truncate pointer-events-none">
+        {img.productName}
+      </div>
+    </div>
+  );
+}
 
 export function StepC({ listing, onChange }: { listing: Listing; onChange: () => void }) {
   const [extraPrompt, setExtraPrompt] = useState("");
@@ -32,11 +120,17 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const [imageOverrides, setImageOverrides] = useState<ImageOverrides>(() => {
     try {
       const ws = listing.wizardStateJson ? JSON.parse(listing.wizardStateJson) : null;
-      return ws?.imageOverrides ?? { primaryImageUrl: null, excludedImages: [] };
+      return ws?.imageOverrides ?? { primaryImageUrl: null, excludedImages: [], imageOrder: [] };
     } catch {
-      return { primaryImageUrl: null, excludedImages: [] };
+      return { primaryImageUrl: null, excludedImages: [], imageOrder: [] };
     }
   });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+  );
 
   const imageOverridesMutation = trpc.multiProduct.updateMultiProductListing.useMutation({
     onSuccess: () => onChange(),
@@ -69,6 +163,26 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     persistImageOverrides({
       ...imageOverrides,
       excludedImages: imageOverrides.excludedImages.filter(u => u !== url),
+    });
+  }
+
+  function reorderImages(visibleUrlsOrdered: string[]) {
+    persistImageOverrides({
+      ...imageOverrides,
+      imageOrder: visibleUrlsOrdered,
+    });
+  }
+
+  function getOrderedVisible(allImages: ProductImage[]): ProductImage[] {
+    const visible = allImages.filter(img => !imageOverrides.excludedImages.includes(img.imageUrl));
+    if (!imageOverrides.imageOrder || imageOverrides.imageOrder.length === 0) {
+      return visible;
+    }
+    const orderMap = new Map(imageOverrides.imageOrder.map((url, idx) => [url, idx]));
+    return [...visible].sort((a, b) => {
+      const ia = orderMap.get(a.imageUrl) ?? Infinity;
+      const ib = orderMap.get(b.imageUrl) ?? Infinity;
+      return ia - ib;
     });
   }
 
@@ -154,65 +268,59 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
         {imagesQuery.isLoading ? (
           <p className="text-xs text-gray-500">Carregando fotos...</p>
         ) : (() => {
-          const allImages = imagesQuery.data?.images ?? [];
-          const visibleImages = allImages.filter(img => !imageOverrides.excludedImages.includes(img.imageUrl));
+          const allImages: ProductImage[] = imagesQuery.data?.images ?? [];
+          const orderedVisible = getOrderedVisible(allImages);
           const excludedImages = allImages.filter(img => imageOverrides.excludedImages.includes(img.imageUrl));
 
-          if (visibleImages.length === 0 && excludedImages.length === 0) {
+          if (orderedVisible.length === 0 && excludedImages.length === 0) {
             return <p className="text-xs text-gray-500">Nenhuma foto encontrada nos produtos vinculados.</p>;
           }
 
           return (
             <>
-              {visibleImages.length === 0 ? (
+              {orderedVisible.length === 0 ? (
                 <p className="text-xs text-gray-500 italic">Todas as fotos foram excluidas.</p>
               ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-                  {visibleImages.map((img, idx) => {
-                    const isCustomPrimary = imageOverrides.primaryImageUrl === img.imageUrl;
-                    const isAutoPrimary = !imageOverrides.primaryImageUrl && img.isPrimary;
-                    const isPrimary = isCustomPrimary || isAutoPrimary;
-
-                    return (
-                      <div key={idx} className="relative group border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                        <img
-                          src={img.imageUrl}
-                          alt={img.productName}
-                          className="w-full h-24 object-cover"
-                          loading="lazy"
-                        />
-                        {isPrimary && (
-                          <span className="absolute top-1 left-1 text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-semibold z-10">
-                            Principal
-                          </span>
-                        )}
-
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 z-20">
-                          {!isPrimary && (
-                            <button
-                              onClick={() => setPrimary(img.imageUrl)}
-                              className="text-[10px] bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded"
-                              title="Marcar como capa"
-                            >
-                              Capa
-                            </button>
-                          )}
-                          <button
-                            onClick={() => excludeImage(img.imageUrl)}
-                            className="text-[10px] bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded"
-                            title="Excluir foto"
-                          >
-                            Excluir
-                          </button>
-                        </div>
-
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 py-0.5 truncate">
-                          {img.productName}
-                        </div>
+                <>
+                  {orderedVisible.length > 1 && (
+                    <p className="text-[10px] text-gray-500 mb-2">Arraste as fotos para reordenar.</p>
+                  )}
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={(ev: DragEndEvent) => {
+                      const { active, over } = ev;
+                      if (!over || active.id === over.id) return;
+                      const oldIndex = orderedVisible.findIndex(img => img.imageUrl === active.id);
+                      const newIndex = orderedVisible.findIndex(img => img.imageUrl === over.id);
+                      if (oldIndex < 0 || newIndex < 0) return;
+                      const newOrder = arrayMove(orderedVisible, oldIndex, newIndex);
+                      reorderImages(newOrder.map(i => i.imageUrl));
+                    }}
+                  >
+                    <SortableContext
+                      items={orderedVisible.map(i => i.imageUrl)}
+                      strategy={rectSortingStrategy}
+                    >
+                      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                        {orderedVisible.map((img) => {
+                          const isCustomPrimary = imageOverrides.primaryImageUrl === img.imageUrl;
+                          const isAutoPrimary = !imageOverrides.primaryImageUrl && img.isPrimary;
+                          const isPrimary = isCustomPrimary || isAutoPrimary;
+                          return (
+                            <SortableImage
+                              key={img.imageUrl}
+                              img={img}
+                              isPrimary={isPrimary}
+                              onSetPrimary={() => setPrimary(img.imageUrl)}
+                              onExclude={() => excludeImage(img.imageUrl)}
+                            />
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
+                    </SortableContext>
+                  </DndContext>
+                </>
               )}
 
               {excludedImages.length > 0 && (
