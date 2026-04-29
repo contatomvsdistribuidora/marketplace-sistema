@@ -156,6 +156,24 @@ export function CombinedWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products.length]);
 
+  // Propaga globalStock per-product → opt.stock vazio das celulas
+  useEffect(() => {
+    setOptionDetailsMatrix(matrix => {
+      let changed = false;
+      const next = matrix.map((row, productIdx) => {
+        const gs = pricingPerProduct[productIdx]?.globalStock;
+        if (!gs || gs === "") return row;
+        return row.map(opt => {
+          if (opt.stock !== "" && opt.stock !== null && opt.stock !== undefined) return opt;
+          changed = true;
+          return { ...opt, stock: gs };
+        });
+      });
+      return changed ? next : matrix;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pricingPerProduct]);
+
   const updateProductPricing = (productIdx: number, field: keyof PricingGlobals, value: string) => {
     setPricingPerProduct(prev => {
       const next = [...prev];
@@ -973,7 +991,8 @@ export function CombinedWizard({
   }
 
   const rangeAlert   = step === "C" ? priceRangeAlert() : null;
-  const hasPricing   = parseFloat(pricing.unitCost) > 0 || parseFloat(pricing.batchCost) > 0;
+  // hasPricing global (legado): true se QUALQUER produto tem custos preenchidos
+  const hasPricing   = pricingPerProduct.some(p => parseFloat(p?.unitCost) > 0 || parseFloat(p?.batchCost) > 0) || parseFloat(pricing.unitCost) > 0 || parseFloat(pricing.batchCost) > 0;
 
   function replicateGlobalParams() {
     setPerVarEnabled(optionDetails.map(() => false));
@@ -1579,6 +1598,8 @@ export function CombinedWizard({
                       if (!product) return [];
                       return row.map((opt, idx) => {
                         const c = computePricing(opt, idx, productIdx);
+                        const pp = pricingPerProduct[productIdx];
+                        const hasPricingForRow = parseFloat(pp?.unitCost ?? "") > 0 || parseFloat(pp?.batchCost ?? "") > 0;
                         const badge = profitBadge(c.profitPct);
                         const isNeg = c.marginContribution < 0;
                         const isFirstInGroup = idx === 0;
@@ -1684,7 +1705,7 @@ export function CombinedWizard({
                               <input
                                 type="number"
                                 min="0"
-                                placeholder="0"
+                                placeholder={pricingPerProduct[productIdx]?.globalStock || "0"}
                                 value={opt.stock}
                                 onChange={(e) => updateDetail(opt.id, "stock", e.target.value, productIdx)}
                                 className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
@@ -1693,7 +1714,7 @@ export function CombinedWizard({
 
                             {/* Lucro */}
                             <td className="px-2 py-1.5">
-                              {hasPricing ? (
+                              {hasPricingForRow ? (
                                 <div
                                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold cursor-help ${
                                     isNeg
