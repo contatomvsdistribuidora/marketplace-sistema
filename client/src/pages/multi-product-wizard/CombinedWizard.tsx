@@ -152,6 +152,9 @@ export function CombinedWizard({
   // Override do nome do produto (max 20 chars - limite Shopee var1)
   const [productNameOverrides, setProductNameOverrides] = useState<Record<number, string>>({});
 
+  // Celula selecionada na matriz para mostrar card de calculo detalhado
+  const [selectedCell, setSelectedCell] = useState<{ productIdx: number; optIdx: number } | null>(null);
+
   // Sincronizar pricingPerProduct quando products muda
   useEffect(() => {
     setPricingPerProduct(prev => {
@@ -1689,8 +1692,19 @@ export function CombinedWizard({
                         const isFirstInGroup = idx === 0;
                         const groupBorder = isFirstInGroup && productIdx > 0 ? "border-t-2 border-t-gray-300" : "";
 
+                        const isSelected = selectedCell?.productIdx === productIdx && selectedCell?.optIdx === idx;
                         return (
-                          <tr key={opt.id} className={`border-b border-gray-100 ${isNeg ? "bg-red-50" : "hover:bg-gray-50"} ${groupBorder}`}>
+                          <tr
+                            key={opt.id}
+                            onClick={() => setSelectedCell({ productIdx, optIdx: idx })}
+                            className={`border-b border-gray-100 cursor-pointer transition ${
+                              isSelected
+                                ? "bg-orange-50 ring-2 ring-orange-300"
+                                : isNeg
+                                ? "bg-red-50"
+                                : "hover:bg-gray-50/50"
+                            } ${groupBorder}`}
+                          >
                             {/* Coluna Produto: rowSpan SO na primeira linha do grupo */}
                             {isFirstInGroup ? (
                               <td rowSpan={row.length} className="px-2 py-2 align-top border-r border-gray-200 bg-gray-50/30">
@@ -1703,6 +1717,7 @@ export function CombinedWizard({
                                       type="text"
                                       maxLength={20}
                                       value={productNameOverrides[productIdx] ?? (product.name ?? "").slice(0, 20)}
+                                      onClick={(e) => e.stopPropagation()}
                                       onChange={(e) => {
                                         const v = e.target.value.slice(0, 20);
                                         setProductNameOverrides(prev => ({ ...prev, [productIdx]: v }));
@@ -1722,6 +1737,7 @@ export function CombinedWizard({
                                 type="text"
                                 value={opt.label}
                                 maxLength={20}
+                                onClick={(e) => e.stopPropagation()}
                                 onChange={e => {
                                   updateOptionLabel(opt.id, e.target.value.slice(0, 20), productIdx);
                                   if (idx > 0) {
@@ -1747,6 +1763,7 @@ export function CombinedWizard({
                                   step={integer ? "1" : "0.01"}
                                   placeholder={ph}
                                   value={(opt as any)[field]}
+                                  onClick={(e) => e.stopPropagation()}
                                   onKeyDown={integer ? (e) => { if (e.key === "." || e.key === ",") e.preventDefault(); } : undefined}
                                   onChange={e => {
                                     let v = e.target.value;
@@ -1769,6 +1786,7 @@ export function CombinedWizard({
                                 maxLength={64}
                                 placeholder={product.sku ? `${product.sku}-${idx + 1}` : "SKU"}
                                 value={opt.sku}
+                                onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => updateDetail(opt.id, "sku", e.target.value, productIdx)}
                                 className="w-32 px-1.5 py-1 border border-gray-200 rounded text-xs font-mono focus:outline-none focus:ring-1 focus:ring-orange-400"
                               />
@@ -1783,6 +1801,7 @@ export function CombinedWizard({
                                   step="0.01"
                                   placeholder={c.price > 0 ? c.price.toFixed(2) : "0.00"}
                                   value={opt.price}
+                                  onClick={(e) => e.stopPropagation()}
                                   onChange={(e) => updateDetail(opt.id, "price", e.target.value, productIdx)}
                                   className={`w-20 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
                                     isNeg ? "border-red-400" : "border-gray-200"
@@ -1801,6 +1820,7 @@ export function CombinedWizard({
                                 min="0"
                                 placeholder={pricingPerProduct[productIdx]?.globalStock || "0"}
                                 value={opt.stock}
+                                onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => updateDetail(opt.id, "stock", e.target.value, productIdx)}
                                 className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
                               />
@@ -1835,6 +1855,103 @@ export function CombinedWizard({
                   </tbody>
                 </table>
               </div>
+
+              {/* Card de calculo da celula selecionada */}
+              {selectedCell && (() => {
+                const product = products[selectedCell.productIdx];
+                const row = optionDetailsMatrix[selectedCell.productIdx];
+                const opt = row?.[selectedCell.optIdx];
+                if (!product || !opt) return null;
+                const pp = pricingPerProduct[selectedCell.productIdx] ?? pricing;
+                const c = computePricing(opt, selectedCell.optIdx, selectedCell.productIdx);
+
+                const finalPrice = parseFloat(opt.price) > 0 ? parseFloat(opt.price) : c.price;
+                const profit = finalPrice - c.totalProductCost - c.platformCost;
+                const profitPct = finalPrice > 0 ? (profit / finalPrice) * 100 : 0;
+
+                const modeLabel =
+                  pricingMode === "multiplier" ? `Multiplicador ${pp.marginMultiplier}x`
+                  : pricingMode === "margin"   ? `Margem desejada ${pp.desiredMargin}%`
+                  : `Lucro minimo R$ ${pp.minProfit}`;
+
+                const txFee = parseFloat(pp.transactionFee) || 0;
+                const packaging = parseFloat(pp.packagingCost) || 0;
+                const shipping = parseFloat(pp.shippingCost) || 0;
+                const commissionValue = finalPrice * c.commissionRate + c.commissionFixed;
+                const taxValue = finalPrice * (txFee / 100);
+                const minMargin = parseFloat(pp.minMarginPct) || 0;
+
+                return (
+                  <div className="mt-4 border-2 border-orange-300 rounded-xl bg-orange-50/50 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        Calculo: {productNameOverrides[selectedCell.productIdx] ?? product.name} — {opt.label || "(sem label)"}
+                      </h4>
+                      <button
+                        onClick={() => setSelectedCell(null)}
+                        className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-white"
+                      >
+                        fechar
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-gray-500 mb-2">Modo: {modeLabel}</div>
+                    <div className="space-y-1.5 text-xs font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-gray-700">Custo produto (qtd {c.qty}x):</span>
+                        <span className="text-gray-900">R$ {c.totalProductCost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-700">+ Embalagem:</span>
+                        <span className="text-gray-900">R$ {packaging.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-700">+ Frete:</span>
+                        <span className="text-gray-900">R$ {shipping.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-700">+ Comissao Shopee ({(c.commissionRate * 100).toFixed(1)}% + R$ {c.commissionFixed.toFixed(2)}):</span>
+                        <span className="text-gray-900">R$ {commissionValue.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-700">+ Taxa transacao ({txFee}%):</span>
+                        <span className="text-gray-900">R$ {taxValue.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-gray-300 pt-1.5 mt-1.5">
+                        <span className="text-gray-800 font-semibold">Custo plataforma total:</span>
+                        <span className="text-gray-900 font-semibold">R$ {c.platformCost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-800 font-semibold">Custo total (produto + plataforma):</span>
+                        <span className="text-gray-900 font-semibold">R$ {(c.totalProductCost + c.platformCost).toFixed(2)}</span>
+                      </div>
+                      {c.effectiveDisc !== 0 && (
+                        <div className="flex justify-between text-blue-700">
+                          <span>Desconto progressivo aplicado:</span>
+                          <span>{c.effectiveDisc.toFixed(1)}% (fator {c.factor.toFixed(3)})</span>
+                        </div>
+                      )}
+                      {c.minMarginAdjusted && minMargin > 0 && (
+                        <div className="flex justify-between text-blue-700">
+                          <span>Piso aplicado pela margem min ({minMargin}%):</span>
+                          <span>↑ ajustado</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t-2 border-orange-400 pt-2 mt-2 text-base">
+                        <span className="text-gray-900 font-bold">PRECO FINAL:</span>
+                        <span className="text-orange-700 font-bold">R$ {finalPrice.toFixed(2)}</span>
+                      </div>
+                      <div className={`flex justify-between font-semibold ${profit < 0 ? "text-red-700" : "text-green-700"}`}>
+                        <span>{profit < 0 ? "PREJUIZO" : "Lucro liquido"}:</span>
+                        <span>R$ {profit.toFixed(2)} ({profitPct.toFixed(1)}%)</span>
+                      </div>
+                      <div className="flex justify-between text-gray-500 pt-1 mt-1 border-t border-gray-200">
+                        <span>Peso/Dim:</span>
+                        <span>{c.weight.toFixed(2)}kg · {c.length.toFixed(0)}×{c.width.toFixed(0)}×{c.height.toFixed(0)}cm</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
