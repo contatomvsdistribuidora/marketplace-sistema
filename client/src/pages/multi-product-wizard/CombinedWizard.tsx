@@ -1890,11 +1890,27 @@ export function CombinedWizard({
               {/* Resumo Ficha Tecnica */}
               <div className="border border-gray-200 rounded-xl bg-white p-4">
                 <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 Ficha Tecnica</h4>
-                <p className="text-xs text-gray-600">
-                  {Object.keys(attributeValues).length > 0
-                    ? `${Object.keys(attributeValues).length} atributo(s) preenchido(s)`
-                    : "Nenhum atributo preenchido"}
-                </p>
+                {Object.keys(attributeValues).length === 0 ? (
+                  <p className="text-xs text-gray-400">Nenhum atributo preenchido</p>
+                ) : (
+                  <div className="space-y-1">
+                    {Object.entries(attributeValues).map(([attrIdStr, val]: [string, any]) => {
+                      const attrId = Number(attrIdStr);
+                      const attrDef = Array.isArray(categoryAttributes)
+                        ? (categoryAttributes as any[]).find((a: any) => Number(a.attribute_id) === attrId)
+                        : undefined;
+                      const name = attrDef?.display_attribute_name ?? attrDef?.original_attribute_name ?? `Atributo ${attrId}`;
+                      const display = val?.displayValue ?? val?.originalValue ?? "—";
+                      const unit = val?.valueUnit ? ` ${val.valueUnit}` : "";
+                      return (
+                        <div key={attrIdStr} className="flex items-start gap-2 text-xs">
+                          <span className="text-gray-500 min-w-[120px] truncate">{name}:</span>
+                          <span className="text-gray-800 font-medium flex-1">{display}{unit}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Acoes */}
