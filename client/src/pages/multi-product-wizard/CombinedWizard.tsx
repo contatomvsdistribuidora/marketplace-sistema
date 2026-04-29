@@ -1414,138 +1414,25 @@ export function CombinedWizard({
                 </div>
               )}
 
-              {/* ── Tabela 2D: linhas = produtos, cards = opcoes ── */}
-              {optionDetailsMatrix.map((row, productIdx) => {
-                const product = products[productIdx];
-                if (!product) return null;
-                return (
-                  <section key={`${product.source}:${product.sourceId}`} className="border rounded-xl overflow-hidden mb-4">
-                    {/* Card de configuracoes especificas deste produto */}
-                    <div className="border-b border-gray-200 bg-white p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-xs font-semibold text-gray-700 flex items-center gap-2">
-                          <Settings className="w-3.5 h-3.5 text-gray-500" /> Configurações de {product.name}
-                        </h4>
-                        {products.length > 1 && (
-                          <button
-                            onClick={() => replicateConfigToAll(productIdx)}
-                            className="text-xs text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
-                            title="Copiar custos/multiplicador/margem deste produto para os demais"
-                          >
-                            ⚡ Replicar config aos outros
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Linha 1: Custos & taxas */}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de uma unidade individual do produto. Use se compra unitario.">Custo unit. (R$)</label>
-                          <input type="number" min="0" step="0.01" placeholder="0.00"
-                            value={pricingPerProduct[productIdx]?.unitCost ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "unitCost", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Valor total pago pelo lote completo do produto.">Custo lote (R$)</label>
-                          <input type="number" min="0" step="0.01" placeholder="0.00"
-                            value={pricingPerProduct[productIdx]?.batchCost ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "batchCost", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Quantas unidades vem no lote pago. Calcula custo/unidade automaticamente.">Qtd lote</label>
-                          <input type="number" min="1" step="1" placeholder="100"
-                            value={pricingPerProduct[productIdx]?.baseProductQty ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "baseProductQty", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo da embalagem da sua operacao por venda.">Embalagem (R$)</label>
-                          <input type="number" min="0" step="0.01" placeholder="0.00"
-                            value={pricingPerProduct[productIdx]?.packagingCost ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "packagingCost", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de envio estimado por unidade vendida.">Frete (R$)</label>
-                          <input type="number" min="0" step="0.01" placeholder="0.00"
-                            value={pricingPerProduct[productIdx]?.shippingCost ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "shippingCost", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Taxa da processadora de pagamento (geralmente 2%).">Taxa transação (%)</label>
-                          <input type="number" min="0" step="0.1" placeholder="2"
-                            value={pricingPerProduct[productIdx]?.transactionFee ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "transactionFee", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                      </div>
-
-                      {/* Linha 2: Pricing mode params */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        <div>
-                          <label
-                            className="block text-[11px] text-gray-500 mb-0.5"
-                            title={
-                              pricingMode === "multiplier"
-                                ? "Quantas vezes o custo total vira preco. Ex: 2.5 = preco e 2.5x o custo."
-                                : pricingMode === "margin"
-                                ? "Margem percentual desejada apos descontar custos Shopee."
-                                : "Lucro minimo em reais por venda."
-                            }
-                          >
-                            {modeParamLabel}
-                          </label>
-                          <input type="number" min="0" step={pricingMode === "multiplier" ? "0.1" : "1"}
-                            placeholder={modeGlobalPlaceholder}
-                            value={pricingPerProduct[productIdx]?.[modeGlobalKey] ?? ""}
-                            onChange={e => updateProductPricing(productIdx, modeGlobalKey, e.target.value)}
-                            className="w-full px-2 py-1.5 border border-orange-300 bg-orange-50 rounded text-xs font-medium focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                        {pricingMode === "multiplier" && (
-                          <div>
-                            <label className="block text-[11px] text-gray-500 mb-0.5" title="Desconto progressivo aplicado por faixa de quantidade.">Desc. faixa (%)</label>
-                            <input type="number" min="0" max="100" step="0.1" placeholder="0"
-                              value={pricingPerProduct[productIdx]?.defaultDiscount ?? ""}
-                              onChange={e => updateProductPricing(productIdx, "defaultDiscount", e.target.value)}
-                              className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                          </div>
-                        )}
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Se o calculo der margem abaixo disso, sobe o preco automaticamente.">Margem mín. (%)</label>
-                          <input type="number" min="0" max="100" step="0.1" placeholder="15"
-                            value={pricingPerProduct[productIdx]?.minMarginPct ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "minMarginPct", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-0.5" title="Estoque padrao aplicado a todas variacoes (pode sobrescrever em cada uma).">Estoque global</label>
-                          <input type="number" min="0" placeholder="0"
-                            value={pricingPerProduct[productIdx]?.globalStock ?? ""}
-                            onChange={e => updateProductPricing(productIdx, "globalStock", e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Header do produto */}
-                    <header className="flex items-center gap-3 p-4 bg-gray-50 border-b border-gray-200">
+              {/* ── CARDS DE CONFIGURACAO PER-PRODUCT (empilhados no topo) ── */}
+              {products.map((product, productIdx) => (
+                <div key={`cfg-${product.source}:${product.sourceId}`} className="border border-gray-200 rounded-xl bg-white p-4 mb-3">
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <h4 className="text-xs font-semibold text-gray-700 flex items-center gap-2 flex-1 min-w-0">
                       {product.imageUrl && (
-                        <img src={product.imageUrl} alt={product.name} className="w-12 h-12 rounded object-cover border border-gray-200" />
+                        <img src={product.imageUrl} alt={product.name} className="w-8 h-8 rounded object-cover flex-shrink-0" />
                       )}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-gray-900 truncate">{product.name}</p>
-                        {product.sku && <p className="text-xs text-gray-500">SKU base: {product.sku}</p>}
-                      </div>
+                      <Settings className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                      <span className="truncate">Configurações de {product.name}</span>
+                    </h4>
+                    <div className="flex items-center gap-2 flex-wrap">
                       {selectedType === "quantidade" && (
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs text-gray-600">Qty base:</label>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[11px] text-gray-600" title="Quantidade base do produto cadastrado (ex: pacote de 100un)">Qty base:</label>
                           <input
                             type="text"
                             inputMode="numeric"
-                            placeholder={pricing.baseProductQty || "1"}
+                            placeholder={pricingPerProduct[productIdx]?.baseProductQty || "1"}
                             value={perRowBaseQty[productIdx] ?? ""}
                             onChange={e => setPerRowBaseQty(arr => {
                               const next = [...arr];
@@ -1553,193 +1440,286 @@ export function CombinedWizard({
                               next[productIdx] = e.target.value;
                               return next;
                             })}
-                            className="w-20 text-xs rounded-lg border border-gray-300 px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-400"
+                            className="w-16 text-[11px] rounded border border-gray-300 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-400"
                           />
                         </div>
                       )}
-                      {row.length > 1 && (
-                        <button
-                          onClick={() => autoGenerateFromFirst(productIdx)}
-                          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
-                          title="Replica peso/dim da 1a opcao para as demais"
-                        >
+                      {(optionDetailsMatrix[productIdx]?.length ?? 0) > 1 && (
+                        <button onClick={() => autoGenerateFromFirst(productIdx)}
+                          className="text-[11px] text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
+                          title="Replica peso/dim da 1a opcao pras demais deste produto">
                           ⚡ Propagar
                         </button>
                       )}
                       {products.length > 1 && (
-                        <button
-                          onClick={() => replicateWeightDimToAll(productIdx)}
-                          className="text-xs text-purple-600 hover:text-purple-700 border border-purple-200 rounded px-2 py-1 bg-white ml-1"
-                          title="Copiar peso e dimensoes deste produto para os demais (mantendo a mesma proporcao)"
-                        >
-                          📦 Peso/Dim aos outros
-                        </button>
+                        <>
+                          <button onClick={() => replicateConfigToAll(productIdx)}
+                            className="text-[11px] text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
+                            title="Copiar custos/multiplicador/margem deste produto para os demais">
+                            ⚡ Config aos outros
+                          </button>
+                          <button onClick={() => replicateWeightDimToAll(productIdx)}
+                            className="text-[11px] text-purple-600 hover:text-purple-700 border border-purple-200 rounded px-2 py-1 bg-white"
+                            title="Copiar peso e dimensoes deste produto para os demais">
+                            📦 Peso/Dim
+                          </button>
+                          <button onClick={() => replicateSkusToAll(productIdx)}
+                            className="text-[11px] text-green-600 hover:text-green-700 border border-green-200 rounded px-2 py-1 bg-white"
+                            title="Replicar padrao de SKU para os demais produtos">
+                            🏷️ SKUs
+                          </button>
+                        </>
                       )}
-                      {products.length > 1 && (
-                        <button
-                          onClick={() => replicateSkusToAll(productIdx)}
-                          className="text-xs text-green-600 hover:text-green-700 border border-green-200 rounded px-2 py-1 bg-white ml-1"
-                          title="Replicar padrao de SKU para os demais produtos (com prefixo de cada um)"
-                        >
-                          🏷️ SKUs aos outros
-                        </button>
-                      )}
-                    </header>
-
-                    {/* Tabela compacta de opcoes (1 linha por opcao) */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead className="bg-gray-50 border-b border-gray-200">
-                          <tr>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">#</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Variação</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Peso (kg)</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Comp (cm)</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Larg (cm)</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Alt (cm)</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">SKU</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Preço</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Estoque</th>
-                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Lucro</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {row.map((opt, idx) => {
-                            const c     = computePricing(opt, idx, productIdx);
-                            const badge = profitBadge(c.profitPct);
-                            const isNeg = c.marginContribution < 0;
-
-                            return (
-                              <tr key={opt.id} className={`border-b border-gray-100 ${isNeg ? "bg-red-50" : "hover:bg-gray-50"}`}>
-                                {/* # */}
-                                <td className="px-2 py-1.5 text-center font-bold text-orange-500">
-                                  {idx + 1}
-                                  {idx > 0 && autoGenerated.has(opt.id) && (
-                                    <span className="ml-0.5 text-blue-600" title="Auto-gerado a partir da 1ª opção">⚡</span>
-                                  )}
-                                </td>
-
-                                {/* Label editavel */}
-                                <td className="px-2 py-1.5">
-                                  <input
-                                    type="text"
-                                    value={opt.label}
-                                    maxLength={20}
-                                    onChange={e => {
-                                      updateOptionLabel(opt.id, e.target.value.slice(0, 20), productIdx);
-                                      if (idx > 0) {
-                                        setManuallyEdited(s => new Set(s).add(opt.id));
-                                        setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
-                                      }
-                                    }}
-                                    className="w-full px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 focus:border-orange-400"
-                                  />
-                                </td>
-
-                                {/* Peso/Comp/Larg/Alt */}
-                                {([
-                                  { field: "weight" as const, ph: c.weight > 0 ? c.weight.toFixed(2) : "0.50", integer: false },
-                                  { field: "length" as const, ph: c.length > 0 ? String(Math.round(c.length)) : "20", integer: true },
-                                  { field: "width"  as const, ph: c.width  > 0 ? String(Math.round(c.width))  : "15", integer: true },
-                                  { field: "height" as const, ph: c.height > 0 ? String(Math.round(c.height)) : "10", integer: true },
-                                ]).map(({ field, ph, integer }) => (
-                                  <td key={field} className="px-1.5 py-1.5">
-                                    <input
-                                      type="number"
-                                      min={integer ? "1" : "0"}
-                                      step={integer ? "1" : "0.01"}
-                                      placeholder={ph}
-                                      value={(opt as any)[field]}
-                                      onKeyDown={integer ? (e) => { if (e.key === "." || e.key === ",") e.preventDefault(); } : undefined}
-                                      onChange={e => {
-                                        let v = e.target.value;
-                                        if (integer && v !== "") v = String(Math.floor(Number(v) || 0));
-                                        updateDetail(opt.id, field, v, productIdx);
-                                        if (idx > 0) {
-                                          setManuallyEdited(s => new Set(s).add(opt.id));
-                                          setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
-                                        }
-                                      }}
-                                      className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 focus:border-orange-400"
-                                    />
-                                  </td>
-                                ))}
-
-                                {/* SKU */}
-                                <td className="px-2 py-1.5">
-                                  <input
-                                    type="text"
-                                    maxLength={64}
-                                    placeholder={product.sku ? `${product.sku}-${idx + 1}` : "SKU"}
-                                    value={opt.sku}
-                                    onChange={(e) => updateDetail(opt.id, "sku", e.target.value, productIdx)}
-                                    className="w-32 px-1.5 py-1 border border-gray-200 rounded text-xs font-mono focus:outline-none focus:ring-1 focus:ring-orange-400 focus:border-orange-400"
-                                  />
-                                </td>
-
-                                {/* Preço */}
-                                <td className="px-2 py-1.5">
-                                  <div className="flex flex-col">
-                                    <input
-                                      type="number"
-                                      min="0.01"
-                                      step="0.01"
-                                      placeholder={c.price > 0 ? c.price.toFixed(2) : "0.00"}
-                                      value={opt.price}
-                                      onChange={(e) => updateDetail(opt.id, "price", e.target.value, productIdx)}
-                                      className={`w-20 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
-                                        isNeg ? "border-red-400" : "border-gray-200 focus:border-orange-400"
-                                      }`}
-                                    />
-                                    {!opt.price && hasPricing && (
-                                      <span className="text-[10px] text-gray-400 mt-0.5">calc: R$ {c.price.toFixed(2)}</span>
-                                    )}
-                                  </div>
-                                </td>
-
-                                {/* Estoque */}
-                                <td className="px-2 py-1.5">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    placeholder="0"
-                                    value={opt.stock}
-                                    onChange={(e) => updateDetail(opt.id, "stock", e.target.value, productIdx)}
-                                    className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 focus:border-orange-400"
-                                  />
-                                </td>
-
-                                {/* Lucro com tooltip do breakdown */}
-                                <td className="px-2 py-1.5">
-                                  {hasPricing ? (
-                                    <div
-                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold cursor-help ${
-                                        isNeg
-                                          ? "bg-red-100 text-red-700 border border-red-300"
-                                          : `${badge.bg}`
-                                      }`}
-                                      title={
-                                        isNeg
-                                          ? `PREJUÍZO\nMargem: R$ ${c.marginContribution.toFixed(2)}\nCusto: R$ ${c.totalProductCost.toFixed(2)}\nPlataforma: R$ ${c.platformCost.toFixed(2)}`
-                                          : `Lucro: ${c.profitPct.toFixed(1)}%\nMargem: R$ ${c.marginContribution.toFixed(2)}\nCusto produto: R$ ${c.totalProductCost.toFixed(2)}\nCusto plataforma: R$ ${c.platformCost.toFixed(2)}\nQtd: ${c.qty}x`
-                                      }
-                                    >
-                                      {isNeg ? "PREJ." : `${c.profitPct.toFixed(0)}%`}
-                                      {!isNeg && c.minMarginAdjusted && <span className="text-green-600">↑</span>}
-                                    </div>
-                                  ) : (
-                                    <span className="text-gray-300 text-xs">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
                     </div>
-                  </section>
-                );
-              })}
+                  </div>
+
+                  {/* Linha 1: Custos & taxas */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de uma unidade individual do produto.">Custo unit. (R$)</label>
+                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                        value={pricingPerProduct[productIdx]?.unitCost ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "unitCost", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Valor total pago pelo lote completo.">Custo lote (R$)</label>
+                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                        value={pricingPerProduct[productIdx]?.batchCost ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "batchCost", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Quantas unidades vem no lote.">Qtd lote</label>
+                      <input type="number" min="1" step="1" placeholder="100"
+                        value={pricingPerProduct[productIdx]?.baseProductQty ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "baseProductQty", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de embalagem por venda.">Embalagem (R$)</label>
+                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                        value={pricingPerProduct[productIdx]?.packagingCost ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "packagingCost", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de envio estimado.">Frete (R$)</label>
+                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                        value={pricingPerProduct[productIdx]?.shippingCost ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "shippingCost", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Taxa da processadora (geralmente 2%).">Taxa transação (%)</label>
+                      <input type="number" min="0" step="0.1" placeholder="2"
+                        value={pricingPerProduct[productIdx]?.transactionFee ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "transactionFee", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                  </div>
+
+                  {/* Linha 2: Pricing mode params */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5">{modeParamLabel}</label>
+                      <input type="number" min="0" step={pricingMode === "multiplier" ? "0.1" : "1"}
+                        placeholder={modeGlobalPlaceholder}
+                        value={pricingPerProduct[productIdx]?.[modeGlobalKey] ?? ""}
+                        onChange={e => updateProductPricing(productIdx, modeGlobalKey, e.target.value)}
+                        className="w-full px-2 py-1.5 border border-orange-300 bg-orange-50 rounded text-xs font-medium focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                    {pricingMode === "multiplier" && (
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-0.5" title="Desconto progressivo por faixa.">Desc. faixa (%)</label>
+                        <input type="number" min="0" max="100" step="0.1" placeholder="0"
+                          value={pricingPerProduct[productIdx]?.defaultDiscount ?? ""}
+                          onChange={e => updateProductPricing(productIdx, "defaultDiscount", e.target.value)}
+                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Se o calculo der margem abaixo disso, sobe o preco automaticamente.">Margem mín. (%)</label>
+                      <input type="number" min="0" max="100" step="0.1" placeholder="15"
+                        value={pricingPerProduct[productIdx]?.minMarginPct ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "minMarginPct", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Estoque padrao aplicado a todas variacoes.">Estoque global</label>
+                      <input type="number" min="0" placeholder="0"
+                        value={pricingPerProduct[productIdx]?.globalStock ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "globalStock", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* ── TABELA UNICA com TODAS as combinacoes (Produto x Opcao) ── */}
+              <div className="overflow-x-auto border border-gray-200 rounded-xl bg-white">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600 w-48">Produto</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Variação</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Peso (kg)</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Comp (cm)</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Larg (cm)</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Alt (cm)</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">SKU</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Preço</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Estoque</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-600">Lucro</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {optionDetailsMatrix.flatMap((row, productIdx) => {
+                      const product = products[productIdx];
+                      if (!product) return [];
+                      return row.map((opt, idx) => {
+                        const c = computePricing(opt, idx, productIdx);
+                        const badge = profitBadge(c.profitPct);
+                        const isNeg = c.marginContribution < 0;
+                        const isFirstInGroup = idx === 0;
+                        const groupBorder = isFirstInGroup && productIdx > 0 ? "border-t-2 border-t-gray-300" : "";
+
+                        return (
+                          <tr key={opt.id} className={`border-b border-gray-100 ${isNeg ? "bg-red-50" : "hover:bg-gray-50"} ${groupBorder}`}>
+                            {/* Coluna Produto: rowSpan SO na primeira linha do grupo */}
+                            {isFirstInGroup ? (
+                              <td rowSpan={row.length} className="px-2 py-2 align-top border-r border-gray-200 bg-gray-50/30">
+                                <div className="flex items-center gap-2">
+                                  {product.imageUrl && (
+                                    <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-medium text-gray-800 line-clamp-2">{product.name}</p>
+                                    {product.sku && <p className="text-[10px] text-gray-500 font-mono">{product.sku}</p>}
+                                  </div>
+                                </div>
+                              </td>
+                            ) : null}
+
+                            {/* Variação (label) */}
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="text"
+                                value={opt.label}
+                                maxLength={20}
+                                onChange={e => {
+                                  updateOptionLabel(opt.id, e.target.value.slice(0, 20), productIdx);
+                                  if (idx > 0) {
+                                    setManuallyEdited(s => new Set(s).add(opt.id));
+                                    setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
+                                  }
+                                }}
+                                className="w-full px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
+                              />
+                            </td>
+
+                            {/* Peso/Comp/Larg/Alt */}
+                            {([
+                              { field: "weight" as const, ph: c.weight > 0 ? c.weight.toFixed(2) : "0.50", integer: false },
+                              { field: "length" as const, ph: c.length > 0 ? String(Math.round(c.length)) : "20", integer: true },
+                              { field: "width"  as const, ph: c.width  > 0 ? String(Math.round(c.width))  : "15", integer: true },
+                              { field: "height" as const, ph: c.height > 0 ? String(Math.round(c.height)) : "10", integer: true },
+                            ]).map(({ field, ph, integer }) => (
+                              <td key={field} className="px-1.5 py-1.5">
+                                <input
+                                  type="number"
+                                  min={integer ? "1" : "0"}
+                                  step={integer ? "1" : "0.01"}
+                                  placeholder={ph}
+                                  value={(opt as any)[field]}
+                                  onKeyDown={integer ? (e) => { if (e.key === "." || e.key === ",") e.preventDefault(); } : undefined}
+                                  onChange={e => {
+                                    let v = e.target.value;
+                                    if (integer && v !== "") v = String(Math.floor(Number(v) || 0));
+                                    updateDetail(opt.id, field, v, productIdx);
+                                    if (idx > 0) {
+                                      setManuallyEdited(s => new Set(s).add(opt.id));
+                                      setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
+                                    }
+                                  }}
+                                  className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                />
+                              </td>
+                            ))}
+
+                            {/* SKU */}
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="text"
+                                maxLength={64}
+                                placeholder={product.sku ? `${product.sku}-${idx + 1}` : "SKU"}
+                                value={opt.sku}
+                                onChange={(e) => updateDetail(opt.id, "sku", e.target.value, productIdx)}
+                                className="w-32 px-1.5 py-1 border border-gray-200 rounded text-xs font-mono focus:outline-none focus:ring-1 focus:ring-orange-400"
+                              />
+                            </td>
+
+                            {/* Preço */}
+                            <td className="px-2 py-1.5">
+                              <div className="flex flex-col">
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  step="0.01"
+                                  placeholder={c.price > 0 ? c.price.toFixed(2) : "0.00"}
+                                  value={opt.price}
+                                  onChange={(e) => updateDetail(opt.id, "price", e.target.value, productIdx)}
+                                  className={`w-20 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
+                                    isNeg ? "border-red-400" : "border-gray-200"
+                                  }`}
+                                />
+                                {!opt.price && hasPricing && (
+                                  <span className="text-[10px] text-gray-400 mt-0.5">calc: R$ {c.price.toFixed(2)}</span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Estoque */}
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="0"
+                                value={opt.stock}
+                                onChange={(e) => updateDetail(opt.id, "stock", e.target.value, productIdx)}
+                                className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
+                              />
+                            </td>
+
+                            {/* Lucro */}
+                            <td className="px-2 py-1.5">
+                              {hasPricing ? (
+                                <div
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold cursor-help ${
+                                    isNeg
+                                      ? "bg-red-100 text-red-700 border border-red-300"
+                                      : `${badge.bg}`
+                                  }`}
+                                  title={
+                                    isNeg
+                                      ? `PREJUÍZO\nMargem: R$ ${c.marginContribution.toFixed(2)}\nCusto: R$ ${c.totalProductCost.toFixed(2)}\nPlataforma: R$ ${c.platformCost.toFixed(2)}`
+                                      : `Lucro: ${c.profitPct.toFixed(1)}%\nMargem: R$ ${c.marginContribution.toFixed(2)}\nCusto produto: R$ ${c.totalProductCost.toFixed(2)}\nCusto plataforma: R$ ${c.platformCost.toFixed(2)}\nQtd: ${c.qty}x`
+                                  }
+                                >
+                                  {isNeg ? "PREJ." : `${c.profitPct.toFixed(0)}%`}
+                                  {!isNeg && c.minMarginAdjusted && <span className="text-green-600">↑</span>}
+                                </div>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
