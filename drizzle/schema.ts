@@ -645,6 +645,7 @@ export const multiProductListings = mysqlTable("multi_product_listings", {
   variation2Type: varchar("variation_2_type", { length: 32 }),
   variation2OptionsJson: text("variation_2_options_json"),
   variation2CellsJson: text("variation_2_cells_json"),
+  wizardStateJson: text("wizard_state_json"),
   lastError: text("last_error"),
   publishedAt: timestamp("published_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
