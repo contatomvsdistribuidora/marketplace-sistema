@@ -3757,6 +3757,7 @@ export const appRouter = router({
         variation2Type: z.string().max(32).nullable().optional(),
         variation2OptionsJson: z.string().nullable().optional(),
         variation2CellsJson: z.string().nullable().optional(),
+        wizardStateJson: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         // Garante ownership
