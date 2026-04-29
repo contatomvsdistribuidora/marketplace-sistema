@@ -28,6 +28,7 @@ import {
   videoBank,
   shopeeAccounts,
   productCache,
+  shopeeProducts,
 } from "../drizzle/schema";
 
 /**
@@ -3703,6 +3704,87 @@ export const appRouter = router({
           .where(eq(multiProductListingItems.listingId, listing.id))
           .orderBy(asc(multiProductListingItems.position));
         return { listing, items };
+      }),
+
+    listProductImages: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "Anúncio combinado não encontrado." });
+
+        const items = await sharedDb
+          .select()
+          .from(multiProductListingItems)
+          .where(eq(multiProductListingItems.listingId, listing.id))
+          .orderBy(asc(multiProductListingItems.position));
+
+        const allImages: Array<{
+          productSource: "shopee" | "baselinker";
+          productSourceId: number;
+          productName: string;
+          imageUrl: string;
+          isPrimary: boolean;
+        }> = [];
+
+        for (const item of items) {
+          if (item.source === "shopee") {
+            const [sp] = await sharedDb
+              .select()
+              .from(shopeeProducts)
+              .where(and(
+                eq(shopeeProducts.itemId, Number(item.sourceId)),
+                eq(shopeeProducts.userId, ctx.user.id),
+              ))
+              .limit(1);
+            if (!sp) continue;
+
+            const urls: string[] = [];
+            if (Array.isArray(sp.images)) {
+              for (const u of sp.images) {
+                if (typeof u === "string" && u) urls.push(u);
+              }
+            }
+            if (urls.length === 0 && sp.imageUrl) urls.push(sp.imageUrl);
+
+            const productName = sp.itemName ?? `Shopee ${item.sourceId}`;
+            urls.forEach((url, idx) => {
+              allImages.push({
+                productSource: "shopee",
+                productSourceId: Number(item.sourceId),
+                productName,
+                imageUrl: url,
+                isPrimary: idx === 0,
+              });
+            });
+          } else if (item.source === "baselinker") {
+            const [pc] = await sharedDb
+              .select()
+              .from(productCache)
+              .where(and(
+                eq(productCache.productId, Number(item.sourceId)),
+                eq(productCache.userId, ctx.user.id),
+              ))
+              .limit(1);
+            if (!pc || !pc.imageUrl) continue;
+
+            allImages.push({
+              productSource: "baselinker",
+              productSourceId: Number(item.sourceId),
+              productName: pc.name ?? `BaseLinker ${item.sourceId}`,
+              imageUrl: pc.imageUrl,
+              isPrimary: true,
+            });
+          }
+        }
+
+        return { images: allImages };
       }),
 
     createMultiProductListing: protectedProcedure

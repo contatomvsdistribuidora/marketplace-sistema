@@ -19,6 +19,11 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const { data: invData } = trpc.settings.getInventoryId.useQuery();
   const inventoryId = invData?.inventoryId;
 
+  const imagesQuery = trpc.multiProduct.listProductImages.useQuery(
+    { id: listing.id },
+    { enabled: !!listing.id },
+  );
+
   const { data: videos, isLoading: videosLoading } = trpc.videoBank.listVideos.useQuery({
     activeOnly: true,
   });
@@ -92,6 +97,40 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
 
   return (
     <div className="space-y-4">
+      <div className="border border-gray-200 rounded-xl bg-white p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+          <ImageIcon className="h-4 w-4" />
+          Fotos dos Produtos Vinculados
+        </h3>
+
+        {imagesQuery.isLoading ? (
+          <p className="text-xs text-gray-500">Carregando fotos...</p>
+        ) : (imagesQuery.data?.images ?? []).length === 0 ? (
+          <p className="text-xs text-gray-500">Nenhuma foto encontrada nos produtos vinculados.</p>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+            {(imagesQuery.data?.images ?? []).map((img, idx) => (
+              <div key={idx} className="relative group border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+                <img
+                  src={img.imageUrl}
+                  alt={img.productName}
+                  className="w-full h-24 object-cover"
+                  loading="lazy"
+                />
+                {img.isPrimary && (
+                  <span className="absolute top-1 left-1 text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded">
+                    Principal
+                  </span>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 py-0.5 truncate">
+                  {img.productName}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
