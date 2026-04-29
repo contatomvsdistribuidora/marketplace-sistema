@@ -22,7 +22,7 @@ import {
   Loader2, Plus, Trash2, Sparkles, Hash, Ruler, Layers,
   Palette, PenLine, ArrowLeft, ArrowRight, Check,
   CheckCircle2, X, PlusCircle, AlertTriangle, TrendingUp,
-  ExternalLink,
+  ExternalLink, Settings,
 } from "lucide-react";
 
 const VARIATION_TYPES: { type: VariationType; label: string; icon: React.ReactNode; examples: string }[] = [
@@ -1142,207 +1142,105 @@ export function CombinedWizard({
                 {pricingMode === "profit"     && "Preço calculado via iteração para garantir o lucro mínimo em R$ por variação, considerando todos os custos da Shopee."}
               </div>
 
-              {/* ── Produto base ── */}
-              {selectedType === "quantidade" && (
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                  <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Produto base cadastrado</p>
-                  <p className="text-xs text-blue-500 mb-3">
-                    Quantas unidades o produto "{getBaseName()}" representa? Peso e dimensões serão calculados proporcionalmente.
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-600 mb-1 font-medium">Qtd. do produto base (un.)</label>
-                      <input
-                        type="number" min="0.001" step="1" placeholder="1"
-                        value={pricing.baseProductQty}
-                        onChange={e => setPricing(p => ({ ...p, baseProductQty: e.target.value }))}
-                        className="w-full px-3 py-2 border border-blue-300 bg-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-600 mb-1 font-medium">Custo total do lote (R$)</label>
-                      <input
-                        type="number" min="0" step="0.01" placeholder="ex: 50.00"
-                        value={pricing.batchCost}
-                        onChange={e => setPricing(p => ({ ...p, batchCost: e.target.value }))}
-                        className="w-full px-3 py-2 border border-blue-300 bg-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      />
-                      {pricing.batchCost && pricing.baseProductQty && (
-                        <p className="text-xs text-blue-700 mt-0.5 font-medium">
-                          Custo unit.: R${(parseFloat(pricing.batchCost) / Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001)).toFixed(4)}
-                        </p>
-                      )}
-                    </div>
-                    <div className="text-xs text-blue-600 space-y-0.5 pt-5">
-                      {getBaseWeight()       && <p>Peso base: <b>{getBaseWeight()} kg</b></p>}
-                      {getBaseLength() && <p>Dims: <b>{getBaseLength()}×{getBaseWidth()}×{getBaseHeight()} cm</b></p>}
-                    </div>
-                  </div>
-                  {(() => {
-                    const bq = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
-                    const bw = parseFloat(baseWeightOverride || getBaseWeight()) || 0;
-                    const bl = parseFloat(baseLengthOverride || getBaseLength()) || 0;
-                    const bwi = parseFloat(baseWidthOverride  || getBaseWidth())  || 0;
-                    const bh = parseFloat(baseHeightOverride  || getBaseHeight()) || 0;
-                    const exampleQty = extractQty(optionDetails[0]?.label ?? "") || bq;
-                    const ratio = exampleQty / bq;
-                    const sc = Math.cbrt(ratio);
-                    if (!bw && !bl) return null;
-                    return (
-                      <div className="mt-3 pt-3 border-t border-blue-200 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-blue-700">
-                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
-                          Ex. {exampleQty}un → Peso: <b>{bw > 0 ? (bw * ratio).toFixed(2) : "—"} kg</b>
-                        </span>
-                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
-                          Comp: <b>{bl > 0 ? (bl * sc).toFixed(1) : "—"} cm</b>
-                        </span>
-                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
-                          Larg: <b>{bwi > 0 ? (bwi * sc).toFixed(1) : "—"} cm</b>
-                        </span>
-                        <span className="bg-white border border-blue-100 rounded px-2 py-1">
-                          Alt: <b>{bh > 0 ? (bh * sc).toFixed(1) : "—"} cm</b>
-                        </span>
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
+              {/* ── Configurações globais (compacto: 2 linhas horizontais) ── */}
+              <div className="border border-gray-200 rounded-xl bg-white p-4 mb-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-gray-500" /> Configurações globais do anúncio
+                </h3>
 
-              {/* ── Campos globais ── */}
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Parâmetros globais</p>
-                  {optionDetails.length > 1 && (
-                    <button onClick={replicateGlobalParams}
-                      className="flex items-center gap-1.5 text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 px-3 py-1.5 rounded-lg transition">
-                      ↺ Replicar para todas as variações
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+                {/* Linha 1: Custos & taxas */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Custo unitário (R$)</label>
-                    <input type="number" min="0" step="0.001" placeholder="0.50" value={pricing.unitCost}
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Custo unit. (R$)</label>
+                    <input type="number" min="0" step="0.01" placeholder="0.00"
+                      value={pricing.unitCost}
                       onChange={e => setPricing(p => ({ ...p, unitCost: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-                    <p className="text-xs text-gray-400 mt-0.5">Custo por unidade individual</p>
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Custo embalagem (R$)</label>
-                    <input type="number" min="0" step="0.01" placeholder="2.00" value={pricing.packagingCost}
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Custo lote (R$)</label>
+                    <input type="number" min="0" step="0.01" placeholder="0.00"
+                      value={pricing.batchCost}
+                      onChange={e => setPricing(p => ({ ...p, batchCost: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Qtd lote</label>
+                    <input type="number" min="1" step="1" placeholder="100"
+                      value={pricing.baseProductQty}
+                      onChange={e => setPricing(p => ({ ...p, baseProductQty: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Embalagem (R$)</label>
+                    <input type="number" min="0" step="0.01" placeholder="0.00"
+                      value={pricing.packagingCost}
                       onChange={e => setPricing(p => ({ ...p, packagingCost: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Taxa transação (%)</label>
-                    <input type="number" min="0" step="0.1" placeholder="2" value={pricing.transactionFee}
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Frete (R$)</label>
+                    <input type="number" min="0" step="0.01" placeholder="0.00"
+                      value={pricing.shippingCost}
+                      onChange={e => setPricing(p => ({ ...p, shippingCost: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-0.5" title="Taxa da processadora de pagamento (geralmente 2%)">Taxa transação (%)</label>
+                    <input type="number" min="0" step="0.1" placeholder="2"
+                      value={pricing.transactionFee}
                       onChange={e => setPricing(p => ({ ...p, transactionFee: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                   </div>
+                </div>
 
-                  {/* Parâmetro específico do modo */}
+                {/* Linha 2: Pricing mode */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+                  <div className="col-span-2 lg:col-span-1">
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Modo</label>
+                    <div className="flex gap-1">
+                      {(["multiplier", "margin", "profit"] as const).map(m => (
+                        <button key={m} onClick={() => setPricingMode(m)}
+                          className={`flex-1 px-2 py-1.5 text-[11px] rounded border transition ${
+                            pricingMode === m
+                              ? "bg-orange-500 text-white border-orange-500"
+                              : "bg-white text-gray-600 border-gray-200 hover:border-orange-300"
+                          }`}>
+                          {m === "multiplier" ? "×Mult" : m === "margin" ? "%Marg" : "R$Lucro"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">
-                      {modeParamLabel} {pricingMode !== "profit" ? "(global)" : "mín. R$ (global)"}
-                    </label>
-                    <input type="number" min="0" step={pricingMode === "multiplier" ? "0.1" : "1"} placeholder={modeGlobalPlaceholder}
+                    <label className="block text-[11px] text-gray-500 mb-0.5">{modeParamLabel}</label>
+                    <input type="number" min="0" step={pricingMode === "multiplier" ? "0.1" : "1"}
+                      placeholder={modeGlobalPlaceholder}
                       value={pricing[modeGlobalKey]}
                       onChange={e => setPricing(p => ({ ...p, [modeGlobalKey]: e.target.value }))}
-                      className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 font-medium" />
+                      className="w-full px-2 py-1.5 border border-orange-300 bg-orange-50 rounded text-xs font-medium focus:outline-none focus:ring-1 focus:ring-orange-400" />
                   </div>
-
-                  {/* Desconto por faixa — só modo 1 */}
                   {pricingMode === "multiplier" && (
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Desconto por faixa (%)</label>
-                      <input type="number" min="0" max="50" step="0.1" placeholder="1" value={pricing.defaultDiscount}
+                      <label className="block text-[11px] text-gray-500 mb-0.5">Desc. faixa (%)</label>
+                      <input type="number" min="0" max="100" step="0.1" placeholder="0"
+                        value={pricing.defaultDiscount}
                         onChange={e => setPricing(p => ({ ...p, defaultDiscount: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                     </div>
                   )}
-                  {/* Margem mínima desejada */}
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Margem mínima desejada (%)</label>
-                    <input type="number" min="0" max="99" step="1" placeholder="15" value={pricing.minMarginPct}
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Margem mín. (%)</label>
+                    <input type="number" min="0" max="100" step="0.1" placeholder="15"
+                      value={pricing.minMarginPct}
                       onChange={e => setPricing(p => ({ ...p, minMarginPct: e.target.value }))}
-                      className="w-full px-3 py-2 border border-green-300 bg-green-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400 font-medium" />
-                    <p className="text-xs text-gray-400 mt-0.5">Preço sobe automaticamente se cair abaixo</p>
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                   </div>
-                  {/* Estoque global */}
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Estoque global</label>
-                    <input type="number" min="0" step="1" placeholder="0" value={pricing.globalStock}
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Estoque global</label>
+                    <input type="number" min="0" placeholder="0"
+                      value={pricing.globalStock}
                       onChange={e => setPricing(p => ({ ...p, globalStock: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-                    <p className="text-xs text-gray-400 mt-0.5">Replicar para todas ao clicar no botão</p>
-                  </div>
-                </div>
-
-                {/* Frete */}
-                <div className="border-t border-gray-200 pt-3">
-                  <label className="block text-xs text-gray-500 mb-1">
-                    Custo de envio estimado (R$)
-                    <span className="ml-1 text-gray-400 font-normal">— integração API Shopee em breve</span>
-                  </label>
-                  <input type="number" min="0" step="0.01" placeholder="0.00" value={pricing.shippingCost}
-                    onChange={e => setPricing(p => ({ ...p, shippingCost: e.target.value }))}
-                    className="w-40 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-                </div>
-
-                {/* Medidas do produto base — editáveis */}
-                <div className="border-t border-gray-200 pt-3 mt-3">
-                  <p className="text-xs font-semibold text-gray-600 mb-1">Medidas do produto base (sobrescrever)</p>
-                  <p className="text-xs text-gray-400 mb-2">Deixe em branco para usar os dados do produto Shopee. Usado no cálculo proporcional de cada variação.</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Peso (kg)</label>
-                      <input type="number" min="0" step="0.001"
-                        placeholder={getBaseWeight() || "0.5"}
-                        value={baseWeightOverride}
-                        onChange={e => setBaseWeightOverride(e.target.value)}
-                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Comp. (cm)</label>
-                      <input type="number" min="0" step="0.1"
-                        placeholder={getBaseLength() || "20"}
-                        value={baseLengthOverride}
-                        onChange={e => setBaseLengthOverride(e.target.value)}
-                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Larg. (cm)</label>
-                      <input type="number" min="0" step="0.1"
-                        placeholder={getBaseWidth() || "15"}
-                        value={baseWidthOverride}
-                        onChange={e => setBaseWidthOverride(e.target.value)}
-                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Alt. (cm)</label>
-                      <input type="number" min="0" step="0.1"
-                        placeholder={getBaseHeight() || "10"}
-                        value={baseHeightOverride}
-                        onChange={e => setBaseHeightOverride(e.target.value)}
-                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Tabela de comissões (informativo) */}
-                <div className="mt-3 border-t border-gray-200 pt-3">
-                  <p className="text-xs text-gray-400 font-semibold mb-1">Composição do custo Shopee 2026:</p>
-                  <div className="space-y-1.5 text-xs text-gray-500">
-                    <div className="flex flex-wrap gap-2">
-                      <span className="bg-orange-50 border border-orange-100 rounded px-2 py-1">
-                        <b className="text-gray-700">Comissão Shopee:</b> &lt; R$8 → 50%+R$0 · R$8–79 → 20%+R$4 · R$80–99 → 14%+R$16 · R$100–199 → 14%+R$20 · R$200+ → 14%+R$26
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <span className="bg-white border border-gray-200 rounded px-2 py-0.5"><b className="text-gray-600">Taxa de Pagamento:</b> configurável no campo acima (padrão 2%)</span>
-                      <span className="bg-white border border-gray-200 rounded px-2 py-0.5"><b className="text-gray-600">Embalagem:</b> custo da sua operação (campo acima)</span>
-                      <span className="bg-white border border-gray-200 rounded px-2 py-0.5"><b className="text-gray-600">Frete:</b> estimativa manual (API em breve)</span>
-                    </div>
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                   </div>
                 </div>
               </div>
