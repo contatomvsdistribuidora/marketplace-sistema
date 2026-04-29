@@ -56,6 +56,7 @@ export type Listing = {
   videoUrl: string | null;
   videoBankId: number | null;
   lastError: string | null;
+  wizardStateJson?: string | null;
 };
 
 export function itemKey(source: string, sourceId: number | string): string {

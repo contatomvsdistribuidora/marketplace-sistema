@@ -164,6 +164,7 @@ function WizardInner({
             multiListingId={listing.id}
             accountId={listing.shopeeAccountId}
             principalIndex={principalIndex}
+            wizardStateJson={listing.wizardStateJson ?? null}
             onSave={() => invalidate()}
             onClose={() => setStep("A")}
           />
