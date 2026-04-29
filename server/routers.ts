@@ -2,6 +2,7 @@ import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "./db";
 import { db as sharedDb } from "./db";
@@ -3695,7 +3696,7 @@ export const appRouter = router({
             eq(multiProductListings.userId, ctx.user.id),
           ))
           .limit(1);
-        if (!listing) throw new Error("Anúncio combinado não encontrado.");
+        if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "Anúncio combinado não encontrado." });
         const items = await sharedDb
           .select()
           .from(multiProductListingItems)

@@ -30,7 +30,14 @@ export default function MultiProductWizard() {
   const utils = trpc.useUtils();
   const listingQuery = trpc.multiProduct.getMultiProductListing.useQuery(
     { id: listingId! },
-    { enabled: listingId !== null, retry: false },
+    {
+      enabled: listingId !== null,
+      retry: (failureCount, error) => {
+        if ((error as any)?.data?.code === "NOT_FOUND") return false;
+        return failureCount < 2;
+      },
+      retryDelay: 1000,
+    },
   );
 
   // Redirect on missing/invalid id or unauthorized listing
@@ -40,8 +47,13 @@ export default function MultiProductWizard() {
       return;
     }
     if (listingQuery.error) {
-      toast.error(listingQuery.error.message || "Anúncio combinado não encontrado.");
-      setLocation("/multi-product");
+      const isNotFound = (listingQuery.error as any)?.data?.code === "NOT_FOUND";
+      if (isNotFound) {
+        toast.error("Anuncio combinado nao encontrado.");
+        setLocation("/multi-product");
+      } else {
+        toast.error("Erro ao carregar anuncio: " + (listingQuery.error.message ?? "tente novamente"));
+      }
     }
   }, [listingId, listingQuery.error]);
 

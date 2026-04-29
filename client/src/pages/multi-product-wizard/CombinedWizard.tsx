@@ -149,6 +149,9 @@ export function CombinedWizard({
   // Per-product pricing: pricingPerProduct[productIdx] tem os parametros desse produto
   const [pricingPerProduct, setPricingPerProduct] = useState<PricingGlobals[]>([]);
 
+  // Override do nome do produto (max 20 chars - limite Shopee var1)
+  const [productNameOverrides, setProductNameOverrides] = useState<Record<number, string>>({});
+
   // Sincronizar pricingPerProduct quando products muda
   useEffect(() => {
     setPricingPerProduct(prev => {
@@ -200,6 +203,7 @@ export function CombinedWizard({
       categoryId: selectedCategoryId,
       categoryBreadcrumb: selectedCategoryBreadcrumb,
       brandValue,
+      productNameOverrides,
     });
   }
 
@@ -226,6 +230,7 @@ export function CombinedWizard({
       if (s.categoryId !== undefined) setSelectedCategoryId(s.categoryId);
       if (s.categoryBreadcrumb !== undefined) setSelectedCategoryBreadcrumb(s.categoryBreadcrumb);
       if (s.brandValue !== undefined) setBrandValue(s.brandValue);
+      if (s.productNameOverrides !== undefined) setProductNameOverrides(s.productNameOverrides);
     } catch (e) {
       console.warn("Falha ao hidratar wizard state:", e);
     }
@@ -1689,13 +1694,23 @@ export function CombinedWizard({
                             {/* Coluna Produto: rowSpan SO na primeira linha do grupo */}
                             {isFirstInGroup ? (
                               <td rowSpan={row.length} className="px-2 py-2 align-top border-r border-gray-200 bg-gray-50/30">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-start gap-2">
                                   {product.imageUrl && (
                                     <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
                                   )}
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-medium text-gray-800 line-clamp-2">{product.name}</p>
-                                    {product.sku && <p className="text-[10px] text-gray-500 font-mono">{product.sku}</p>}
+                                  <div className="min-w-0 flex-1">
+                                    <input
+                                      type="text"
+                                      maxLength={20}
+                                      value={productNameOverrides[productIdx] ?? (product.name ?? "").slice(0, 20)}
+                                      onChange={(e) => {
+                                        const v = e.target.value.slice(0, 20);
+                                        setProductNameOverrides(prev => ({ ...prev, [productIdx]: v }));
+                                      }}
+                                      className="w-full text-xs font-medium text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-orange-400 focus:outline-none px-0.5 py-0.5"
+                                      title="Editavel - max 20 chars (limite Shopee para nome de variacao 1)"
+                                    />
+                                    {product.sku && <p className="text-[10px] text-gray-500 font-mono mt-0.5">{product.sku}</p>}
                                   </div>
                                 </div>
                               </td>
