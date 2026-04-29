@@ -243,8 +243,17 @@ export function CombinedWizard({
   // Categoria efetiva: começa do produto e fica editável no fluxo CREATE.
   // Em UPDATE/PROMOTE a Shopee bloqueia mudança (CATEGORY_CHANGED), então o
   // picker aparece desabilitado com tooltip explicativo.
-  const initialCategoryId = null; // modo combinado: operador escolhe categoria
+  // Modo combinado: pre-preenche com categoria do 1o produto Shopee, ou null se nenhum tiver
+  const initialCategoryId = products.find(p => p.source === "shopee" && p.categoryId)?.categoryId ?? null;
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(initialCategoryId);
+
+  // Sincroniza categoryId quando products resolve assincronamente
+  useEffect(() => {
+    if (selectedCategoryId !== null) return;
+    const fromShopee = products.find(p => p.source === "shopee" && p.categoryId)?.categoryId;
+    if (fromShopee) setSelectedCategoryId(fromShopee);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products.length]);
   // categoryName é o nome da folha (sem hierarquia) ou null pra
   // produtos sincronizados antes do cache de árvore. Resolvemos o
   // breadcrumb completo via tRPC abaixo quando há ID mas falta breadcrumb.
@@ -1256,6 +1265,28 @@ export function CombinedWizard({
                   {pricingMode === "profit"     && "Preço calculado para garantir lucro mínimo em R$ por variação."}
                 </span>
               </div>
+
+              {/* Categoria Shopee (selecao ou troca) */}
+              <div className="border border-gray-200 rounded-xl bg-white p-4 mb-3">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  🏷️ Categoria Shopee
+                </h3>
+                <CategoryPicker
+                  accountId={accountId}
+                  value={selectedCategoryId}
+                  valueBreadcrumb={selectedCategoryBreadcrumb}
+                  onChange={(id, crumb) => {
+                    setSelectedCategoryId(id);
+                    setSelectedCategoryBreadcrumb(crumb);
+                  }}
+                />
+              </div>
+
+              {!categoryId && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-3 text-xs text-yellow-800">
+                  💡 Selecione uma categoria acima para ver as especificacoes do produto.
+                </div>
+              )}
 
               {/* ── Especificações do Produto (Ficha Técnica) ── */}
               {categoryId && (

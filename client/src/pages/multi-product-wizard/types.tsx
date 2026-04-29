@@ -26,6 +26,7 @@ export type ResolvedProduct = {
   dimensionLength: string | null;
   dimensionWidth: string | null;
   dimensionHeight: string | null;
+  categoryId?: number | null;
 };
 
 export type ListingItem = {

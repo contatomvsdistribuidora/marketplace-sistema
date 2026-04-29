@@ -47,6 +47,7 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
           dimensionLength: null,
           dimensionWidth: null,
           dimensionHeight: null,
+          categoryId: null,
         });
       }
     }
@@ -65,6 +66,7 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
           dimensionLength: p.dimensionLength ?? null,
           dimensionWidth: p.dimensionWidth ?? null,
           dimensionHeight: p.dimensionHeight ?? null,
+          categoryId: p.categoryId != null ? Number(p.categoryId) : null,
         });
       }
     }
