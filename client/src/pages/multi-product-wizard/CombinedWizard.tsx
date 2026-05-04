@@ -1980,31 +1980,47 @@ export function CombinedWizard({
                           )}
                           <span className="text-sm font-semibold text-gray-800 truncate">{product.name}</span>
                         </div>
-                        <div className="space-y-1 ml-10">
-                          {row.map((opt, idx) => {
-                            const c = computePricing(opt, idx, productIdx);
-                            const pp = pricingPerProduct[productIdx];
-                            const hasPricingForRow = parseFloat(pp?.unitCost ?? "") > 0;
-                            const isNeg = c.marginContribution < 0;
-                            return (
-                              <div key={opt.id} className="flex items-center gap-3 text-xs">
-                                <span className="text-gray-700 font-medium w-16">{opt.label || "—"}</span>
-                                <span className="text-gray-500 w-32 truncate">
-                                  {opt.weight && `${opt.weight}kg `}
-                                  {opt.length && opt.width && opt.height && `${opt.length}×${opt.width}×${opt.height}cm`}
-                                </span>
-                                <span className="text-gray-500 font-mono w-32 truncate">{opt.sku || "—"}</span>
-                                <span className="text-gray-800 font-semibold w-20">R$ {parseFloat(opt.price || c.price.toFixed(2) || "0").toFixed(2)}</span>
-                                <span className="text-gray-500 w-16">Est: {opt.stock || pp?.globalStock || "0"}</span>
-                                {hasPricingForRow && (
-                                  <span className={`font-semibold ${isNeg ? "text-red-600" : "text-green-600"}`}>
-                                    {isNeg ? "PREJ" : `${c.profitPct.toFixed(0)}%`}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
+                        <table className="w-full text-xs ml-10 border border-gray-200 rounded">
+                          <thead className="bg-gray-50">
+                            <tr className="text-left text-gray-600 text-[11px]">
+                              <th className="px-2 py-1.5 border-b border-gray-200">Variação 1 (produto)</th>
+                              <th className="px-2 py-1.5 border-b border-gray-200">Variação 2</th>
+                              <th className="px-2 py-1.5 border-b border-gray-200 text-right">Preço</th>
+                              <th className="px-2 py-1.5 border-b border-gray-200 text-right">Estoque</th>
+                              <th className="px-2 py-1.5 border-b border-gray-200 text-right">Lucro</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {row.map((opt, idx) => {
+                              const c = computePricing(opt, idx, productIdx);
+                              const pp = pricingPerProduct[productIdx];
+                              const hasPricingForRow = parseFloat(pp?.unitCost ?? "") > 0;
+                              const isNeg = c.marginContribution < 0;
+                              const productLabel = productNameOverrides[productIdx] ?? (product.name ?? "").slice(0, 20);
+                              return (
+                                <tr key={opt.id} className="border-b border-gray-100 last:border-b-0">
+                                  <td className="px-2 py-1.5 text-gray-800">{productLabel}</td>
+                                  <td className="px-2 py-1.5 text-gray-700 font-medium">{opt.label || "—"}</td>
+                                  <td className="px-2 py-1.5 text-gray-800 font-semibold text-right">
+                                    R$ {parseFloat(opt.price || c.price.toFixed(2) || "0").toFixed(2)}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-gray-600 text-right">
+                                    {opt.stock || pp?.globalStock || "0"}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right">
+                                    {hasPricingForRow ? (
+                                      <span className={`font-semibold ${isNeg ? "text-red-600" : "text-green-600"}`}>
+                                        {isNeg ? "PREJ" : `${c.profitPct.toFixed(0)}%`}
+                                      </span>
+                                    ) : (
+                                      <span className="text-gray-400">—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     );
                   })}
@@ -2022,10 +2038,14 @@ export function CombinedWizard({
               {/* Resumo Ficha Tecnica */}
               <div className="border border-gray-200 rounded-xl bg-white p-4">
                 <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 Ficha Tecnica</h4>
-                {Object.keys(attributeValues).length === 0 ? (
-                  <p className="text-xs text-gray-400">Nenhum atributo preenchido</p>
-                ) : (
+                {(brandValue?.brandName || Object.keys(attributeValues).length > 0) ? (
                   <div className="space-y-1">
+                    {brandValue?.brandName && (
+                      <div className="flex items-start gap-2 text-xs">
+                        <span className="text-gray-500 min-w-[120px] truncate">Marca:</span>
+                        <span className="text-gray-800 font-medium flex-1">{brandValue.brandName}</span>
+                      </div>
+                    )}
                     {Object.entries(attributeValues).map(([attrIdStr, val]: [string, any]) => {
                       const attrId = Number(attrIdStr);
                       const attrDef = Array.isArray(categoryAttributes)
@@ -2042,6 +2062,8 @@ export function CombinedWizard({
                       );
                     })}
                   </div>
+                ) : (
+                  <p className="text-xs text-gray-400">Nenhum atributo preenchido</p>
                 )}
               </div>
 
