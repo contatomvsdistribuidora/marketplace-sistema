@@ -291,6 +291,9 @@ export async function publishMultiProductListing(
     const computedByCellKey = new Map<string, any>();
     computedCellsList.forEach((c: any) => computedByCellKey.set(c.cellKey, c));
 
+    // Sufixo unico pra evitar duplicate de SKU em re-tentativas
+    const skuSuffix = String(Date.now()).slice(-6);
+
     // Categoria: prefere a do wizard
     const finalCategoryId = Number(ws.categoryId ?? principalData.categoryId);
 
@@ -327,7 +330,7 @@ export async function publishMultiProductListing(
             ? Number(cellOpt.stock)
             : (product.stock > 0 ? product.stock : 1);
 
-          const sku = cellOpt?.sku ? String(cellOpt.sku) : `${listing.id}-P${productIdx + 1}-V${optIdx + 1}`;
+          const sku = cellOpt?.sku ? String(cellOpt.sku) : `${listing.id}-${skuSuffix}-P${productIdx + 1}-V${optIdx + 1}`;
           const optionLabel = `${productLabel} | ${optLabel}`.slice(0, 20);
 
           variationOptions.push(optionLabel);
@@ -343,7 +346,7 @@ export async function publishMultiProductListing(
       } else {
         const price = Number(product.price ?? 0);
         const stock = product.stock > 0 ? product.stock : 1;
-        const sku = product.sku || `${listing.id}-P${productIdx + 1}`;
+        const sku = product.sku || `${listing.id}-${skuSuffix}-P${productIdx + 1}`;
         const optionLabel = productLabel.slice(0, 20);
 
         variationOptions.push(optionLabel);
@@ -427,7 +430,7 @@ export async function publishMultiProductListing(
         weight: Number(principalData.weight ?? 0),
         imageIds: [thumbImageId],
         condition: "NEW",
-        sku: `${listing.id}-MAIN`,
+        sku: `${listing.id}-${skuSuffix}-MAIN`,
         dimension: principalData.dimensionLength
           ? {
               packageLength: Math.round(Number(principalData.dimensionLength)),
