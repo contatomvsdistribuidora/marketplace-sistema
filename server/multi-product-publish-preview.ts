@@ -41,6 +41,19 @@ type WizardState = {
   productNameOverrides?: Record<string, string>;
 };
 
+const VARIATION_TYPE_LABELS: Record<string, string> = {
+  quantidade: "Quantidade",
+  tamanho: "Tamanho",
+  material: "Material",
+  cor: "Cor",
+  personalizado: "Variacao",
+};
+
+function deriveVariationName(selectedType: string | undefined | null, fallback: string = "Variacao"): string {
+  if (!selectedType) return fallback;
+  return VARIATION_TYPE_LABELS[selectedType] ?? fallback;
+}
+
 function safeParseWizardState(raw: string | null | undefined): WizardState {
   if (!raw) return {};
   try {
@@ -143,41 +156,54 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
     ? { brand_id: ws.brandValue.brandId, original_brand_name: ws.brandValue.brandName ?? "" }
     : { brand_id: 0, original_brand_name: "No Brand" };
 
-  // Variacoes a partir da matriz wizard
+  // ===== Variacoes Shopee =====
+  // Variacao 1: nome vem de selectedType (ex "Quantidade"), opcoes vem de optionLabels (ex "20", "30", "40")
   const tierVariations: any[] = [];
-  const variation1Name = ws.optionLabels?.[0] ?? "Variacao";
-  const variation1Options = (ws.optionDetailsMatrix?.[0] ?? []).map((opt: any) => ({
-    option: (opt?.label ?? "").toString().slice(0, 20),
+  const variation1Name = deriveVariationName(ws.selectedType);
+  const variation1Options = (ws.optionLabels ?? []).filter(l => l && l.trim()).map((label: string) => ({
+    option: label.toString().slice(0, 20),
   }));
   if (variation1Options.length > 0) {
     tierVariations.push({ name: variation1Name.slice(0, 20), option_list: variation1Options });
   }
 
-  const variation2Name = ws.optionLabels?.[1];
-  const variation2Options = (ws.optionDetailsMatrix?.[1] ?? []).map((opt: any) => ({
-    option: (opt?.label ?? "").toString().slice(0, 20),
-  }));
+  // Variacao 2: vem das colunas do schema, nao do optionLabels[1]
+  const variation2Type = (listing as any).variation2Type as string | null;
+  const variation2OptionsRaw = (listing as any).variation2OptionsJson as any[] | null;
+  const variation2Name = variation2Type ? deriveVariationName(variation2Type) : null;
+  const variation2Options = Array.isArray(variation2OptionsRaw)
+    ? variation2OptionsRaw.filter((o: any) => o?.label).map((o: any) => ({ option: String(o.label).slice(0, 20) }))
+    : [];
   if (variation2Name && variation2Options.length > 0) {
     tierVariations.push({ name: variation2Name.slice(0, 20), option_list: variation2Options });
   }
 
-  // Models (combinacoes)
+  // ===== Models (combinacoes) =====
+  // priceOverrides eh Record<number, number> (preco direto, NAO objeto)
+  // Por enquanto: tira preco/estoque do produto principal por linha (i)
+  // O calculo completo (computePricing) sera plugado no proximo bloco
   const models: any[] = [];
   const dim1Count = variation1Options.length || 1;
   const dim2Count = variation2Options.length || 1;
   for (let i = 0; i < dim1Count; i++) {
     for (let j = 0; j < dim2Count; j++) {
-      const cellKey = `${i}-${j}`;
-      const cellOverride = ws.priceOverrides?.[cellKey];
-      const cellOpt1 = ws.optionDetailsMatrix?.[0]?.[i];
-      const cellOpt2 = ws.optionDetailsMatrix?.[1]?.[j];
-      const price = cellOverride?.price
-        ? Number(cellOverride.price)
-        : (cellOpt1?.price ? Number(cellOpt1.price) : (resolved[0]?.price ?? 0));
-      const stock = cellOverride?.stock
-        ? Number(cellOverride.stock)
-        : (cellOpt1?.stock ? Number(cellOpt1.stock) : (resolved[0]?.stock ?? 0));
-      const sku = cellOverride?.sku ?? cellOpt1?.sku ?? `${listing.id}-V${i + 1}-${j + 1}`;
+      // priceOverrides[i] = preco direto, se setado pelo usuario
+      const overridePrice = (ws.priceOverrides as any)?.[i];
+      const productForRow = resolved[i] ?? resolved[0];
+      const cellOpt1 = ws.optionDetailsMatrix?.[i]?.[j];
+
+      const price = overridePrice != null && overridePrice > 0
+        ? Number(overridePrice)
+        : (cellOpt1?.price ? Number(cellOpt1.price) : Number(productForRow?.price ?? 0));
+
+      const stock = cellOpt1?.stock
+        ? Number(cellOpt1.stock)
+        : Number(productForRow?.stock ?? 0);
+
+      const sku = cellOpt1?.sku
+        ? String(cellOpt1.sku)
+        : `${listing.id}-V${i + 1}${variation2Name ? `-${j + 1}` : ""}`;
+
       models.push({
         tier_index: variation2Name ? [i, j] : [i],
         original_price: price,
@@ -244,9 +270,12 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
       categoryBreadcrumb: ws.categoryBreadcrumb,
       brand: ws.brandValue,
       attributeCount: ws.attributeValues ? Object.keys(ws.attributeValues).length : 0,
+      selectedType: ws.selectedType,
       variation1: { name: variation1Name, options: variation1Options.length },
       variation2: variation2Name ? { name: variation2Name, options: variation2Options.length } : null,
       totalCells: dim1Count * dim2Count,
+      hasPriceOverrides: !!ws.priceOverrides && Object.keys(ws.priceOverrides as any).length > 0,
+      pricingMode: ws.pricingMode,
     },
     media: {
       thumbUrl: listing.thumbUrl,
