@@ -571,6 +571,9 @@ export interface KitVariation {
    * `image: { image_id }` dentro de cada `option_list[i]` no init_tier_variation.
    */
   optionImageIds?: string[];
+  // Dimensao 2 opcional (variacao 2D)
+  name2?: string;
+  options2?: string[];
   models: Array<{
     tierIndex: number[];
     price: number;
@@ -598,20 +601,30 @@ export async function initTierVariation(
     );
   }
 
+  // Monta dim 1 (com images opcionais por opcao)
+  const tierDim1 = {
+    name: variation.name,
+    option_list: variation.options.map((opt, i) => {
+      const entry: Record<string, any> = { option: opt };
+      if (variation.optionImageIds && variation.optionImageIds[i]) {
+        entry.image = { image_id: variation.optionImageIds[i] };
+      }
+      return entry;
+    }),
+  };
+
+  // Dim 2 opcional - se name2/options2 vier, vira variacao 2D
+  const tierVariation: any[] = [tierDim1];
+  if (variation.name2 && variation.options2 && variation.options2.length > 0) {
+    tierVariation.push({
+      name: variation.name2,
+      option_list: variation.options2.map((opt) => ({ option: opt })),
+    });
+  }
+
   const body = {
     item_id: itemId,
-    tier_variation: [
-      {
-        name: variation.name,
-        option_list: variation.options.map((opt, i) => {
-          const entry: Record<string, any> = { option: opt };
-          if (variation.optionImageIds && variation.optionImageIds[i]) {
-            entry.image = { image_id: variation.optionImageIds[i] };
-          }
-          return entry;
-        }),
-      },
-    ],
+    tier_variation: tierVariation,
     model: variation.models.map((m) => ({
       tier_index: m.tierIndex,
       seller_stock: [{ stock: m.stock }],

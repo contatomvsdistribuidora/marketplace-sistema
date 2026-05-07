@@ -376,19 +376,25 @@ export async function publishMultiProductListing(
 
     // Monta opcoes da variacao (1D concatenado: "Produto | Opcao")
     // Quando nao tem variacao 2 (optionLabels vazio), so usa nome do produto
+    // ============ Variacoes 2D reais ============
     const hasOptions = optionLabels.length > 0;
-    const variationOptions: string[] = [];
-    const variationOptionImageIds: string[] = [];
+
+    const productOptions: string[] = resolved.map((p, idx) => {
+      const label = ws.productNameOverrides?.[String(idx)] ?? p.name ?? `Produto ${idx + 1}`;
+      return String(label).slice(0, 20);
+    });
+    const productOptionImageIds: string[] = resolved.map((_, idx) => optionImageIds[idx] ?? thumbImageId);
+
+    const optionLabelsTrimmed: string[] = optionLabels.map((l: string) => String(l).slice(0, 20));
+
     const models: shopeePublish.KitVariation["models"] = [];
     let minPrice = Infinity;
 
     for (let productIdx = 0; productIdx < resolved.length; productIdx++) {
       const product = resolved[productIdx];
-      const productLabel = (ws.productNameOverrides?.[String(productIdx)] ?? product.name ?? `Produto ${productIdx + 1}`).slice(0, 12);
 
       if (hasOptions) {
         for (let optIdx = 0; optIdx < optionLabels.length; optIdx++) {
-          const optLabel = optionLabels[optIdx].slice(0, 6);
           const cellKey = `${productIdx}-${optIdx}`;
           const computed = computedByCellKey.get(cellKey);
           const cellOpt = ws.optionDetailsMatrix?.[productIdx]?.[optIdx];
@@ -402,13 +408,12 @@ export async function publishMultiProductListing(
             ? Number(cellOpt.stock)
             : (product.stock > 0 ? product.stock : 1);
 
-          const sku = cellOpt?.sku ? String(cellOpt.sku) : `${listing.id}-${skuSuffix}-P${productIdx + 1}-V${optIdx + 1}`;
-          const optionLabel = `${productLabel} | ${optLabel}`.slice(0, 20);
+          const sku = cellOpt?.sku
+            ? String(cellOpt.sku)
+            : `${listing.id}-${skuSuffix}-P${productIdx + 1}-V${optIdx + 1}`;
 
-          variationOptions.push(optionLabel);
-          variationOptionImageIds.push(optionImageIds[productIdx] ?? thumbImageId);
           models.push({
-            tierIndex: [variationOptions.length - 1],
+            tierIndex: [productIdx, optIdx],
             price: price >= 1 ? price : 1,
             stock: stock > 0 ? stock : 1,
             sku,
@@ -419,12 +424,9 @@ export async function publishMultiProductListing(
         const price = Number(product.price ?? 0);
         const stock = product.stock > 0 ? product.stock : 1;
         const sku = product.sku || `${listing.id}-${skuSuffix}-P${productIdx + 1}`;
-        const optionLabel = productLabel.slice(0, 20);
 
-        variationOptions.push(optionLabel);
-        variationOptionImageIds.push(optionImageIds[productIdx] ?? thumbImageId);
         models.push({
-          tierIndex: [variationOptions.length - 1],
+          tierIndex: [productIdx],
           price: price >= 1 ? price : 1,
           stock,
           sku,
@@ -441,16 +443,32 @@ export async function publishMultiProductListing(
       mode = "promote";
       shopeeItemId = Number(listing.existingShopeeItemId);
 
+      const promoteVariations = hasOptions
+        ? productOptions.flatMap((pLabel, pIdx) =>
+            optionLabelsTrimmed.map((oLabel, oIdx) => {
+              const flatIdx = pIdx * optionLabels.length + oIdx;
+              const flatLabel = `${pLabel.slice(0, 12)} | ${oLabel.slice(0, 6)}`.slice(0, 20);
+              return {
+                label: flatLabel,
+                price: models[flatIdx].price,
+                stock: models[flatIdx].stock,
+                sku: models[flatIdx].sku ?? `${listing.id}-V${flatIdx + 1}`,
+                imageId: productOptionImageIds[pIdx] ?? thumbImageId,
+              };
+            })
+          )
+        : productOptions.map((label, idx) => ({
+            label,
+            price: models[idx].price,
+            stock: models[idx].stock,
+            sku: models[idx].sku ?? `${listing.id}-V${idx + 1}`,
+            imageId: productOptionImageIds[idx] ?? thumbImageId,
+          }));
+
       await shopeePublish.promoteSimpleToVariated(accessToken, shopId, {
         itemId: shopeeItemId,
         variationTypeName: "Modelo",
-        variations: variationOptions.map((label, idx) => ({
-          label,
-          price: models[idx].price,
-          stock: models[idx].stock,
-          sku: models[idx].sku ?? `${listing.id}-V${idx + 1}`,
-          imageId: variationOptionImageIds[idx],
-        })),
+        variations: promoteVariations,
       });
     } else {
       onProgress?.("Criando anúncio na Shopee");
@@ -526,8 +544,9 @@ export async function publishMultiProductListing(
       try {
         await shopeePublish.initTierVariation(accessToken, shopId, shopeeItemId, {
           name: "Modelo",
-          options: variationOptions,
-          optionImageIds: variationOptionImageIds,
+          options: productOptions,
+          optionImageIds: productOptionImageIds,
+          ...(hasOptions ? { name2: "Quantidade", options2: optionLabelsTrimmed } : {}),
           models,
         });
       } catch (initErr: any) {
