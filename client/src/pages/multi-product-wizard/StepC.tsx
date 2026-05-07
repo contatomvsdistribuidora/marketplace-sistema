@@ -9,7 +9,9 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
   SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Image as ImageIcon, Video, Package, Sparkles } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, Search, X, Film } from "lucide-react";
 import { toast } from "sonner";
 import { type Listing } from "./types";
 import {
@@ -109,6 +111,9 @@ function SortableImage({
 
 export function StepC({ listing, onChange }: { listing: Listing; onChange: () => void }) {
   const [extraPrompt, setExtraPrompt] = useState("");
+  const [videoModalOpen, setVideoModalOpen] = useState(false);
+  const [videoSearch, setVideoSearch] = useState("");
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
 
   const { data: invData } = trpc.settings.getInventoryId.useQuery();
   const inventoryId = invData?.inventoryId;
@@ -311,6 +316,30 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     ? (videos as any[] | undefined)?.find((v) => v.id === listing.videoBankId)
     : undefined;
 
+  // Lista unificada de videos: BaseLinker + Banco
+  const allVideos: Array<{ key: string; value: string; title: string; url: string; source: "bl" | "bank"; subtitle?: string; thumbHint?: string }> = [];
+  (blVideos as any[] | undefined ?? []).forEach((v: any) => {
+    allVideos.push({
+      key: `bl-${v.productId}`,
+      value: `bl:${v.productId}`,
+      title: v.videoTitle || v.name || `Produto ${v.productId}`,
+      url: v.videoUrl,
+      source: "bl",
+      subtitle: `BaseLinker · #${v.productId}`,
+      thumbHint: v.imageUrl,
+    });
+  });
+  (videos as any[] | undefined ?? []).forEach((v: any) => {
+    allVideos.push({
+      key: `bank-${v.id}`,
+      value: `bank:${v.id}`,
+      title: v.title,
+      url: v.url,
+      source: "bank",
+      subtitle: v.source === "manual_upload" ? "Upload do PC" : v.source === "external_url" ? "URL importada" : "Banco",
+    });
+  });
+
   let currentValue: string;
   if (listing.videoBankId !== null) {
     currentValue = `bank:${listing.videoBankId}`;
@@ -322,6 +351,11 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   } else {
     currentValue = "none";
   }
+
+  const filteredVideos = videoSearch.trim()
+    ? allVideos.filter(v => v.title.toLowerCase().includes(videoSearch.toLowerCase()))
+    : allVideos;
+  const selectedVideoMeta = allVideos.find(v => v.value === currentValue);
 
   const isLoading = blVideosLoading || videosLoading;
   const hasAnyVideo = (blVideos?.length ?? 0) > 0 || (videos?.length ?? 0) > 0;
@@ -547,80 +581,148 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
               (campo extra "Vídeo arquivo") ou adicione manualmente em /video-bank (em breve).
             </p>
           ) : (
-            <Select value={currentValue} onValueChange={handleSelectVideo}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione um vídeo..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Sem vídeo</SelectItem>
-                {currentValue === "custom" && (
-                  <SelectItem value="custom" disabled>URL personalizada (atual)</SelectItem>
-                )}
-                {blVideos && blVideos.length > 0 && (
-                  <SelectGroup>
-                    <SelectLabel className="text-xs">
-                      Vídeos do BaseLinker ({blVideos.length})
-                    </SelectLabel>
-                    {(blVideos as any[]).map((v) => (
-                      <SelectItem key={`bl:${v.productId}`} value={`bl:${v.productId}`}>
-                        {v.videoTitle ?? v.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-                {videos && videos.length > 0 && (
-                  <SelectGroup>
-                    <SelectLabel className="text-xs">Banco de vídeos</SelectLabel>
-                    {(videos as any[]).map((v) => (
-                      <SelectItem key={`bank:${v.id}`} value={`bank:${v.id}`}>
-                        {v.title}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-              </SelectContent>
-            </Select>
-          )}
-
-          {/* Preview do vídeo selecionado */}
-          {listing.videoUrl && (
-            <div className="rounded border bg-muted/30 p-3 text-xs space-y-1">
-              {currentBlVideo ? (
-                <div className="flex items-start gap-2">
-                  {currentBlVideo.imageUrl ? (
-                    <img
-                      src={currentBlVideo.imageUrl}
-                      alt=""
-                      className="h-10 w-10 rounded object-cover border shrink-0"
-                      loading="lazy"
+            <div className="space-y-3">
+              {/* Preview do video selecionado + botao trocar */}
+              {selectedVideoMeta || listing.videoUrl ? (
+                <div className="rounded-xl border bg-muted/30 p-3 flex items-center gap-3">
+                  <div className="relative h-20 w-32 rounded overflow-hidden bg-black flex-shrink-0">
+                    <video
+                      src={selectedVideoMeta?.url || listing.videoUrl || ""}
+                      className="h-full w-full object-cover"
+                      preload="metadata"
+                      muted
                     />
-                  ) : (
-                    <div className="h-10 w-10 rounded bg-muted flex items-center justify-center shrink-0">
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => setVideoPreviewUrl(selectedVideoMeta?.url || listing.videoUrl || null)}
+                      className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/50 transition"
+                    >
+                      <Play className="h-6 w-6 text-white fill-white" />
+                    </button>
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium line-clamp-1">
-                      {currentBlVideo.videoTitle ?? currentBlVideo.name}
+                    <div className="font-medium text-sm line-clamp-1">
+                      {selectedVideoMeta?.title ?? "Video personalizado"}
                     </div>
-                    <div className="text-muted-foreground">
-                      Produto BaseLinker · ID {String(currentBlVideo.productId)}
+                    <div className="text-xs text-muted-foreground">
+                      {selectedVideoMeta?.subtitle ?? listing.videoUrl}
                     </div>
                   </div>
-                </div>
-              ) : currentBankVideo ? (
-                <div>
-                  <div className="font-medium">{currentBankVideo.title}</div>
-                  <div className="text-muted-foreground truncate">{currentBankVideo.url}</div>
+                  <div className="flex flex-col gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setVideoModalOpen(true)}>
+                      Trocar
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => handleSelectVideo("none")}>
+                      Remover
+                    </Button>
+                  </div>
                 </div>
               ) : (
-                <div>
-                  <div className="font-medium">URL personalizada</div>
-                  <div className="text-muted-foreground truncate">{listing.videoUrl}</div>
-                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setVideoModalOpen(true)}
+                  className="w-full h-20 border-dashed"
+                >
+                  <Film className="h-5 w-5 mr-2" />
+                  Selecionar video ({allVideos.length} disponiveis)
+                </Button>
               )}
             </div>
           )}
+
+          {/* Modal Galeria de Videos */}
+          <Dialog open={videoModalOpen} onOpenChange={setVideoModalOpen}>
+            <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle>Selecione um video</DialogTitle>
+              </DialogHeader>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por nome..."
+                    value={videoSearch}
+                    onChange={(e) => setVideoSearch(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <Badge variant="outline">{filteredVideos.length} video(s)</Badge>
+              </div>
+              <div className="overflow-y-auto flex-1 -mx-2 px-2">
+                {filteredVideos.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                    <Film className="h-12 w-12 mb-3 opacity-30" />
+                    <p className="text-sm">Nenhum video encontrado</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {filteredVideos.map((v) => {
+                      const isSelected = v.value === currentValue;
+                      return (
+                        <div
+                          key={v.key}
+                          className={`relative rounded-lg border-2 overflow-hidden transition cursor-pointer ${
+                            isSelected ? "border-primary ring-2 ring-primary/20" : "border-transparent hover:border-muted-foreground/30"
+                          }`}
+                          onClick={() => {
+                            handleSelectVideo(v.value);
+                            setVideoModalOpen(false);
+                          }}
+                        >
+                          <div className="relative aspect-video bg-black">
+                            <video
+                              src={v.url}
+                              className="h-full w-full object-cover"
+                              preload="metadata"
+                              muted
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setVideoPreviewUrl(v.url);
+                              }}
+                              className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/50 transition opacity-0 hover:opacity-100"
+                            >
+                              <Play className="h-10 w-10 text-white fill-white" />
+                            </button>
+                            {isSelected && (
+                              <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
+                                <Film className="h-3 w-3" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="p-2 bg-card">
+                            <div className="text-xs font-medium line-clamp-2">{v.title}</div>
+                            <div className="text-[10px] text-muted-foreground mt-0.5">{v.subtitle}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Player Preview Flutuante */}
+          <Dialog open={!!videoPreviewUrl} onOpenChange={(o) => !o && setVideoPreviewUrl(null)}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>Pre-visualizacao</DialogTitle>
+              </DialogHeader>
+              {videoPreviewUrl && (
+                <video
+                  src={videoPreviewUrl}
+                  controls
+                  autoPlay
+                  className="w-full rounded"
+                  style={{ maxHeight: "70vh" }}
+                />
+              )}
+            </DialogContent>
+          </Dialog>
         </CardContent>
       </Card>
     </div>
