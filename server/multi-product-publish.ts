@@ -274,6 +274,93 @@ export async function publishMultiProductListing(
     let shopeeItemId: number;
     let mode: "create" | "promote";
 
+    // Hidrata wizardStateJson - fonte de verdade dos precos/variacoes
+    const ws = (() => {
+      try {
+        const raw = listing.wizardStateJson as string | null;
+        if (!raw) return {} as any;
+        const parsed = JSON.parse(raw);
+        return parsed?.version === 1 ? parsed : ({} as any);
+      } catch { return {} as any; }
+    })();
+
+    const optionLabels: string[] = Array.isArray(ws.optionLabels)
+      ? ws.optionLabels.filter((l: string) => l && l.trim())
+      : [];
+    const computedCellsList: any[] = Array.isArray(ws.computedCells) ? ws.computedCells : [];
+    const computedByCellKey = new Map<string, any>();
+    computedCellsList.forEach((c: any) => computedByCellKey.set(c.cellKey, c));
+
+    // Categoria: prefere a do wizard
+    const finalCategoryId = Number(ws.categoryId ?? principalData.categoryId);
+
+    // Marca: prefere a do wizard
+    const finalBrand = ws.brandValue?.brandId
+      ? { brandId: Number(ws.brandValue.brandId), originalBrandName: String(ws.brandValue.brandName ?? "") }
+      : { brandId: 0, originalBrandName: "No Brand" };
+
+    // Monta opcoes da variacao (1D concatenado: "Produto | Opcao")
+    // Quando nao tem variacao 2 (optionLabels vazio), so usa nome do produto
+    const hasOptions = optionLabels.length > 0;
+    const variationOptions: string[] = [];
+    const variationOptionImageIds: string[] = [];
+    const models: shopeePublish.KitVariation["models"] = [];
+    let minPrice = Infinity;
+
+    for (let productIdx = 0; productIdx < resolved.length; productIdx++) {
+      const product = resolved[productIdx];
+      const productLabel = (ws.productNameOverrides?.[String(productIdx)] ?? product.name ?? `Produto ${productIdx + 1}`).slice(0, 12);
+
+      if (hasOptions) {
+        for (let optIdx = 0; optIdx < optionLabels.length; optIdx++) {
+          const optLabel = optionLabels[optIdx].slice(0, 6);
+          const cellKey = `${productIdx}-${optIdx}`;
+          const computed = computedByCellKey.get(cellKey);
+          const cellOpt = ws.optionDetailsMatrix?.[productIdx]?.[optIdx];
+
+          let price = 0;
+          if (computed?.pricing?.price > 0) price = Number(computed.pricing.price);
+          else if (cellOpt?.price && Number(cellOpt.price) > 0) price = Number(cellOpt.price);
+          else price = Number(product.price ?? 0);
+
+          const stock = cellOpt?.stock != null && cellOpt.stock !== ""
+            ? Number(cellOpt.stock)
+            : (product.stock > 0 ? product.stock : 1);
+
+          const sku = cellOpt?.sku ? String(cellOpt.sku) : `${listing.id}-P${productIdx + 1}-V${optIdx + 1}`;
+          const optionLabel = `${productLabel} | ${optLabel}`.slice(0, 20);
+
+          variationOptions.push(optionLabel);
+          variationOptionImageIds.push(optionImageIds[productIdx] ?? thumbImageId);
+          models.push({
+            tierIndex: [variationOptions.length - 1],
+            price: price > 0 ? price : 0.01,
+            stock: stock > 0 ? stock : 1,
+            sku,
+          });
+          if (price > 0 && price < minPrice) minPrice = price;
+        }
+      } else {
+        const price = Number(product.price ?? 0);
+        const stock = product.stock > 0 ? product.stock : 1;
+        const sku = product.sku || `${listing.id}-P${productIdx + 1}`;
+        const optionLabel = productLabel.slice(0, 20);
+
+        variationOptions.push(optionLabel);
+        variationOptionImageIds.push(optionImageIds[productIdx] ?? thumbImageId);
+        models.push({
+          tierIndex: [variationOptions.length - 1],
+          price: price > 0 ? price : 0.01,
+          stock,
+          sku,
+        });
+        if (price > 0 && price < minPrice) minPrice = price;
+      }
+    }
+
+    // Preco do item-level: usa o menor encontrado, fallback principal.price/0.01
+    const itemLevelPrice = minPrice !== Infinity ? minPrice : Number(principal.price ?? 0.01);
+
     if (listing.mode === "promote" && listing.existingShopeeItemId) {
       onProgress?.("Promovendo anúncio existente a multi-variação");
       mode = "promote";
@@ -281,27 +368,37 @@ export async function publishMultiProductListing(
 
       await shopeePublish.promoteSimpleToVariated(accessToken, shopId, {
         itemId: shopeeItemId,
-        variationTypeName: "Variação",
-        variations: resolved.map((item, idx) => ({
-          label: item.name.substring(0, 40),
-          price: item.price,
-          stock: item.stock > 0 ? item.stock : 1,
-          sku: `${listing.id}-V${idx + 1}`,
-          imageId: optionImageIds[idx],
+        variationTypeName: "Modelo",
+        variations: variationOptions.map((label, idx) => ({
+          label,
+          price: models[idx].price,
+          stock: models[idx].stock,
+          sku: models[idx].sku ?? `${listing.id}-V${idx + 1}`,
+          imageId: variationOptionImageIds[idx],
         })),
       });
     } else {
       onProgress?.("Criando anúncio na Shopee");
       mode = "create";
 
+      // Atributos: prefere os do wizard, fallback pra os do principal
+      let finalAttributes = convertAttributesToCreateInput(principalData.attributes);
+      if (ws.attributeValues && typeof ws.attributeValues === "object") {
+        const fromWizard = Object.entries(ws.attributeValues).map(([attrIdStr, val]: [string, any]) => ({
+          attributeId: Number(attrIdStr),
+          attributeValueList: Array.isArray(val) ? val : [val],
+        }));
+        if (fromWizard.length > 0) finalAttributes = fromWizard as any;
+      }
+
       const created = await shopeePublish.createProduct(accessToken, shopId, {
         itemName: listing.title.trim().substring(0, 120),
         description: listing.description.trim().substring(0, 5000),
-        categoryId: Number(principalData.categoryId),
+        categoryId: finalCategoryId,
         // Item-level price/stock são "container" — o init_tier_variation
-        // sobrescreve com valores reais por modelo. Usamos o do principal
-        // como placeholder pra atender o schema do add_item.
-        price: principal.price,
+        // sobrescreve com valores reais por modelo. Usamos o menor preco
+        // dos models como placeholder pra atender o schema do add_item.
+        price: itemLevelPrice,
         stock: 0,
         weight: Number(principalData.weight ?? 0),
         imageIds: [thumbImageId],
@@ -315,23 +412,18 @@ export async function publishMultiProductListing(
             }
           : undefined,
         logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
-        attributes: convertAttributesToCreateInput(principalData.attributes),
-        brand: { brandId: 0, originalBrandName: "No Brand" },
+        attributes: finalAttributes,
+        brand: finalBrand,
       });
 
       shopeeItemId = created.itemId;
 
       onProgress?.("Criando variações");
       await shopeePublish.initTierVariation(accessToken, shopId, shopeeItemId, {
-        name: "Variação",
-        options: resolved.map((item) => item.name.substring(0, 40)),
-        optionImageIds,
-        models: resolved.map((item, idx) => ({
-          tierIndex: [idx],
-          price: item.price,
-          stock: item.stock > 0 ? item.stock : 1,
-          sku: `${listing.id}-V${idx + 1}`,
-        })),
+        name: "Modelo",
+        options: variationOptions,
+        optionImageIds: variationOptionImageIds,
+        models,
       });
     }
 
