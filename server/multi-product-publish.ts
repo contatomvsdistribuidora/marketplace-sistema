@@ -262,6 +262,88 @@ export async function publishMultiProductListing(
       }
     }
 
+    // Hidrata wizardStateJson - fonte de verdade pros overrides (galeria, precos, variacoes)
+    const ws = (() => {
+      try {
+        const raw = listing.wizardStateJson as string | null;
+        if (!raw) return {} as any;
+        const parsed = JSON.parse(raw);
+        return parsed?.version === 1 ? parsed : ({} as any);
+      } catch { return {} as any; }
+    })();
+
+    // ============ Galeria completa: agrega todas as imagens dos produtos + uploads do user ============
+    onProgress?.("Coletando imagens da galeria");
+
+    // Cache de uploads ja feitos (item.imageUrl -> shopee imageId)
+    const uploadCache = new Map<string, string>();
+    for (let i = 0; i < resolved.length; i++) {
+      const item = resolved[i];
+      if (item.imageUrl && optionImageIds[i] && optionImageIds[i] !== thumbImageId) {
+        uploadCache.set(item.imageUrl, optionImageIds[i]);
+      }
+    }
+
+    // Coleta todas as URLs candidatas
+    const allImageUrls: string[] = [];
+    for (let i = 0; i < resolved.length; i++) {
+      const item = resolved[i];
+      if (item.source === "shopee") {
+        const [sp] = await sharedDb
+          .select()
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.itemId, item.sourceId))
+          .limit(1);
+        const imgs = (sp as any)?.images;
+        if (Array.isArray(imgs)) {
+          imgs.forEach((u: string) => { if (u && !allImageUrls.includes(u)) allImageUrls.push(u); });
+        } else if ((sp as any)?.imageUrl) {
+          const u = (sp as any).imageUrl;
+          if (!allImageUrls.includes(u)) allImageUrls.push(u);
+        }
+      } else if (item.imageUrl && !allImageUrls.includes(item.imageUrl)) {
+        allImageUrls.push(item.imageUrl);
+      }
+    }
+
+    // Aplica imageOverrides do wizard
+    const imageOverrides = (ws.imageOverrides ?? {}) as any;
+    const uploadedExtras = Array.isArray(imageOverrides.uploadedImages)
+      ? imageOverrides.uploadedImages.map((u: any) => u.url).filter((u: string) => u && !allImageUrls.includes(u))
+      : [];
+    let combined = [...allImageUrls, ...uploadedExtras];
+
+    // Excluir URLs que o user removeu
+    const excluded = new Set<string>(Array.isArray(imageOverrides.excludedImages) ? imageOverrides.excludedImages : []);
+    combined = combined.filter((u) => !excluded.has(u));
+
+    // Aplicar ordem custom se definida
+    if (Array.isArray(imageOverrides.imageOrder) && imageOverrides.imageOrder.length > 0) {
+      const orderMap = new Map<string, number>();
+      imageOverrides.imageOrder.forEach((u: string, idx: number) => orderMap.set(u, idx));
+      combined.sort((a, b) => (orderMap.get(a) ?? Infinity) - (orderMap.get(b) ?? Infinity));
+    }
+
+    // Upload das novas (limita 8 - 1 reservada pra thumb = 9 total)
+    onProgress?.(`Fazendo upload de ${combined.length} imagens da galeria`);
+    const galleryImageIds: string[] = [];
+    for (let i = 0; i < combined.length && galleryImageIds.length < 8; i++) {
+      const url = combined[i];
+      try {
+        let id = uploadCache.get(url);
+        if (!id) {
+          id = await shopeePublish.uploadImageFromUrl(accessToken, shopId, url, "normal");
+          uploadCache.set(url, id);
+          if (i < combined.length - 1) await new Promise(r => setTimeout(r, 300));
+        }
+        if (id !== thumbImageId && !galleryImageIds.includes(id)) {
+          galleryImageIds.push(id);
+        }
+      } catch (err) {
+        console.warn(`Falha no upload da imagem ${url}:`, err);
+      }
+    }
+
     // ============ 10. Logistics (top 5)
     onProgress?.("Configurando canais de envio");
     const channels = await shopeePublish.getLogisticsChannels(accessToken, shopId);
@@ -273,16 +355,6 @@ export async function publishMultiProductListing(
     // ============ 11. Cria/promove na Shopee
     let shopeeItemId: number;
     let mode: "create" | "promote";
-
-    // Hidrata wizardStateJson - fonte de verdade dos precos/variacoes
-    const ws = (() => {
-      try {
-        const raw = listing.wizardStateJson as string | null;
-        if (!raw) return {} as any;
-        const parsed = JSON.parse(raw);
-        return parsed?.version === 1 ? parsed : ({} as any);
-      } catch { return {} as any; }
-    })();
 
     const optionLabels: string[] = Array.isArray(ws.optionLabels)
       ? ws.optionLabels.filter((l: string) => l && l.trim())
@@ -428,7 +500,7 @@ export async function publishMultiProductListing(
         price: itemLevelPrice,
         stock: 0,
         weight: Number(principalData.weight ?? 0),
-        imageIds: [thumbImageId],
+        imageIds: [thumbImageId, ...galleryImageIds].slice(0, 9),
         condition: "NEW",
         sku: `${listing.id}-${skuSuffix}-MAIN`,
         dimension: principalData.dimensionLength
@@ -481,7 +553,7 @@ export async function publishMultiProductListing(
     return {
       itemId: shopeeItemId,
       itemUrl: `https://shopee.com.br/product/${shopId}/${shopeeItemId}`,
-      imagesUploaded: 1 + optionImageIds.length,
+      imagesUploaded: 1 + galleryImageIds.length,
       modelsCreated: resolved.length,
       mode,
     };
