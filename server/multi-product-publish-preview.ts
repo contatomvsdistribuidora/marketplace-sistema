@@ -300,6 +300,23 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
     });
   }
 
+  // Valida price_ratio Shopee: max preco / min preco <= 4
+  const validPrices = models
+    .map((m: any) => Number(m.original_price))
+    .filter((p: number) => p > 0);
+  if (validPrices.length >= 2) {
+    const minP = Math.min(...validPrices);
+    const maxP = Math.max(...validPrices);
+    const ratio = maxP / minP;
+    if (ratio > 4) {
+      issues.push({
+        severity: "error",
+        field: "price",
+        message: `Razao de precos ${ratio.toFixed(1)}x excede limite Shopee de 4x (mais caro R$ ${maxP.toFixed(2)} / mais barato R$ ${minP.toFixed(2)}). Ajuste precos no Step 2 ou separe em multiplos anuncios.`,
+      });
+    }
+  }
+
   return {
     listingId,
     listingStatus: listing.status,
