@@ -382,12 +382,36 @@ export async function publishMultiProductListing(
       mode = "create";
 
       // Atributos: prefere os do wizard, fallback pra os do principal
+      // O wizard salva { valueId, originalValue, displayValue } - precisa mapear pra { valueId, originalValueName, valueUnit }
+      const normalizeAttributeValue = (val: any) => {
+        if (val == null) return null;
+        // Se ja vier no formato Shopee, mantem
+        const valueId = Number(val.valueId ?? val.value_id ?? 0);
+        const originalValueName = val.originalValueName ?? val.original_value_name ?? val.originalValue ?? val.original_value ?? val.displayValue ?? val.display_value ?? "";
+        const valueUnit = val.valueUnit ?? val.value_unit ?? "";
+        // Se valueId = 0 (texto livre), precisa garantir que tem originalValueName
+        if (valueId === 0 && !originalValueName) return null;
+        const out: any = { valueId };
+        if (originalValueName) out.originalValueName = String(originalValueName);
+        if (valueUnit) out.valueUnit = String(valueUnit);
+        return out;
+      };
+
       let finalAttributes = convertAttributesToCreateInput(principalData.attributes);
       if (ws.attributeValues && typeof ws.attributeValues === "object") {
-        const fromWizard = Object.entries(ws.attributeValues).map(([attrIdStr, val]: [string, any]) => ({
-          attributeId: Number(attrIdStr),
-          attributeValueList: Array.isArray(val) ? val : [val],
-        }));
+        const fromWizard = Object.entries(ws.attributeValues)
+          .map(([attrIdStr, val]: [string, any]) => {
+            const valuesRaw = Array.isArray(val) ? val : [val];
+            const attributeValueList = valuesRaw
+              .map(normalizeAttributeValue)
+              .filter((v: any) => v !== null);
+            if (attributeValueList.length === 0) return null;
+            return {
+              attributeId: Number(attrIdStr),
+              attributeValueList,
+            };
+          })
+          .filter((a: any) => a !== null);
         if (fromWizard.length > 0) finalAttributes = fromWizard as any;
       }
 
