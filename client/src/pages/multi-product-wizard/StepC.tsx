@@ -317,7 +317,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     : undefined;
 
   // Lista unificada de videos: BaseLinker + Banco
-  const allVideos: Array<{ key: string; value: string; title: string; url: string; source: "bl" | "bank"; subtitle?: string; thumbHint?: string }> = [];
+  const allVideos: Array<{ key: string; value: string; title: string; url: string; source: "bl" | "bank"; subtitle?: string; thumbHint?: string; productName?: string }> = [];
   (blVideos as any[] | undefined ?? []).forEach((v: any) => {
     allVideos.push({
       key: `bl-${v.productId}`,
@@ -327,6 +327,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
       source: "bl",
       subtitle: `BaseLinker · #${v.productId}`,
       thumbHint: v.imageUrl,
+      productName: v.name,
     });
   });
   (videos as any[] | undefined ?? []).forEach((v: any) => {
@@ -633,7 +634,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
 
           {/* Modal Galeria de Videos */}
           <Dialog open={videoModalOpen} onOpenChange={setVideoModalOpen}>
-            <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+            <DialogContent className="max-w-7xl w-[95vw] h-[90vh] flex flex-col">
               <DialogHeader>
                 <DialogTitle>Selecione um video</DialogTitle>
               </DialogHeader>
@@ -656,7 +657,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
                     <p className="text-sm">Nenhum video encontrado</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredVideos.map((v) => {
                       const isSelected = v.value === currentValue;
                       return (
@@ -693,9 +694,16 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
                               </div>
                             )}
                           </div>
-                          <div className="p-2 bg-card">
-                            <div className="text-xs font-medium line-clamp-2">{v.title}</div>
-                            <div className="text-[10px] text-muted-foreground mt-0.5">{v.subtitle}</div>
+                          <div className="p-3 bg-card space-y-1">
+                            <div className="text-sm font-semibold line-clamp-2">{v.title}</div>
+                            {v.productName && (
+                              <div className="text-xs text-muted-foreground line-clamp-1">
+                                📦 {v.productName}
+                              </div>
+                            )}
+                            <Badge variant="secondary" className="text-[10px]">
+                              {v.subtitle}
+                            </Badge>
                           </div>
                         </div>
                       );
