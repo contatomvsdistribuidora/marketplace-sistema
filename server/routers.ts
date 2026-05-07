@@ -21,6 +21,7 @@ import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
 import * as multiProductAi from "./multi-product-ai";
 import * as multiProductPublish from "./multi-product-publish";
+import * as multiProductPublishPreview from "./multi-product-publish-preview";
 import { storagePut } from "./storage";
 import * as videoStorage from "./storage-video";
 import { randomUUID } from "node:crypto";
@@ -4148,6 +4149,22 @@ export const appRouter = router({
           ctx.user.id,
         );
         return result;
+      }),
+
+    previewPublishPayload: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ ctx, input }) => {
+        try {
+          return await multiProductPublishPreview.previewMultiProductPublish(
+            input.id,
+            ctx.user.id,
+          );
+        } catch (e: any) {
+          throw new TRPCError({
+            code: e?.code === "NOT_FOUND" ? "NOT_FOUND" : "BAD_REQUEST",
+            message: e?.message ?? "Falha ao gerar preview",
+          });
+        }
       }),
   }),
 
