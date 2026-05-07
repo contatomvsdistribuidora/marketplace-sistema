@@ -175,34 +175,34 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
     ? { brand_id: ws.brandValue.brandId, original_brand_name: ws.brandValue.brandName ?? "" }
     : { brand_id: 0, original_brand_name: "No Brand" };
 
-  // ===== Variacoes Shopee =====
-  // Variacao 1: nome vem de selectedType (ex "Quantidade"), opcoes vem de optionLabels (ex "20", "30", "40")
+  // ===== Variacoes Shopee (CORRETO) =====
+  // Var 1 = PRODUTOS, Var 2 = OPCOES (optionLabels)
   const tierVariations: any[] = [];
-  const variation1Name = deriveVariationName(ws.selectedType);
-  const variation1Options = (ws.optionLabels ?? []).filter(l => l && l.trim()).map((label: string) => ({
-    option: label.toString().slice(0, 20),
-  }));
+
+  const variation1Name = "Modelo";
+  const variation1Options = resolved.map((r, idx) => {
+    const productLabel = ws.productNameOverrides?.[String(idx)] ?? r.name ?? `Produto ${idx + 1}`;
+    return { option: String(productLabel).slice(0, 20) };
+  });
   if (variation1Options.length > 0) {
     tierVariations.push({ name: variation1Name.slice(0, 20), option_list: variation1Options });
   }
 
-  // Variacao 2: vem das colunas do schema, nao do optionLabels[1]
-  const variation2Type = (listing as any).variation2Type as string | null;
-  const variation2OptionsRaw = (listing as any).variation2OptionsJson as any[] | null;
-  const variation2Name = variation2Type ? deriveVariationName(variation2Type) : null;
-  const variation2Options = Array.isArray(variation2OptionsRaw)
-    ? variation2OptionsRaw.filter((o: any) => o?.label).map((o: any) => ({ option: String(o.label).slice(0, 20) }))
-    : [];
-  if (variation2Name && variation2Options.length > 0) {
+  const variation2Name = deriveVariationName(ws.selectedType);
+  const variation2Options = (ws.optionLabels ?? [])
+    .filter((l: string) => l && l.trim())
+    .map((label: string) => ({ option: String(label).slice(0, 20) }));
+  if (variation2Options.length > 0) {
     tierVariations.push({ name: variation2Name.slice(0, 20), option_list: variation2Options });
   }
 
   // ===== Models (combinacoes) =====
-  // PRIORIDADE: ws.computedCells (snapshot do frontend - precos exatos)
-  // FALLBACK: priceOverrides + cellOpt + produto base (compat com listings antigos)
+  // Cartesiano: produtos x opcoes. tier_index: [productIdx, optIdx]
   const models: any[] = [];
-  const dim1Count = variation1Options.length || 1;
-  const dim2Count = variation2Options.length || 1;
+  const productCount = variation1Options.length || 1;
+  const optionCount = variation2Options.length || 1;
+  const hasVar2 = variation2Options.length > 0;
+
   const computedByCellKey = new Map<string, any>();
   if (Array.isArray(ws.computedCells)) {
     ws.computedCells.forEach((cell: any) => {
@@ -210,43 +210,40 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
     });
   }
 
-  for (let i = 0; i < dim1Count; i++) {
-    for (let j = 0; j < dim2Count; j++) {
-      const cellKey = `${i}-${j}`;
-      const computed = computedByCellKey.get(cellKey);
-      const productForRow = resolved[i] ?? resolved[0];
-      const cellOpt1 = ws.optionDetailsMatrix?.[i]?.[j];
-      const overridePrice = (ws.priceOverrides as any)?.[i];
+  for (let productIdx = 0; productIdx < productCount; productIdx++) {
+    const productForRow = resolved[productIdx];
+    const overridePriceForProduct = (ws.priceOverrides as any)?.[productIdx];
 
-      // PRECO: prefere computado do front, senao override, senao base
+    for (let optIdx = 0; optIdx < optionCount; optIdx++) {
+      const cellKey = `${productIdx}-${optIdx}`;
+      const computed = computedByCellKey.get(cellKey);
+      const cellOpt = ws.optionDetailsMatrix?.[productIdx]?.[optIdx];
+
       let price: number;
       if (computed?.pricing?.price && computed.pricing.price > 0) {
         price = Number(computed.pricing.price);
-      } else if (overridePrice != null && overridePrice > 0) {
-        price = Number(overridePrice);
-      } else if (cellOpt1?.price) {
-        price = Number(cellOpt1.price);
+      } else if (overridePriceForProduct != null && overridePriceForProduct > 0) {
+        price = Number(overridePriceForProduct);
+      } else if (cellOpt?.price) {
+        price = Number(cellOpt.price);
       } else {
         price = Number(productForRow?.price ?? 0);
       }
 
-      // ESTOQUE: prefere cellOpt, senao produto
-      const stock = cellOpt1?.stock != null
-        ? Number(cellOpt1.stock)
+      const stock = cellOpt?.stock != null && cellOpt.stock !== ""
+        ? Number(cellOpt.stock)
         : Number(productForRow?.stock ?? 0);
 
-      // SKU: prefere cellOpt, senao gera
-      const sku = cellOpt1?.sku
-        ? String(cellOpt1.sku)
-        : `${listing.id}-V${i + 1}${variation2Name ? `-${j + 1}` : ""}`;
+      const sku = cellOpt?.sku
+        ? String(cellOpt.sku)
+        : `${listing.id}-P${productIdx + 1}${hasVar2 ? `-V${optIdx + 1}` : ""}`;
 
       models.push({
-        tier_index: variation2Name ? [i, j] : [i],
+        tier_index: hasVar2 ? [productIdx, optIdx] : [productIdx],
         original_price: price,
         seller_stock: [{ stock }],
         model_sku: sku,
-        // debug: marca se veio do computado
-        _from: computed ? "computed" : (overridePrice ? "override" : (cellOpt1?.price ? "cellOpt" : "product")),
+        _from: computed ? "computed" : (overridePriceForProduct ? "override" : (cellOpt?.price ? "cellOpt" : "product")),
         _profitPct: computed?.pricing?.profitPct,
         _margin: computed?.pricing?.marginContribution,
       });
@@ -311,9 +308,9 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
       brand: ws.brandValue,
       attributeCount: ws.attributeValues ? Object.keys(ws.attributeValues).length : 0,
       selectedType: ws.selectedType,
-      variation1: { name: variation1Name, options: variation1Options.length },
-      variation2: variation2Name ? { name: variation2Name, options: variation2Options.length } : null,
-      totalCells: dim1Count * dim2Count,
+      variation1: { name: variation1Name, options: variation1Options.length, label: "Modelo (produto)" },
+      variation2: variation2Options.length > 0 ? { name: variation2Name, options: variation2Options.length } : null,
+      totalCells: productCount * optionCount,
       hasPriceOverrides: !!ws.priceOverrides && Object.keys(ws.priceOverrides as any).length > 0,
       pricingMode: ws.pricingMode,
       computedCellsCount: Array.isArray(ws.computedCells) ? ws.computedCells.length : 0,
