@@ -337,7 +337,7 @@ export async function publishMultiProductListing(
           variationOptionImageIds.push(optionImageIds[productIdx] ?? thumbImageId);
           models.push({
             tierIndex: [variationOptions.length - 1],
-            price: price > 0 ? price : 0.01,
+            price: price >= 1 ? price : 1,
             stock: stock > 0 ? stock : 1,
             sku,
           });
@@ -353,7 +353,7 @@ export async function publishMultiProductListing(
         variationOptionImageIds.push(optionImageIds[productIdx] ?? thumbImageId);
         models.push({
           tierIndex: [variationOptions.length - 1],
-          price: price > 0 ? price : 0.01,
+          price: price >= 1 ? price : 1,
           stock,
           sku,
         });
@@ -362,7 +362,7 @@ export async function publishMultiProductListing(
     }
 
     // Preco do item-level: usa o menor encontrado, fallback principal.price/0.01
-    const itemLevelPrice = minPrice !== Infinity ? minPrice : Number(principal.price ?? 0.01);
+    const itemLevelPrice = minPrice !== Infinity && minPrice >= 1 ? minPrice : Math.max(Number(principal.price ?? 1), 1);
 
     if (listing.mode === "promote" && listing.existingShopeeItemId) {
       onProgress?.("Promovendo anúncio existente a multi-variação");
@@ -445,13 +445,25 @@ export async function publishMultiProductListing(
 
       shopeeItemId = created.itemId;
 
+      // Salva o shopeeItemId IMEDIATAMENTE pra rastrear orfaos se init_tier_variation falhar
+      await sharedDb.update(multiProductListings)
+        .set({ shopeeItemId: shopeeItemId, status: "publishing" })
+        .where(eq(multiProductListings.id, listingId));
+
       onProgress?.("Criando variações");
-      await shopeePublish.initTierVariation(accessToken, shopId, shopeeItemId, {
-        name: "Modelo",
-        options: variationOptions,
-        optionImageIds: variationOptionImageIds,
-        models,
-      });
+      try {
+        await shopeePublish.initTierVariation(accessToken, shopId, shopeeItemId, {
+          name: "Modelo",
+          options: variationOptions,
+          optionImageIds: variationOptionImageIds,
+          models,
+        });
+      } catch (initErr: any) {
+        // initTierVariation falhou. Item ja foi criado na Shopee como produto simples.
+        // Marca como erro mas mantem shopeeItemId pra que o user possa apagar manualmente.
+        const enrichedMsg = `${initErr?.message ?? "init_tier_variation falhou"} | ITEM ORFAO criado na Shopee: itemId=${shopeeItemId} (deletar manualmente em seller.shopee.com.br)`;
+        throw new Error(enrichedMsg);
+      }
     }
 
     // ============ 12. Sucesso

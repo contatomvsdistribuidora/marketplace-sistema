@@ -290,6 +290,16 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
   if (!ws.optionDetailsMatrix || ws.optionDetailsMatrix.length === 0) issues.push({ severity: "error", field: "variations", message: "Matriz de variacoes vazia" });
   if (!listing.videoUrl && !listing.videoBankId) issues.push({ severity: "warning", field: "video", message: "Sem video - anuncios com video tem mais conversao" });
 
+  // Valida precos minimos da Shopee (>= R$ 1,00)
+  const lowPriceModels = models.filter((m: any) => m.original_price < 1);
+  if (lowPriceModels.length > 0) {
+    issues.push({
+      severity: "error",
+      field: "price",
+      message: `${lowPriceModels.length} modelo(s) com preco abaixo de R$ 1,00 (limite minimo Shopee). Verifique calculos no Step 2.`,
+    });
+  }
+
   return {
     listingId,
     listingStatus: listing.status,
