@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -114,6 +114,13 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const [videoModalOpen, setVideoModalOpen] = useState(false);
   const [videoSearch, setVideoSearch] = useState("");
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [importUrlOpen, setImportUrlOpen] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importTitle, setImportTitle] = useState("");
+  const [importingUrl, setImportingUrl] = useState(false);
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: invData } = trpc.settings.getInventoryId.useQuery();
   const inventoryId = invData?.inventoryId;
@@ -278,6 +285,11 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     onError: (e) => toast.error(e.message),
   });
 
+  const requestUploadMut = trpc.videoBank.requestUploadUrl.useMutation();
+  const confirmUploadMut = trpc.videoBank.confirmUpload.useMutation();
+  const importFromUrlMut = trpc.videoBank.importFromUrl.useMutation();
+  const utilsVideoBank = trpc.useUtils();
+
   const generateThumbMutation = trpc.multiProduct.generateThumbWithAI.useMutation({
     onSuccess: () => {
       onChange();
@@ -305,6 +317,78 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
       // Vídeo do BL: salva só a URL, videoBankId fica null
       updateMutation.mutate({ id: listing.id, videoBankId: null, videoUrl: v.videoUrl });
       return;
+    }
+  }
+
+  async function handleUploadVideoFromPC(file: File) {
+    if (!file) return;
+    if (file.size > 30 * 1024 * 1024) {
+      toast.error("Video maior que 30MB. Use um arquivo menor.");
+      return;
+    }
+    const allowed = ["video/mp4", "video/quicktime", "video/webm"];
+    if (!allowed.includes(file.type)) {
+      toast.error("Formato nao suportado. Use MP4, MOV ou WEBM.");
+      return;
+    }
+    setUploadingVideo(true);
+    setUploadProgress(0);
+    try {
+      const presigned = await requestUploadMut.mutateAsync({
+        contentType: file.type as any,
+        sizeBytes: file.size,
+      });
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", presigned.uploadUrl);
+        xhr.setRequestHeader("Content-Type", file.type);
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+        };
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`HTTP ${xhr.status}`)));
+        xhr.onerror = () => reject(new Error("Falha no upload"));
+        xhr.send(file);
+      });
+      const titleClean = file.name.replace(/\.[^.]+$/, "").slice(0, 256);
+      const confirmed = await confirmUploadMut.mutateAsync({
+        key: presigned.key,
+        title: titleClean,
+      });
+      handleSelectVideo(`bank:${confirmed.id}`);
+      await utilsVideoBank.videoBank.listVideos.invalidate();
+      toast.success("Video enviado e salvo no banco!");
+      setVideoModalOpen(false);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Falha no upload");
+    } finally {
+      setUploadingVideo(false);
+      setUploadProgress(0);
+      if (videoFileInputRef.current) videoFileInputRef.current.value = "";
+    }
+  }
+
+  async function handleImportFromUrl() {
+    if (!importUrl.trim() || !importTitle.trim()) {
+      toast.error("Preencha URL e titulo.");
+      return;
+    }
+    setImportingUrl(true);
+    try {
+      const result = await importFromUrlMut.mutateAsync({
+        sourceUrl: importUrl.trim(),
+        title: importTitle.trim(),
+      });
+      handleSelectVideo(`bank:${result.id}`);
+      await utilsVideoBank.videoBank.listVideos.invalidate();
+      toast.success("Video importado e salvo no banco!");
+      setImportUrlOpen(false);
+      setImportUrl("");
+      setImportTitle("");
+      setVideoModalOpen(false);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Falha ao importar");
+    } finally {
+      setImportingUrl(false);
     }
   }
 
@@ -634,7 +718,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
 
           {/* Modal Galeria de Videos */}
           <Dialog open={videoModalOpen} onOpenChange={setVideoModalOpen}>
-            <DialogContent className="max-w-7xl w-[95vw] h-[90vh] flex flex-col">
+            <DialogContent className="!max-w-[98vw] w-[98vw] !h-[95vh] flex flex-col p-4 sm:p-6">
               <DialogHeader>
                 <DialogTitle>Selecione um video</DialogTitle>
               </DialogHeader>
@@ -657,7 +741,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
                     <p className="text-sm">Nenhum video encontrado</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
                     {filteredVideos.map((v) => {
                       const isSelected = v.value === currentValue;
                       return (
@@ -710,6 +794,87 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* Rodape com botoes de adicionar */}
+              <div className="border-t pt-3 mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  ref={videoFileInputRef}
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/webm"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleUploadVideoFromPC(f);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={() => videoFileInputRef.current?.click()}
+                  disabled={uploadingVideo}
+                  className="gap-2"
+                >
+                  {uploadingVideo ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Enviando {uploadProgress}%</>
+                  ) : (
+                    <><ImageIcon className="h-4 w-4" /> Enviar do PC</>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setImportUrlOpen(true)}
+                  disabled={uploadingVideo}
+                  className="gap-2"
+                >
+                  <Search className="h-4 w-4" /> Importar de URL
+                </Button>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  Max 30MB · MP4/MOV/WEBM · fica salvo pra reusar
+                </span>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Modal Importar URL */}
+          <Dialog open={importUrlOpen} onOpenChange={(o) => { if (!importingUrl) setImportUrlOpen(o); }}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Importar video de URL</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium">URL do video (link direto .mp4)</label>
+                  <Input
+                    placeholder="https://exemplo.com/video.mp4"
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    disabled={importingUrl}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Nao funciona com YouTube, TikTok, Instagram, Facebook ou Vimeo.
+                    Use Google Drive publico, Dropbox ou link direto.
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Titulo do video</label>
+                  <Input
+                    placeholder="Ex: Demo do produto X"
+                    value={importTitle}
+                    onChange={(e) => setImportTitle(e.target.value)}
+                    disabled={importingUrl}
+                    maxLength={256}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button variant="outline" onClick={() => setImportUrlOpen(false)} disabled={importingUrl}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleImportFromUrl} disabled={importingUrl}>
+                  {importingUrl ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Importando...</> : "Importar"}
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
