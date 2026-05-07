@@ -22,6 +22,7 @@ import * as shopeeOptimizer from "./shopee-optimizer";
 import * as multiProductAi from "./multi-product-ai";
 import * as multiProductPublish from "./multi-product-publish";
 import { storagePut } from "./storage";
+import * as videoStorage from "./storage-video";
 import { randomUUID } from "node:crypto";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
 import {
@@ -4202,6 +4203,77 @@ export const appRouter = router({
         });
         const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
         return { id: Number(insertedId) };
+      }),
+
+    // ===== Upload do PC via presigned URL =====
+    requestUploadUrl: protectedProcedure
+      .input(z.object({
+        contentType: z.enum(["video/mp4", "video/quicktime", "video/webm"]),
+        sizeBytes: z.number().int().positive(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          return await videoStorage.getPresignedVideoUploadUrl({
+            userId: ctx.user.id,
+            contentType: input.contentType,
+            sizeBytes: input.sizeBytes,
+          });
+        } catch (e: any) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: e?.message ?? "Falha ao gerar URL de upload" });
+        }
+      }),
+
+    confirmUpload: protectedProcedure
+      .input(z.object({
+        key: z.string().min(1),
+        title: z.string().min(1).max(256),
+        durationSeconds: z.number().int().positive().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const verify = await videoStorage.verifyVideoUploaded(input.key);
+        if (!verify.exists) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Upload nao encontrado no R2. Tente novamente." });
+        }
+        const publicUrl = videoStorage.buildVideoPublicUrl(input.key);
+        const result = await sharedDb.insert(videoBank).values({
+          title: input.title,
+          url: publicUrl,
+          source: "manual_upload",
+          durationSeconds: input.durationSeconds ?? null,
+          thumbnailUrl: null,
+          isActive: 1,
+        });
+        const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
+        return { id: Number(insertedId), url: publicUrl, sizeBytes: verify.size };
+      }),
+
+    importFromUrl: protectedProcedure
+      .input(z.object({
+        sourceUrl: z.string().url("URL invalida"),
+        title: z.string().min(1).max(256),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        let downloaded;
+        try {
+          downloaded = await videoStorage.downloadVideoFromUrl(input.sourceUrl);
+        } catch (e: any) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: e?.message ?? "Falha ao baixar video" });
+        }
+        const stored = await videoStorage.uploadVideoBuffer({
+          userId: ctx.user.id,
+          buffer: downloaded.buffer,
+          contentType: downloaded.contentType,
+        });
+        const result = await sharedDb.insert(videoBank).values({
+          title: input.title,
+          url: stored.publicUrl,
+          source: "external_url",
+          durationSeconds: null,
+          thumbnailUrl: null,
+          isActive: 1,
+        });
+        const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
+        return { id: Number(insertedId), url: stored.publicUrl, sizeBytes: downloaded.buffer.length };
       }),
 
     updateVideo: protectedProcedure
