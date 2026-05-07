@@ -39,6 +39,25 @@ type WizardState = {
   categoryBreadcrumb?: any[];
   brandValue?: { brandId?: number; brandName?: string } | null;
   productNameOverrides?: Record<string, string>;
+  computedCells?: Array<{
+    productIdx: number;
+    optIdx: number;
+    cellKey: string;
+    productSourceId: number | string;
+    productSource?: string;
+    optionLabel: string;
+    pricing: {
+      price: number;
+      qty: number;
+      weight: number;
+      length: number;
+      width: number;
+      height: number;
+      profitPct: number;
+      marginContribution: number;
+      [k: string]: any;
+    };
+  }>;
 };
 
 const VARIATION_TYPE_LABELS: Record<string, string> = {
@@ -179,27 +198,44 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
   }
 
   // ===== Models (combinacoes) =====
-  // priceOverrides eh Record<number, number> (preco direto, NAO objeto)
-  // Por enquanto: tira preco/estoque do produto principal por linha (i)
-  // O calculo completo (computePricing) sera plugado no proximo bloco
+  // PRIORIDADE: ws.computedCells (snapshot do frontend - precos exatos)
+  // FALLBACK: priceOverrides + cellOpt + produto base (compat com listings antigos)
   const models: any[] = [];
   const dim1Count = variation1Options.length || 1;
   const dim2Count = variation2Options.length || 1;
+  const computedByCellKey = new Map<string, any>();
+  if (Array.isArray(ws.computedCells)) {
+    ws.computedCells.forEach((cell: any) => {
+      computedByCellKey.set(cell.cellKey, cell);
+    });
+  }
+
   for (let i = 0; i < dim1Count; i++) {
     for (let j = 0; j < dim2Count; j++) {
-      // priceOverrides[i] = preco direto, se setado pelo usuario
-      const overridePrice = (ws.priceOverrides as any)?.[i];
+      const cellKey = `${i}-${j}`;
+      const computed = computedByCellKey.get(cellKey);
       const productForRow = resolved[i] ?? resolved[0];
       const cellOpt1 = ws.optionDetailsMatrix?.[i]?.[j];
+      const overridePrice = (ws.priceOverrides as any)?.[i];
 
-      const price = overridePrice != null && overridePrice > 0
-        ? Number(overridePrice)
-        : (cellOpt1?.price ? Number(cellOpt1.price) : Number(productForRow?.price ?? 0));
+      // PRECO: prefere computado do front, senao override, senao base
+      let price: number;
+      if (computed?.pricing?.price && computed.pricing.price > 0) {
+        price = Number(computed.pricing.price);
+      } else if (overridePrice != null && overridePrice > 0) {
+        price = Number(overridePrice);
+      } else if (cellOpt1?.price) {
+        price = Number(cellOpt1.price);
+      } else {
+        price = Number(productForRow?.price ?? 0);
+      }
 
-      const stock = cellOpt1?.stock
+      // ESTOQUE: prefere cellOpt, senao produto
+      const stock = cellOpt1?.stock != null
         ? Number(cellOpt1.stock)
         : Number(productForRow?.stock ?? 0);
 
+      // SKU: prefere cellOpt, senao gera
       const sku = cellOpt1?.sku
         ? String(cellOpt1.sku)
         : `${listing.id}-V${i + 1}${variation2Name ? `-${j + 1}` : ""}`;
@@ -209,6 +245,10 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
         original_price: price,
         seller_stock: [{ stock }],
         model_sku: sku,
+        // debug: marca se veio do computado
+        _from: computed ? "computed" : (overridePrice ? "override" : (cellOpt1?.price ? "cellOpt" : "product")),
+        _profitPct: computed?.pricing?.profitPct,
+        _margin: computed?.pricing?.marginContribution,
       });
     }
   }
@@ -276,6 +316,7 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
       totalCells: dim1Count * dim2Count,
       hasPriceOverrides: !!ws.priceOverrides && Object.keys(ws.priceOverrides as any).length > 0,
       pricingMode: ws.pricingMode,
+      computedCellsCount: Array.isArray(ws.computedCells) ? ws.computedCells.length : 0,
     },
     media: {
       thumbUrl: listing.thumbUrl,

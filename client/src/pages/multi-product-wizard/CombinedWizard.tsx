@@ -15,6 +15,16 @@ import type {
   VariationType, WizardStep, VariationOption, VariationGroup,
   PricingMode, PricingGlobals, ComputedPricing,
 } from "../shopee-criador/types";
+
+type ComputedCell = {
+  productIdx: number;
+  optIdx: number;
+  cellKey: string;
+  productSourceId: number | string;
+  productSource: "baselinker" | "shopee";
+  optionLabel: string;
+  pricing: ComputedPricing;
+};
 import {
   uid, emptyOption, isValidEan, suggestNewName, truncateVariationName,
 } from "../shopee-criador/helpers";
@@ -207,6 +217,7 @@ export function CombinedWizard({
       categoryBreadcrumb: selectedCategoryBreadcrumb,
       brandValue,
       productNameOverrides,
+      computedCells,
     });
   }
 
@@ -500,6 +511,34 @@ export function CombinedWizard({
 
     return { qty, price, totalProductCost, platformCost, commissionRate, commissionFixed, marginContribution, profitPct, weight, length, width, height, factor, effectiveDisc, minMarginAdjusted };
   }
+
+  const computedCells: ComputedCell[] = useMemo(() => {
+    if (!Array.isArray(optionDetailsMatrix)) return [];
+    const out: ComputedCell[] = [];
+    for (let productIdx = 0; productIdx < optionDetailsMatrix.length; productIdx++) {
+      const row = optionDetailsMatrix[productIdx];
+      const product = products[productIdx];
+      if (!Array.isArray(row) || !product) continue;
+      for (let optIdx = 0; optIdx < row.length; optIdx++) {
+        const opt = row[optIdx];
+        try {
+          const pricing = computePricing(opt, optIdx, productIdx);
+          out.push({
+            productIdx,
+            optIdx,
+            cellKey: `${productIdx}-${optIdx}`,
+            productSourceId: product.sourceId,
+            productSource: product.source as any,
+            optionLabel: opt.label ?? "",
+            pricing,
+          });
+        } catch (e) {
+          // Skip celulas com erro de calculo
+        }
+      }
+    }
+    return out;
+  }, [optionDetailsMatrix, products, pricing, pricingPerProduct, pricingMode, perRowBaseQty, qtyFactors, perVarParam, perVarEnabled, priceOverrides, selectedType]);
 
   function profitBadge(pct: number) {
     if (pct >= 20) return { bg: "bg-green-100 text-green-700 border-green-300",    dot: "bg-green-500"  };
