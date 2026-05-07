@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Star, Image as ImageIcon, Send, AlertTriangle, CheckCircle2, Loader2,
+  Eye, AlertCircle, X,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
   itemKey, SourceBadge,
@@ -30,6 +32,8 @@ export function StepD({
 
   const [, setLocation] = useLocation();
   const [publishedItemUrl, setPublishedItemUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTab, setPreviewTab] = useState<"resumo" | "json">("resumo");
 
   const publishMutation = trpc.multiProduct.publishToShopee.useMutation({
     onSuccess: (data) => {
@@ -42,6 +46,11 @@ export function StepD({
       toast.error(e.message);
     },
   });
+
+  const previewQuery = trpc.multiProduct.previewPublishPayload.useQuery(
+    { id: listing.id },
+    { enabled: false, retry: false },
+  );
 
   const isPrincipalShopee = listing.mainProductSource === "shopee";
 
@@ -62,7 +71,7 @@ export function StepD({
     title: !!listing.title && listing.title.trim().length >= 10,
     description: !!listing.description && listing.description.trim().length >= 30,
     thumb: !!listing.thumbUrl,
-    video: !!listing.videoBankId,
+    video: !!listing.videoBankId || !!listing.videoUrl,
   };
 
   const Status = ({ ok }: { ok: boolean }) =>
@@ -215,6 +224,24 @@ export function StepD({
           {listing.status !== "published" && (
             <Button
               size="lg"
+              variant="outline"
+              className="w-full mb-2"
+              onClick={() => {
+                setPreviewOpen(true);
+                previewQuery.refetch();
+              }}
+              disabled={previewQuery.isFetching}
+            >
+              {previewQuery.isFetching ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Gerando preview...</>
+              ) : (
+                <><Eye className="h-4 w-4 mr-2" /> Pre-visualizar publicacao</>
+              )}
+            </Button>
+          )}
+          {listing.status !== "published" && (
+            <Button
+              size="lg"
               className="w-full"
               disabled={!!blockingPublishReason || publishMutation.isPending}
               onClick={() => publishMutation.mutate({ id: listing.id })}
@@ -256,6 +283,205 @@ export function StepD({
           )}
         </CardContent>
       </Card>
+
+      {/* Modal Preview do Payload Shopee */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="!max-w-[95vw] w-[95vw] !h-[90vh] flex flex-col p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Preview do que sera enviado pra Shopee
+            </DialogTitle>
+          </DialogHeader>
+
+          {previewQuery.isFetching && (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <span className="ml-3 text-muted-foreground">Montando payload...</span>
+            </div>
+          )}
+
+          {previewQuery.error && (
+            <div className="bg-red-50 border border-red-200 rounded p-4 text-sm text-red-700">
+              <strong>Erro ao gerar preview:</strong> {previewQuery.error.message}
+            </div>
+          )}
+
+          {previewQuery.data && !previewQuery.isFetching && (
+            <>
+              {/* Tabs */}
+              <div className="flex gap-2 border-b">
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab("resumo")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
+                    previewTab === "resumo"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Resumo Visivel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab("json")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
+                    previewTab === "json"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  JSON Tecnico
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto mt-4">
+                {previewTab === "resumo" && (
+                  <div className="space-y-4">
+                    {previewQuery.data.issues.length > 0 && (
+                      <div className="space-y-2">
+                        <h3 className="font-semibold text-sm">Validacao</h3>
+                        {previewQuery.data.issues.map((issue: any, i: number) => (
+                          <div
+                            key={i}
+                            className={`flex items-start gap-2 rounded p-3 text-sm ${
+                              issue.severity === "error"
+                                ? "bg-red-50 border border-red-200 text-red-800"
+                                : "bg-yellow-50 border border-yellow-200 text-yellow-800"
+                            }`}
+                          >
+                            {issue.severity === "error" ? (
+                              <X className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                            ) : (
+                              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                            )}
+                            <div>
+                              <strong className="capitalize">{issue.field}:</strong> {issue.message}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className={`rounded-lg p-3 text-sm flex items-center gap-2 ${
+                      previewQuery.data.canPublish
+                        ? "bg-green-50 border border-green-200 text-green-800"
+                        : "bg-red-50 border border-red-200 text-red-800"
+                    }`}>
+                      {previewQuery.data.canPublish ? (
+                        <><CheckCircle2 className="h-5 w-5" /> Pronto para publicar (sem erros bloqueantes)</>
+                      ) : (
+                        <><AlertTriangle className="h-5 w-5" /> Existem erros que impedem a publicacao</>
+                      )}
+                    </div>
+
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Item Principal</h3>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div><span className="text-muted-foreground">Modo:</span> <strong>{previewQuery.data.mode}</strong></div>
+                        <div><span className="text-muted-foreground">Conta Shopee:</span> {previewQuery.data.accountId}</div>
+                        <div className="col-span-2"><span className="text-muted-foreground">Titulo:</span> {previewQuery.data.payloadPreview.addItem.item_name}</div>
+                        <div><span className="text-muted-foreground">Categoria:</span> {previewQuery.data.payloadPreview.addItem.category_id ?? "—"}</div>
+                        <div><span className="text-muted-foreground">Marca:</span> {previewQuery.data.payloadPreview.addItem.brand.original_brand_name}</div>
+                        <div><span className="text-muted-foreground">Atributos:</span> {previewQuery.data.wizardState.attributeCount}</div>
+                        <div><span className="text-muted-foreground">Imagens:</span> {previewQuery.data.media.productImagesCount} produto(s)</div>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Variacoes ({previewQuery.data.wizardState.totalCells} combinacoes)</h3>
+                      <div className="text-sm space-y-1">
+                        <div>
+                          <strong>Variacao 1:</strong> {previewQuery.data.wizardState.variation1.name} ({previewQuery.data.wizardState.variation1.options} opcoes)
+                        </div>
+                        {previewQuery.data.wizardState.variation2 && (
+                          <div>
+                            <strong>Variacao 2:</strong> {previewQuery.data.wizardState.variation2.name} ({previewQuery.data.wizardState.variation2.options} opcoes)
+                          </div>
+                        )}
+                      </div>
+                      {previewQuery.data.payloadPreview.initTierVariation && (
+                        <div className="mt-3">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-1">Modelos (combinacoes)</h4>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead className="bg-muted/30">
+                                <tr>
+                                  <th className="text-left p-2">Tier Index</th>
+                                  <th className="text-right p-2">Preco</th>
+                                  <th className="text-right p-2">Estoque</th>
+                                  <th className="text-left p-2">SKU</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {previewQuery.data.payloadPreview.initTierVariation.model.map((m: any, i: number) => (
+                                  <tr key={i} className="border-b border-muted/30">
+                                    <td className="p-2">[{m.tier_index.join(", ")}]</td>
+                                    <td className="p-2 text-right">R$ {m.original_price.toFixed(2)}</td>
+                                    <td className="p-2 text-right">{m.seller_stock[0].stock}</td>
+                                    <td className="p-2 font-mono text-[11px]">{m.model_sku}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Produtos da Combinacao</h3>
+                      <div className="space-y-1 text-sm">
+                        {previewQuery.data.resolved.map((r: any, i: number) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-[10px]">{r.source}</Badge>
+                            <span className="flex-1">{r.name}</span>
+                            <span className="text-muted-foreground">R$ {r.price.toFixed(2)}</span>
+                            <span className="text-muted-foreground">Est: {r.stock}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Midia</h3>
+                      <div className="text-sm space-y-1">
+                        <div><span className="text-muted-foreground">Thumb:</span> {previewQuery.data.media.thumbUrl ? "OK" : "Faltando"}</div>
+                        <div><span className="text-muted-foreground">Video:</span> {previewQuery.data.media.videoUrl || previewQuery.data.media.videoBankId ? "OK" : "Sem video"}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {previewTab === "json" && (
+                  <div className="space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-sm mb-2">add_item payload</h3>
+                      <pre className="bg-zinc-900 text-zinc-100 p-4 rounded text-xs overflow-auto max-h-96">
+                        {JSON.stringify(previewQuery.data.payloadPreview.addItem, null, 2)}
+                      </pre>
+                    </div>
+                    {previewQuery.data.payloadPreview.initTierVariation && (
+                      <div>
+                        <h3 className="font-semibold text-sm mb-2">init_tier_variation payload</h3>
+                        <pre className="bg-zinc-900 text-zinc-100 p-4 rounded text-xs overflow-auto max-h-96">
+                          {JSON.stringify(previewQuery.data.payloadPreview.initTierVariation, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    <div>
+                      <h3 className="font-semibold text-sm mb-2">Estado completo (debug)</h3>
+                      <pre className="bg-zinc-900 text-zinc-100 p-4 rounded text-xs overflow-auto max-h-64">
+                        {JSON.stringify(previewQuery.data, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
