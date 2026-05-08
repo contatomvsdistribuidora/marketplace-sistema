@@ -253,23 +253,20 @@ export async function publishMultiProductListing(
         console.warn("[multi-publish] falha ao resolver videoBank:", e);
       }
     }
-    // VIDEO TEMPORARIAMENTE DESABILITADO:
-    // A API Shopee aceita o payload mas nao anexa o video ao item (silent drop).
-    // Provavel causa: falta de scope MEDIA/VIDEO no partner app.
-    // Pra reativar: descomentar bloco abaixo apos resolver com Shopee Partner Support.
-    //
-    // if (resolvedVideoUrl) {
-    //   try {
-    //     onProgress?.("Enviando vídeo para Shopee...");
-    //     const videoId = await shopeeVideo.uploadVideoFromUrl(accessToken, shopId, resolvedVideoUrl);
-    //     videoUploadIds = [videoId];
-    //   } catch (e: any) {
-    //     console.warn("[multi-publish] upload de video falhou:", e?.message ?? e);
-    //   }
-    // }
-
     if (resolvedVideoUrl) {
-      onProgress?.("⚠️ Video sera adicionado manualmente na Shopee depois (limitacao da API)");
+      try {
+        onProgress?.("Enviando vídeo para Shopee (pode demorar até 1 min)");
+        const videoId = await shopeeVideo.uploadVideoFromUrl(
+          accessToken,
+          shopId,
+          resolvedVideoUrl,
+        );
+        videoUploadIds = [videoId];
+        onProgress?.("Vídeo processado com sucesso");
+      } catch (e: any) {
+        console.warn("[multi-publish] upload de video falhou - publicando sem video:", e?.message ?? e);
+        onProgress?.(`Vídeo falhou (${e?.message?.substring(0, 60) ?? "erro"}) - continuando sem vídeo`);
+      }
     }
 
     onProgress?.(`Fazendo upload de ${resolved.length} imagens das variações`);

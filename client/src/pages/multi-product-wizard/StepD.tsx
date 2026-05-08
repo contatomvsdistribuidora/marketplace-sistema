@@ -178,27 +178,28 @@ export function StepD({
               </div>
             </div>
           </div>
-          {/* Aviso de limitacao da API Shopee pra video */}
-          {(listing.videoUrl || listing.videoBankId) && (
-            <div className="border-2 border-orange-300 rounded p-3 bg-orange-50">
-              <div className="text-xs text-orange-900 mb-2 flex items-center gap-1.5 font-semibold">
-                <span>⚠️</span>
-                <span>Vídeo precisa ser adicionado manualmente na Shopee</span>
+          {listing.videoUrl && (
+            <div className="border rounded p-2 bg-green-50 border-green-200">
+              <div className="text-xs text-green-900 mb-1.5 flex items-center gap-1.5 font-semibold">
+                <span>🎬</span>
+                <span>Vídeo será enviado pra Shopee:</span>
               </div>
-              <p className="text-xs text-orange-800 mb-2">
-                A API da Shopee não está aceitando vídeo automaticamente no momento.
-                Após publicar, vá em <b>seller.shopee.com.br → Meus Produtos → editar o anúncio</b> e adicione o vídeo manualmente. Leva 30 segundos.
-              </p>
-              {listing.videoUrl && (
-                <video
-                  src={listing.videoUrl}
-                  controls
-                  muted
-                  preload="metadata"
-                  className="w-full max-w-sm rounded border"
-                  style={{ maxHeight: "200px" }}
-                />
-              )}
+              <video
+                src={listing.videoUrl}
+                controls
+                muted
+                preload="metadata"
+                className="w-full max-w-sm rounded border"
+                style={{ maxHeight: "200px" }}
+              />
+            </div>
+          )}
+          {listing.videoBankId && !listing.videoUrl && (
+            <div className="border rounded p-2 bg-blue-50 border-blue-200">
+              <div className="text-xs text-blue-900 flex items-center gap-1.5">
+                <span>🎬</span>
+                <span>Vídeo da galeria selecionado (ID: {listing.videoBankId}). Será enviado pra Shopee.</span>
+              </div>
             </div>
           )}
         </CardContent>
