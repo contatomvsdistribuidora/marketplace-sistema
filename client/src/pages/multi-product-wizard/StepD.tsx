@@ -157,18 +157,53 @@ export function StepD({
             Editar
           </Button>
         </CardHeader>
-        <CardContent className="flex items-center gap-4">
-          <div className="h-20 w-20 rounded border bg-muted flex items-center justify-center overflow-hidden shrink-0">
-            {listing.thumbUrl ? (
-              <img src={listing.thumbUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <ImageIcon className="h-6 w-6 text-muted-foreground" />
-            )}
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-4">
+            <div className="h-20 w-20 rounded border bg-muted flex items-center justify-center overflow-hidden shrink-0">
+              {listing.thumbUrl ? (
+                <img src={listing.thumbUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <ImageIcon className="h-6 w-6 text-muted-foreground" />
+              )}
+            </div>
+            <div className="text-sm">
+              <div>Thumb: {listing.thumbUrl ? "definida" : "(faltando)"}</div>
+              <div>
+                Vídeo:{" "}
+                {(listing.videoBankId || listing.videoUrl) ? (
+                  <span className="text-green-600 font-medium">definido ✓</span>
+                ) : (
+                  "(opcional, faltando)"
+                )}
+              </div>
+            </div>
           </div>
-          <div className="text-sm">
-            <div>Thumb: {listing.thumbUrl ? "definida" : "(faltando)"}</div>
-            <div>Vídeo: {listing.videoBankId ? "definido" : "(opcional, faltando)"}</div>
-          </div>
+          {/* Preview do video se tiver videoUrl direto */}
+          {listing.videoUrl && (
+            <div className="border rounded p-2 bg-muted/30">
+              <div className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                <span>🎬</span>
+                <span>Vídeo que será enviado pra Shopee:</span>
+              </div>
+              <video
+                src={listing.videoUrl}
+                controls
+                muted
+                preload="metadata"
+                className="w-full max-w-sm rounded border"
+                style={{ maxHeight: "240px" }}
+              />
+            </div>
+          )}
+          {/* Aviso se tem videoBankId mas nao temos a URL no front */}
+          {listing.videoBankId && !listing.videoUrl && (
+            <div className="border rounded p-2 bg-blue-50 border-blue-200">
+              <div className="text-xs text-blue-900 flex items-center gap-1.5">
+                <span>🎬</span>
+                <span>Vídeo da galeria selecionado (ID: {listing.videoBankId}). Será enviado pra Shopee na publicação.</span>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
