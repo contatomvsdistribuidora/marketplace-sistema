@@ -1701,6 +1701,54 @@ export function CombinedWizard({
                 </div>
               ))}
 
+              {(() => {
+                const validPrices = computedCells.map((c) => c.pricing.price).filter((p) => p > 0);
+                if (validPrices.length < 2) return null;
+                const minP = Math.min(...validPrices);
+                const maxP = Math.max(...validPrices);
+                const ratio = maxP / minP;
+                if (ratio <= 4) {
+                  return (
+                    <div className="mb-3 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800 flex items-center gap-2">
+                      <span>✅</span>
+                      <span>Razao de preços <b>{ratio.toFixed(1)}x</b> dentro do limite Shopee de 4x (min R$ {minP.toFixed(2)} / max R$ {maxP.toFixed(2)})</span>
+                    </div>
+                  );
+                }
+                const targetMin = maxP / 4;
+                const lowCells = computedCells.filter((c) => c.pricing.price > 0 && c.pricing.price < targetMin);
+                const handleAutoFix = () => {
+                  let count = 0;
+                  lowCells.forEach((c) => {
+                    const row = optionDetailsMatrix[c.productIdx];
+                    const opt = row?.[c.optIdx];
+                    if (opt) {
+                      updateDetail(opt.id, "price", targetMin.toFixed(2), c.productIdx);
+                      count++;
+                    }
+                  });
+                  toast.success(`${count} preço(s) ajustados para R$ ${targetMin.toFixed(2)} (limite Shopee 4x)`);
+                };
+                return (
+                  <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 flex items-center gap-3 flex-wrap">
+                    <span>⚠️</span>
+                    <span className="flex-1 min-w-[200px]">
+                      Razao de preços <b>{ratio.toFixed(1)}x</b> excede limite Shopee de <b>4x</b>.
+                      Mais barato <b>R$ {minP.toFixed(2)}</b>, mais caro <b>R$ {maxP.toFixed(2)}</b>.
+                      <br />
+                      {lowCells.length} célula(s) abaixo do mínimo permitido (R$ {targetMin.toFixed(2)}).
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAutoFix}
+                      className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 transition-colors flex items-center gap-1.5 shrink-0"
+                    >
+                      🔧 Auto-corrigir preços baixos
+                    </button>
+                  </div>
+                );
+              })()}
+
               {/* ── TABELA UNICA com TODAS as combinacoes (Produto x Opcao) ── */}
               <div className="overflow-x-auto border border-gray-200 rounded-xl bg-white">
                 <table className="w-full text-xs">
