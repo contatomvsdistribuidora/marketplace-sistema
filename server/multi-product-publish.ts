@@ -17,8 +17,10 @@ import {
   multiProductListingItems,
   productCache,
   shopeeProducts,
+  videoBank,
 } from "../drizzle/schema";
 import * as shopeePublish from "./shopee-publish";
+import * as shopeeVideo from "./shopee-video";
 import { getValidToken } from "./shopee";
 
 export class PublishMultiProductError extends Error {
@@ -232,6 +234,40 @@ export async function publishMultiProductListing(
       listing.thumbUrl,
       "normal",
     );
+
+    // Resolve URL do video (direto ou via videoBank) e faz upload pra Shopee.
+    // Se falhar, publica o anuncio sem video (nao bloqueia).
+    let videoUploadIds: string[] | undefined = undefined;
+    let resolvedVideoUrl: string | null = null;
+    if ((listing as any).videoUrl) {
+      resolvedVideoUrl = (listing as any).videoUrl;
+    } else if ((listing as any).videoBankId) {
+      try {
+        const [vb] = await sharedDb
+          .select({ url: videoBank.url })
+          .from(videoBank)
+          .where(eq(videoBank.id, (listing as any).videoBankId))
+          .limit(1);
+        if (vb?.url) resolvedVideoUrl = vb.url;
+      } catch (e) {
+        console.warn("[multi-publish] falha ao resolver videoBank:", e);
+      }
+    }
+    if (resolvedVideoUrl) {
+      try {
+        onProgress?.("Enviando vídeo para Shopee (pode demorar até 1 min)");
+        const videoId = await shopeeVideo.uploadVideoFromUrl(
+          accessToken,
+          shopId,
+          resolvedVideoUrl,
+        );
+        videoUploadIds = [videoId];
+        onProgress?.("Vídeo processado com sucesso");
+      } catch (e: any) {
+        console.warn("[multi-publish] upload de video falhou - publicando sem video:", e?.message ?? e);
+        onProgress?.(`Vídeo falhou (${e?.message?.substring(0, 60) ?? "erro"}) - continuando sem vídeo`);
+      }
+    }
 
     onProgress?.(`Fazendo upload de ${resolved.length} imagens das variações`);
     const optionImageIds: string[] = [];
@@ -539,6 +575,7 @@ export async function publishMultiProductListing(
             logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
             attributes: finalAttributes,
             brand: finalBrand,
+            videoUploadIds: videoUploadIds,
           });
           // Sucesso - sai do loop
           break;

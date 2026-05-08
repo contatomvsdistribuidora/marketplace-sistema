@@ -473,6 +473,8 @@ export interface CreateProductInput {
    *  GTIN in init_tier_variation, so the wizard only exposes this when the
    *  product has a single variation. 8/12/13/14 digits. */
   gtinCode?: string;
+  /** IDs de videos da Shopee (resultado de uploadVideoFromUrl). Max 1 video por anuncio. */
+  videoUploadIds?: string[];
 }
 
 /**
@@ -546,6 +548,13 @@ export async function createProduct(
   // products — the wizard enforces that constraint on the client side.
   if (input.gtinCode) {
     body.gtin_code = input.gtinCode;
+  }
+
+  // Video (max 1 video por anuncio Shopee).
+  if (input.videoUploadIds && input.videoUploadIds.length > 0) {
+    body.video_info_list = input.videoUploadIds.slice(0, 1).map((id) => ({
+      video_upload_id: id,
+    }));
   }
 
   console.log('[SHOPEE DEBUG] payload completo:', JSON.stringify(body, null, 2));
