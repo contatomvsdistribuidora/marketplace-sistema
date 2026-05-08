@@ -1716,23 +1716,28 @@ export function CombinedWizard({
                   );
                 }
                 const targetMin = Math.ceil((maxP / 4) * 100) / 100;
-                const lowCells = computedCells.filter((c) => c.pricing.price > 0 && c.pricing.price < targetMin);
-                const lowMin = lowCells.length ? Math.min(...lowCells.map((c) => c.pricing.price)) : 0;
-                const lowMax = lowCells.length ? Math.max(...lowCells.map((c) => c.pricing.price)) : 0;
+                const lowCells = computedCells.filter((c) => c.pricing.price < targetMin);
+                const lowPricesNonZero = lowCells.map((c) => c.pricing.price).filter((p) => p > 0);
+                const lowMin = lowPricesNonZero.length ? Math.min(...lowPricesNonZero) : 0;
+                const lowMax = lowPricesNonZero.length ? Math.max(...lowPricesNonZero) : 0;
+                const hasZeros = lowCells.some((c) => c.pricing.price <= 0);
                 const handleAutoFix = () => {
-                  let count = 0;
-                  lowCells.forEach((c) => {
-                    const row = optionDetailsMatrix[c.productIdx];
-                    const opt = row?.[c.optIdx];
-                    if (opt) {
-                      updateDetail(opt.id, "price", targetMin.toFixed(2), c.productIdx);
-                      count++;
-                    }
-                  });
+                  // Batch update: aplica TODAS mudancas em UM unico setState
+                  const targets = new Set(lowCells.map((c) => c.cellKey));
+                  const targetStr = targetMin.toFixed(2);
+                  setOptionDetailsMatrix((matrix) =>
+                    matrix.map((row, pIdx) =>
+                      row.map((opt, oIdx) =>
+                        targets.has(`${pIdx}-${oIdx}`) ? { ...opt, price: targetStr } : opt
+                      )
+                    )
+                  );
+                  // Salva no banco imediatamente (proximo tick, depois do setState)
+                  setTimeout(() => autoSaveWizardState(), 100);
                   toast.success(
                     lowMin === lowMax
-                      ? `${count} preço(s) ajustados de R$ ${lowMin.toFixed(2)} para R$ ${targetMin.toFixed(2)}`
-                      : `${count} preço(s) ajustados de R$ ${lowMin.toFixed(2)}–${lowMax.toFixed(2)} para R$ ${targetMin.toFixed(2)}`
+                      ? `${lowCells.length} preço(s) ajustados de R$ ${lowMin.toFixed(2)} para R$ ${targetStr} (salvando...)`
+                      : `${lowCells.length} preço(s) ajustados de R$ ${lowMin.toFixed(2)}–${lowMax.toFixed(2)} para R$ ${targetStr} (salvando...)`
                   );
                 };
                 return (
@@ -1764,7 +1769,7 @@ export function CombinedWizard({
                         onClick={handleAutoFix}
                         className="px-4 py-2 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 active:bg-amber-800 transition-colors flex items-center gap-1.5 shrink-0 shadow-sm"
                       >
-                        🔧 Auto-corrigir {lowCells.length} preço(s) → R$ {targetMin.toFixed(2)}
+                        🔧 Auto-corrigir {lowCells.length} preço(s){hasZeros ? " (incluindo R$ 0)" : ""} → R$ {targetMin.toFixed(2)}
                       </button>
                     </div>
                   </div>
