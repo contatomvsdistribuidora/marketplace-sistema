@@ -52,6 +52,8 @@ export function StepD({
     { enabled: false, retry: false },
   );
 
+  const autoFixMutation = trpc.multiProduct.autoFixPricesMultiProduct.useMutation();
+
   const isPrincipalShopee = listing.mainProductSource === "shopee";
 
   const blockingPublishReason: string | null = (() => {
@@ -341,6 +343,29 @@ export function StepD({
                     {previewQuery.data.issues.length > 0 && (
                       <div className="space-y-2">
                         <h3 className="font-semibold text-sm">Validacao</h3>
+                        {previewQuery.data.issues.some((i: any) => i.field === "price" && i.severity === "error") && (
+                          <div className="rounded p-3 bg-blue-50 border border-blue-200 flex items-center gap-3 flex-wrap mb-2">
+                            <span className="text-blue-900 text-xs flex-1 min-w-[180px]">
+                              🔧 <b>Tem erros de preço?</b> Posso corrigir automaticamente: ajusta preços baixos pra respeitar o limite Shopee de 4x.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const result = await autoFixMutation.mutateAsync({ id: listing.id });
+                                  toast.success(result.message || "Preços corrigidos");
+                                  await previewQuery.refetch();
+                                } catch (e: any) {
+                                  toast.error(e?.message ?? "Falha ao corrigir");
+                                }
+                              }}
+                              disabled={autoFixMutation.isPending}
+                              className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 shrink-0"
+                            >
+                              {autoFixMutation.isPending ? "Corrigindo..." : "🔧 Auto-corrigir agora"}
+                            </button>
+                          </div>
+                        )}
                         {previewQuery.data.issues.map((issue: any, i: number) => (
                           <div
                             key={i}
