@@ -34,6 +34,7 @@ async function initVideoUpload(
   shopId: number,
   fileSizeBytes: number,
   durationSeconds: number,
+  fileMd5: string,
 ): Promise<InitVideoUploadResult> {
   const path = "/api/v2/media_space/init_video_upload";
   const url = buildUrl(path, accessToken, shopId);
@@ -42,7 +43,7 @@ async function initVideoUpload(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      file_md5: "", // calculado no front mais abaixo
+      file_md5: fileMd5,
       file_size: fileSizeBytes,
       duration: durationSeconds,
     }),
@@ -188,12 +189,16 @@ export async function uploadVideoFromUrl(
   // (deixar como 30s default - Shopee corrige no processing)
   const durationSeconds = 30;
 
-  // 3. init upload
+  // 3. Calcula MD5 do arquivo inteiro (Shopee exige no init)
+  const fileMd5 = crypto.createHash("md5").update(fileBuffer).digest("hex");
+
+  // 4. init upload
   const { video_upload_id } = await initVideoUpload(
     accessToken,
     shopId,
     fileBuffer.length,
     durationSeconds,
+    fileMd5,
   );
 
   // 4. Divide em chunks e sobe
