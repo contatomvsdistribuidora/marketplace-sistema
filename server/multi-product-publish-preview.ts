@@ -296,7 +296,7 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
     issues.push({
       severity: "error",
       field: "price",
-      message: `${zeroPriceModels.length} celula(s) com preco ZERO ou nao preenchido. Va no Step 2 e preencha os precos faltantes.`,
+      message: `${zeroPriceModels.length} célula(s) com preço ZERO ou nao preenchido. Va no Step 2 e preencha os preços faltantes.`,
     });
   }
   const lowPriceModels = models.filter((m: any) => Number(m.original_price) > 0 && Number(m.original_price) < 1);
@@ -304,7 +304,7 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
     issues.push({
       severity: "error",
       field: "price",
-      message: `${lowPriceModels.length} modelo(s) com preco abaixo de R$ 1,00 (limite minimo Shopee). Verifique calculos no Step 2.`,
+      message: `${lowPriceModels.length} modelo(s) com preço abaixo de R$ 1,00 (limite minimo Shopee). Verifique calculos no Step 2.`,
     });
   }
 
@@ -317,13 +317,13 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
     issues.push({
       severity: "error",
       field: "stock",
-      message: `Todas as ${zeroStockCount} celulas estao com estoque ZERO. Anuncio nao podera vender. Preencha estoque no Step 2.`,
+      message: `Todas as ${zeroStockCount} células estao com estoque ZERO. Anuncio nao podera vender. Preencha estoque no Step 2.`,
     });
   } else if (zeroStockCount > 0) {
     issues.push({
       severity: "warning",
       field: "stock",
-      message: `${zeroStockCount} celula(s) com estoque ZERO - nao poderao vender ate ter estoque.`,
+      message: `${zeroStockCount} célula(s) com estoque ZERO - nao poderao vender ate ter estoque.`,
     });
   }
 

@@ -1736,9 +1736,9 @@ export function CombinedWizard({
                   );
                 };
                 return (
-                  <div className="mb-3 rounded-lg bg-amber-50 border-2 border-amber-300 overflow-hidden animate-pulse-slow">
+                  <div className="mb-3 rounded-lg bg-amber-50 border-2 border-amber-300 overflow-hidden">
                     <div className="px-3 py-2 bg-amber-100 border-b border-amber-300 flex items-center gap-2">
-                      <span className="text-base">⚠️</span>
+                      <span className="text-base animate-pulse">⚠️</span>
                       <span className="font-semibold text-amber-900 text-xs">
                         Razão {ratio.toFixed(1)}x excede limite Shopee (4x)
                       </span>
