@@ -160,6 +160,7 @@ async function waitVideoProcessing(
       throw new Error(`Shopee video processing FAILED: ${JSON.stringify(data.response)}`);
     }
     // INITIATED / TRANSCODING - espera mais
+    console.log(`[shopee-video] polling status=${status}, aguardando...`);
     await new Promise(r => setTimeout(r, 2000));
   }
   throw new Error(`Shopee video processing timeout apos ${maxWaitMs}ms`);
@@ -173,26 +174,28 @@ export async function uploadVideoFromUrl(
   shopId: number,
   videoUrl: string,
 ): Promise<string> {
-  // 1. Baixa video da URL (R2 ou externa)
+  console.log(`[shopee-video] INICIO upload videoUrl=${videoUrl}`);
+
+  // 1. Baixa video da URL
+  console.log(`[shopee-video] baixando arquivo...`);
   const downloadRes = await fetch(videoUrl);
   if (!downloadRes.ok) {
     throw new Error(`Falha ao baixar video da URL ${videoUrl}: ${downloadRes.status}`);
   }
   const arrayBuffer = await downloadRes.arrayBuffer();
   const fileBuffer = Buffer.from(arrayBuffer);
+  console.log(`[shopee-video] baixado ${fileBuffer.length} bytes (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB)`);
 
   if (fileBuffer.length > MAX_VIDEO_SIZE) {
     throw new Error(`Video tem ${(fileBuffer.length / 1024 / 1024).toFixed(1)}MB - limite Shopee e 30MB`);
   }
 
-  // 2. Estima duracao - Shopee aceita 0 e descobre sozinha
-  // (deixar como 30s default - Shopee corrige no processing)
   const durationSeconds = 30;
-
-  // 3. Calcula MD5 do arquivo inteiro (Shopee exige no init)
   const fileMd5 = crypto.createHash("md5").update(fileBuffer).digest("hex");
+  console.log(`[shopee-video] MD5=${fileMd5} duration=${durationSeconds}s`);
 
-  // 4. init upload
+  // 2. init upload
+  console.log(`[shopee-video] chamando init_video_upload...`);
   const { video_upload_id } = await initVideoUpload(
     accessToken,
     shopId,
@@ -200,25 +203,32 @@ export async function uploadVideoFromUrl(
     durationSeconds,
     fileMd5,
   );
+  console.log(`[shopee-video] init OK video_upload_id=${video_upload_id}`);
 
-  // 4. Divide em chunks e sobe
+  // 3. Divide em chunks e sobe
   const totalParts = Math.ceil(fileBuffer.length / PART_SIZE);
+  console.log(`[shopee-video] subindo ${totalParts} chunk(s) de ate ${PART_SIZE / 1024 / 1024}MB`);
   const partSeqList: number[] = [];
   for (let i = 0; i < totalParts; i++) {
     const start = i * PART_SIZE;
     const end = Math.min(start + PART_SIZE, fileBuffer.length);
     const chunk = fileBuffer.subarray(start, end);
+    console.log(`[shopee-video] chunk ${i + 1}/${totalParts} size=${chunk.length}`);
     await uploadVideoPart(accessToken, shopId, video_upload_id, i, chunk);
+    console.log(`[shopee-video] chunk ${i + 1}/${totalParts} OK`);
     partSeqList.push(i);
-    // Pequeno delay entre chunks pra nao stressar Shopee
     if (i < totalParts - 1) await new Promise(r => setTimeout(r, 200));
   }
 
-  // 5. Complete
+  // 4. Complete
+  console.log(`[shopee-video] chamando complete_video_upload com part_seq_list=${JSON.stringify(partSeqList)}`);
   await completeVideoUpload(accessToken, shopId, video_upload_id, partSeqList);
+  console.log(`[shopee-video] complete OK`);
 
-  // 6. Aguarda processamento
+  // 5. Aguarda processamento
+  console.log(`[shopee-video] aguardando processamento (polling ate 60s)...`);
   await waitVideoProcessing(accessToken, shopId, video_upload_id);
+  console.log(`[shopee-video] SUCCEEDED video_upload_id=${video_upload_id}`);
 
   return video_upload_id;
 }
