@@ -291,12 +291,39 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
   if (!listing.videoUrl && !listing.videoBankId) issues.push({ severity: "warning", field: "video", message: "Sem video - anuncios com video tem mais conversao" });
 
   // Valida precos minimos da Shopee (>= R$ 1,00)
-  const lowPriceModels = models.filter((m: any) => m.original_price < 1);
+  const zeroPriceModels = models.filter((m: any) => !m.original_price || Number(m.original_price) <= 0);
+  if (zeroPriceModels.length > 0) {
+    issues.push({
+      severity: "error",
+      field: "price",
+      message: `${zeroPriceModels.length} celula(s) com preco ZERO ou nao preenchido. Va no Step 2 e preencha os precos faltantes.`,
+    });
+  }
+  const lowPriceModels = models.filter((m: any) => Number(m.original_price) > 0 && Number(m.original_price) < 1);
   if (lowPriceModels.length > 0) {
     issues.push({
       severity: "error",
       field: "price",
       message: `${lowPriceModels.length} modelo(s) com preco abaixo de R$ 1,00 (limite minimo Shopee). Verifique calculos no Step 2.`,
+    });
+  }
+
+  // Valida estoque (Shopee aceita 0 mas eh boa pratica avisar se TUDO esta zerado)
+  const zeroStockCount = models.filter((m: any) => {
+    const stock = m.seller_stock?.[0]?.stock ?? 0;
+    return stock <= 0;
+  }).length;
+  if (zeroStockCount > 0 && zeroStockCount === models.length) {
+    issues.push({
+      severity: "error",
+      field: "stock",
+      message: `Todas as ${zeroStockCount} celulas estao com estoque ZERO. Anuncio nao podera vender. Preencha estoque no Step 2.`,
+    });
+  } else if (zeroStockCount > 0) {
+    issues.push({
+      severity: "warning",
+      field: "stock",
+      message: `${zeroStockCount} celula(s) com estoque ZERO - nao poderao vender ate ter estoque.`,
     });
   }
 
