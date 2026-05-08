@@ -508,58 +508,60 @@ export async function publishMultiProductListing(
         if (fromWizard.length > 0) finalAttributes = fromWizard as any;
       }
 
-      // Helper de retry: tenta criar e se duplicate, ajusta titulo/SKUs e tenta novamente
-      let createdItem: { itemId: number } | null = null;
-      let attempt = 0;
-      const maxAttempts = 3;
+      // Auto-retry com sufixo unico quando Shopee detecta duplicate
+      let created: { itemId: number } | null = null;
       let currentSuffix = skuSuffix;
       let currentTitle = listing.title.trim().substring(0, 120);
+      const MAX_ATTEMPTS = 3;
 
-      while (attempt < maxAttempts && !createdItem) {
-        attempt++;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
-          createdItem = await shopeePublish.createProduct(accessToken, shopId, {
+          created = await shopeePublish.createProduct(accessToken, shopId, {
             itemName: currentTitle,
             description: listing.description.trim().substring(0, 5000),
             categoryId: finalCategoryId,
-        // Item-level price/stock são "container" — o init_tier_variation
-        // sobrescreve com valores reais por modelo. Usamos o menor preco
-        // dos models como placeholder pra atender o schema do add_item.
-        price: itemLevelPrice,
-        stock: 0,
-        weight: Number(principalData.weight ?? 0),
-        imageIds: [thumbImageId, ...galleryImageIds].slice(0, 9),
-        condition: "NEW",
-        sku: `${listing.id}-${currentSuffix}-MAIN`,
-        dimension: principalData.dimensionLength
-          ? {
-              packageLength: Math.round(Number(principalData.dimensionLength)),
-              packageWidth: Math.round(Number(principalData.dimensionWidth ?? 0)),
-              packageHeight: Math.round(Number(principalData.dimensionHeight ?? 0)),
-            }
-          : undefined,
-        logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
-        attributes: finalAttributes,
-        brand: finalBrand,
-      });
+            // Item-level price/stock são "container" — o init_tier_variation
+            // sobrescreve com valores reais por modelo. Usamos o menor preco
+            // dos models como placeholder pra atender o schema do add_item.
+            price: itemLevelPrice,
+            stock: 0,
+            weight: Number(principalData.weight ?? 0),
+            imageIds: [thumbImageId, ...galleryImageIds].slice(0, 9),
+            condition: "NEW",
+            sku: `${listing.id}-${currentSuffix}-MAIN`,
+            dimension: principalData.dimensionLength
+              ? {
+                  packageLength: Math.round(Number(principalData.dimensionLength)),
+                  packageWidth: Math.round(Number(principalData.dimensionWidth ?? 0)),
+                  packageHeight: Math.round(Number(principalData.dimensionHeight ?? 0)),
+                }
+              : undefined,
+            logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
+            attributes: finalAttributes,
+            brand: finalBrand,
+          });
+          // Sucesso - sai do loop
+          break;
         } catch (err: any) {
-          const errMsg = String(err?.message || "");
-          const isDuplicate = errMsg.toLowerCase().includes("duplicate") || errMsg.toLowerCase().includes("already exist");
-          if (isDuplicate && attempt < maxAttempts) {
+          const errMsg = String(err?.message || "").toLowerCase();
+          const isDuplicate = errMsg.includes("duplicate") || errMsg.includes("already exist");
+          if (isDuplicate && attempt < MAX_ATTEMPTS) {
             // Gera novo suffix unico (timestamp + random)
             const newSuffix = String(Date.now()).slice(-5) + Math.random().toString(36).slice(2, 4).toUpperCase();
-            onProgress?.(`Tentativa ${attempt} duplicate - gerando novo SKU (${newSuffix}) e retentando`);
-            // Atualiza titulo com sufixo unico curto
-            const baseTitle = listing.title.trim().substring(0, 110);
-            currentTitle = `${baseTitle} #${newSuffix}`.substring(0, 120);
+            onProgress?.(`Tentativa ${attempt} duplicada na Shopee - retentando com SKU ${newSuffix}`);
             // Atualiza SKUs nos models substituindo suffix antigo
-            currentSuffix = newSuffix;
             for (let mi = 0; mi < models.length; mi++) {
               const m = models[mi];
-              if (m.sku && m.sku.includes(skuSuffix)) {
-                m.sku = m.sku.replace(skuSuffix, newSuffix);
+              if (m.sku && m.sku.includes(currentSuffix)) {
+                m.sku = m.sku.replace(currentSuffix, newSuffix);
               }
             }
+            // Na 2a tentativa adiciona sufixo no titulo tambem
+            if (attempt >= 2) {
+              const baseTitle = listing.title.trim().substring(0, 110);
+              currentTitle = `${baseTitle} #${newSuffix}`.substring(0, 120);
+            }
+            currentSuffix = newSuffix;
             await new Promise(r => setTimeout(r, 500));
             continue;
           }
@@ -567,11 +569,11 @@ export async function publishMultiProductListing(
         }
       }
 
-      if (!createdItem) {
-        throw new Error(`Falha ao criar item apos ${maxAttempts} tentativas`);
+      if (!created) {
+        throw new Error(`Falha ao criar item apos ${MAX_ATTEMPTS} tentativas`);
       }
 
-      shopeeItemId = createdItem.itemId;
+      shopeeItemId = created.itemId;
 
       // Salva o shopeeItemId IMEDIATAMENTE pra rastrear orfaos se init_tier_variation falhar
       await sharedDb.update(multiProductListings)
