@@ -550,9 +550,9 @@ export async function createProduct(
     body.gtin_code = input.gtinCode;
   }
 
-  // Video (max 1 video por anuncio Shopee).
+  // Video (max 1 video por anuncio Shopee). Campo correto: video_info (singular).
   if (input.videoUploadIds && input.videoUploadIds.length > 0) {
-    body.video_info_list = input.videoUploadIds.slice(0, 1).map((id) => ({
+    body.video_info = input.videoUploadIds.slice(0, 1).map((id) => ({
       video_upload_id: id,
     }));
   }
