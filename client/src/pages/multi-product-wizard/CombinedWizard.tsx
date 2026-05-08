@@ -1767,7 +1767,11 @@ export function CombinedWizard({
                     </tr>
                   </thead>
                   <tbody>
-                    {optionDetailsMatrix.flatMap((row, productIdx) => {
+                    {(() => {
+                      const __validPrices = computedCells.map(c => c.pricing.price).filter(p => p > 0);
+                      const __maxP = __validPrices.length ? Math.max(...__validPrices) : 0;
+                      const __targetMin = __maxP > 0 ? __maxP / 4 : 0;
+                      return optionDetailsMatrix.flatMap((row, productIdx) => {
                       const product = products[productIdx];
                       if (!product) return [];
                       return row.map((opt, idx) => {
@@ -1890,8 +1894,24 @@ export function CombinedWizard({
                                   value={opt.price}
                                   onClick={(e) => e.stopPropagation()}
                                   onChange={(e) => updateDetail(opt.id, "price", e.target.value, productIdx)}
+                                  title={(() => {
+                                    const v = parseFloat(opt.price as any);
+                                    const effPrice = v > 0 ? v : c.price;
+                                    if (__targetMin > 0 && effPrice > 0 && effPrice < __targetMin) {
+                                      return `Preco abaixo do minimo Shopee 4x (R$ ${__targetMin.toFixed(2)})`;
+                                    }
+                                    return "";
+                                  })()}
                                   className={`w-20 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
-                                    isNeg ? "border-red-400" : "border-gray-200"
+                                    isNeg
+                                      ? "border-red-400"
+                                      : (() => {
+                                          const v = parseFloat(opt.price as any);
+                                          const effPrice = v > 0 ? v : c.price;
+                                          return __targetMin > 0 && effPrice > 0 && effPrice < __targetMin
+                                            ? "border-amber-400 bg-amber-50"
+                                            : "border-gray-200";
+                                        })()
                                   }`}
                                 />
                                 {!opt.price && hasPricing && (
@@ -1938,7 +1958,7 @@ export function CombinedWizard({
                           </tr>
                         );
                       });
-                    })}
+                    }); })()}
                   </tbody>
                 </table>
               </div>
