@@ -415,13 +415,40 @@ export async function publishMultiProductListing(
     // ============ Variacoes 2D reais ============
     const hasOptions = optionLabels.length > 0;
 
-    const productOptions: string[] = resolved.map((p, idx) => {
-      const label = ws.productNameOverrides?.[String(idx)] ?? p.name ?? `Produto ${idx + 1}`;
-      return String(label).slice(0, 20);
-    });
+    // Trunca pra 20 chars, mas garante unicidade (Shopee rejeita duplicatas)
+    const productOptions: string[] = (() => {
+      const result: string[] = [];
+      const seen = new Set<string>();
+      resolved.forEach((p, idx) => {
+        const fullLabel = ws.productNameOverrides?.[String(idx)] ?? p.name ?? `Produto ${idx + 1}`;
+        let label = String(fullLabel).slice(0, 20);
+        if (seen.has(label)) {
+          let suffix = 2;
+          while (seen.has(`${label.slice(0, 17)} #${suffix}`)) suffix++;
+          label = `${label.slice(0, 17)} #${suffix}`;
+        }
+        seen.add(label);
+        result.push(label);
+      });
+      return result;
+    })();
     const productOptionImageIds: string[] = resolved.map((_, idx) => optionImageIds[idx] ?? thumbImageId);
 
-    const optionLabelsTrimmed: string[] = optionLabels.map((l: string) => String(l).slice(0, 20));
+    const optionLabelsTrimmed: string[] = (() => {
+      const result: string[] = [];
+      const seen = new Set<string>();
+      optionLabels.forEach((l: string) => {
+        let label = String(l).slice(0, 20);
+        if (seen.has(label)) {
+          let suffix = 2;
+          while (seen.has(`${label.slice(0, 17)} #${suffix}`)) suffix++;
+          label = `${label.slice(0, 17)} #${suffix}`;
+        }
+        seen.add(label);
+        result.push(label);
+      });
+      return result;
+    })();
 
     const models: shopeePublish.KitVariation["models"] = [];
     let minPrice = Infinity;
