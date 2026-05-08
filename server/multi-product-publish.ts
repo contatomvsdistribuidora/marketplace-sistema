@@ -400,8 +400,8 @@ export async function publishMultiProductListing(
           const cellOpt = ws.optionDetailsMatrix?.[productIdx]?.[optIdx];
 
           let price = 0;
-          if (computed?.pricing?.price > 0) price = Number(computed.pricing.price);
-          else if (cellOpt?.price && Number(cellOpt.price) > 0) price = Number(cellOpt.price);
+          if (cellOpt?.price && Number(cellOpt.price) > 0) price = Number(cellOpt.price);
+          else if (computed?.pricing?.price > 0) price = Number(computed.pricing.price);
           else price = Number(product.price ?? 0);
 
           const stock = cellOpt?.stock != null && cellOpt.stock !== ""

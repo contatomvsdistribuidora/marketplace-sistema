@@ -3969,7 +3969,14 @@ export const appRouter = router({
           })
         );
 
-        const newWs = { ...ws, optionDetailsMatrix: newMatrix };
+        // Atualiza tambem computedCells.pricing.price pras celulas corrigidas (evita stale)
+        const newComputedCells = (computedCells ?? []).map((c: any) =>
+          lowCellKeys.has(c.cellKey)
+            ? { ...c, pricing: { ...c.pricing, price: targetMin } }
+            : c
+        );
+
+        const newWs = { ...ws, optionDetailsMatrix: newMatrix, computedCells: newComputedCells };
         await sharedDb.update(multiProductListings)
           .set({ wizardStateJson: JSON.stringify(newWs) })
           .where(eq(multiProductListings.id, input.id));

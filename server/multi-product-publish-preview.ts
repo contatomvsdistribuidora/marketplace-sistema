@@ -220,12 +220,12 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
       const cellOpt = ws.optionDetailsMatrix?.[productIdx]?.[optIdx];
 
       let price: number;
-      if (computed?.pricing?.price && computed.pricing.price > 0) {
-        price = Number(computed.pricing.price);
+      if (cellOpt?.price && Number(cellOpt.price) > 0) {
+        price = Number(cellOpt.price);
       } else if (overridePriceForProduct != null && overridePriceForProduct > 0) {
         price = Number(overridePriceForProduct);
-      } else if (cellOpt?.price) {
-        price = Number(cellOpt.price);
+      } else if (computed?.pricing?.price && computed.pricing.price > 0) {
+        price = Number(computed.pricing.price);
       } else {
         price = Number(productForRow?.price ?? 0);
       }
