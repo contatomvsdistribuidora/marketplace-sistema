@@ -160,7 +160,7 @@ async function waitVideoProcessing(
       throw new Error(`Shopee video processing FAILED: ${JSON.stringify(data.response)}`);
     }
     // INITIATED / TRANSCODING - espera mais
-    console.log(`[shopee-video] polling status=${status}, aguardando...`);
+    console.log(`[shopee-video] polling status=${status}, aguardando 2s...`);
     await new Promise(r => setTimeout(r, 2000));
   }
   throw new Error(`Shopee video processing timeout apos ${maxWaitMs}ms`);
