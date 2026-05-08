@@ -3914,6 +3914,69 @@ export const appRouter = router({
         return { id: newId };
       }),
 
+    autoFixPricesMultiProduct: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new Error("Anuncio nao encontrado");
+
+        const ws = (() => {
+          try {
+            const raw = listing.wizardStateJson as string | null;
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed?.version === 1 ? parsed : null;
+          } catch { return null; }
+        })();
+        if (!ws) throw new Error("Wizard state nao encontrado");
+
+        const computedCells = Array.isArray(ws.computedCells) ? ws.computedCells : [];
+        const validPrices = computedCells
+          .map((c: any) => Number(c?.pricing?.price ?? 0))
+          .filter((p: number) => p > 0);
+        if (validPrices.length < 2) {
+          return { fixed: 0, targetMin: 0, message: "Sem precos suficientes pra calcular" };
+        }
+        const maxP = Math.max(...validPrices);
+        const targetMin = Math.ceil((maxP / 4) * 100) / 100;
+
+        // Identifica celulas baixas
+        const lowCellKeys = new Set<string>(
+          computedCells
+            .filter((c: any) => Number(c?.pricing?.price ?? 0) < targetMin)
+            .map((c: any) => c.cellKey)
+        );
+
+        if (lowCellKeys.size === 0) {
+          return { fixed: 0, targetMin, message: "Nada a corrigir" };
+        }
+
+        // Aplica nos optionDetailsMatrix
+        const matrix = Array.isArray(ws.optionDetailsMatrix) ? ws.optionDetailsMatrix : [];
+        const newMatrix = matrix.map((row: any[], pIdx: number) =>
+          row.map((opt: any, oIdx: number) => {
+            if (lowCellKeys.has(`${pIdx}-${oIdx}`)) {
+              return { ...opt, price: targetMin.toFixed(2) };
+            }
+            return opt;
+          })
+        );
+
+        const newWs = { ...ws, optionDetailsMatrix: newMatrix };
+        await sharedDb.update(multiProductListings)
+          .set({ wizardStateJson: JSON.stringify(newWs) })
+          .where(eq(multiProductListings.id, input.id));
+
+        return { fixed: lowCellKeys.size, targetMin, message: `${lowCellKeys.size} preco(s) ajustados pra R$ ${targetMin.toFixed(2)}` };
+      }),
+
     updateMultiProductListing: protectedProcedure
       .input(z.object({
         id: z.number(),
