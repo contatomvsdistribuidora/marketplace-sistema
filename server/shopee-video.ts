@@ -155,7 +155,12 @@ async function waitVideoProcessing(
       throw new Error(`Shopee get_video_upload_result: ${data.error} - ${data.message ?? ""}`);
     }
     const status = data?.response?.status;
-    if (status === "SUCCEEDED") return;
+    if (status === "SUCCEEDED") {
+      // Aguarda 3s adicionais pro video propagar nos servidores Shopee antes de usar
+      console.log(`[shopee-video] SUCCEEDED, aguardando 3s pra propagar...`);
+      await new Promise(r => setTimeout(r, 3000));
+      return;
+    }
     if (status === "FAILED") {
       throw new Error(`Shopee video processing FAILED: ${JSON.stringify(data.response)}`);
     }
