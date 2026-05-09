@@ -360,17 +360,23 @@ export function CombinedWizard({
         const product = products[idx];
         if (!product) return pp;
         const updates: Partial<PricingGlobals> = {};
-        if (product.source === "baselinker" && (!pp.unitCost || pp.unitCost === "0")) {
+        // Gate numerico: trata "0.00", "0,00", " ", null como vazio.
+        // O check string-frágil anterior (=== "0") deixava produtos travados
+        // quando o campo tinha sido salvo com formato decimal (.toFixed(2)).
+        const curCost = parseFloat(pp.unitCost ?? "");
+        if (product.source === "baselinker" && (!Number.isFinite(curCost) || curCost <= 0)) {
           const cost = costByProductId.get(product.sourceId);
           if (cost && cost > 0) updates.unitCost = cost.toFixed(2);
         }
         // Preco de venda BL: hidrata do mainPrice (ja em product.price).
         // So preenche se vazio — edicao manual nao sobrescrita.
-        if (product.source === "baselinker" && (!pp.blSalePrice || pp.blSalePrice === "0")) {
+        const curBlSale = parseFloat(pp.blSalePrice ?? "");
+        if (product.source === "baselinker" && (!Number.isFinite(curBlSale) || curBlSale <= 0)) {
           const blPrice = parseFloat(product.price);
           if (Number.isFinite(blPrice) && blPrice > 0) updates.blSalePrice = blPrice.toFixed(2);
         }
-        if (!pp.globalStock || pp.globalStock === "0") {
+        const curStock = parseInt(pp.globalStock ?? "", 10);
+        if (!Number.isFinite(curStock) || curStock <= 0) {
           // Prefere stock somado de todos warehouses (API), cai no cache local se
           // a API nao retornou nada.
           const apiStock = product.source === "baselinker" ? stockByProductId.get(product.sourceId) : undefined;

@@ -11,7 +11,7 @@
  */
 
 import { eq, and, or, sql, inArray, gte, lte, like, notLike, not } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { db } from "./db";
 import { productCache, cacheSync } from "../drizzle/schema";
 
 const BASELINKER_API_URL = "https://api.baselinker.com/connector.php";
@@ -444,16 +444,8 @@ function getCacheKey(userId: number, inventoryId: number): string {
   return `${userId}_${inventoryId}`;
 }
 
-function getDbInstance() {
-  if (!process.env.DATABASE_URL) return null;
-  return drizzle(process.env.DATABASE_URL);
-}
-
 /** Get cache sync status from database */
 export async function getCacheSyncStatus(userId: number, inventoryId: number) {
-  const db = getDbInstance();
-  if (!db) return null;
-
   const rows = await db.select().from(cacheSync)
     .where(and(eq(cacheSync.userId, userId), eq(cacheSync.inventoryId, inventoryId)))
     .limit(1);
@@ -484,8 +476,6 @@ export async function startProductSync(
   onProgress?: (progress: ScanProgress) => void
 ): Promise<void> {
   const key = getCacheKey(userId, inventoryId);
-  const db = getDbInstance();
-  if (!db) throw new Error("Database not available");
 
   // Check if already scanning
   const existing = activeScanProgress.get(key);
@@ -724,10 +714,6 @@ export async function filterProductsFromCache(
   hasMore: boolean;
   allIds: number[];
 }> {
-  const db = getDbInstance();
-  if (!db) {
-    return { products: [], total: 0, page: 1, totalPages: 0, hasMore: false, allIds: [] };
-  }
 
   // Build WHERE conditions
   const conditions: any[] = [
@@ -865,8 +851,7 @@ export async function getProductsByIdsFromCache(
   inventoryId: number,
   productIds: number[]
 ): Promise<IndexedProduct[]> {
-  const db = getDbInstance();
-  if (!db || productIds.length === 0) return [];
+  if (productIds.length === 0) return [];
 
   const rows = await db.select().from(productCache)
     .where(and(
@@ -904,8 +889,6 @@ export async function listCachedManufacturers(
   userId: number,
   inventoryId: number,
 ): Promise<Array<{ manufacturerId: number; productCount: number }>> {
-  const db = getDbInstance();
-  if (!db) return [];
   const rows: any = await db
     .select({
       manufacturerId: productCache.manufacturerId,
@@ -925,9 +908,6 @@ export async function listCachedManufacturers(
 
 /** Get cache statistics from database */
 export async function getCacheStats(userId: number, inventoryId: number) {
-  const db = getDbInstance();
-  if (!db) return null;
-
   const syncStatus = await getCacheSyncStatus(userId, inventoryId);
   if (!syncStatus) return null;
 

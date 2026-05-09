@@ -6,28 +6,18 @@
  */
 
 import { eq, and, or, lte, inArray, sql, desc, lt } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
 import { backgroundJobs, productCache, settings, shopeeAccounts } from "../drizzle/schema";
 import * as ml from "./mercadolivre";
 import * as aiMapper from "./ai-mapper";
 import * as baselinker from "./baselinker";
 import * as db from "./db";
+import { db as dbInst } from "./db";
 import * as shopee from "./shopee";
 import { notifyOwner } from "./_core/notification";
 
 const POLL_INTERVAL = 30_000; // Check every 30 seconds
 let isRunning = false;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-
-function getDbInstance() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL not configured");
-  try {
-    return drizzle(url);
-  } catch (error: any) {
-    throw new Error(`DATABASE_URL inválida ("${url.slice(0, 30)}..."): ${error.message}`);
-  }
-}
 
 // ============ JOB MANAGEMENT ============
 
@@ -48,7 +38,6 @@ export async function createBackgroundJob(data: {
   totalItems: number;
   scheduledFor?: Date;
 }) {
-  const dbInst = getDbInstance();
   const status = data.scheduledFor ? "scheduled" : "queued";
   const [result] = await dbInst.insert(backgroundJobs).values({
     userId: data.userId,
@@ -72,7 +61,6 @@ export async function createBackgroundJob(data: {
 }
 
 export async function getBackgroundJobs(userId: number, limit: number = 50) {
-  const dbInst = getDbInstance();
   return dbInst.select().from(backgroundJobs)
     .where(eq(backgroundJobs.userId, userId))
     .orderBy(desc(backgroundJobs.createdAt))
@@ -80,7 +68,6 @@ export async function getBackgroundJobs(userId: number, limit: number = 50) {
 }
 
 export async function getBackgroundJob(jobId: number) {
-  const dbInst = getDbInstance();
   const rows = await dbInst.select().from(backgroundJobs)
     .where(eq(backgroundJobs.id, jobId))
     .limit(1);
@@ -88,7 +75,6 @@ export async function getBackgroundJob(jobId: number) {
 }
 
 export async function cancelBackgroundJob(jobId: number, userId: number) {
-  const dbInst = getDbInstance();
   const job = await getBackgroundJob(jobId);
   if (!job || job.userId !== userId) return false;
   if (job.status === "completed" || job.status === "failed") return false;
@@ -112,7 +98,6 @@ async function updateJobProgress(jobId: number, data: Partial<{
   resultLog: any;
   productData: any;
 }>) {
-  const dbInst = getDbInstance();
   await dbInst.update(backgroundJobs).set(data).where(eq(backgroundJobs.id, jobId));
 }
 
@@ -572,7 +557,6 @@ export async function getResumableShopeeJob(
   startedAt: Date | null;
   byStatus: Record<string, number>;
 } | null> {
-  const dbInst = getDbInstance();
   const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
 
   const rows = await dbInst
@@ -617,7 +601,6 @@ export async function getResumableShopeeJob(
 
 /** Re-queue a previously failed/stale job so the worker picks it up again. */
 export async function resumeSyncJob(jobId: number): Promise<void> {
-  const dbInst = getDbInstance();
   await dbInst
     .update(backgroundJobs)
     .set({ status: "queued", lastError: null })
@@ -629,7 +612,6 @@ export async function cancelIncompleteShopeeJobs(
   accountId: number,
   userId: number
 ): Promise<void> {
-  const dbInst = getDbInstance();
   await dbInst
     .update(backgroundJobs)
     .set({ status: "cancelled", completedAt: new Date() })
@@ -654,8 +636,7 @@ async function pollForJobs() {
   isRunning = true;
   
   try {
-    const dbInst = getDbInstance();
-    const now = new Date();
+      const now = new Date();
     
     // Find jobs that are queued or scheduled for now/past
     const pendingJobs = await dbInst.select().from(backgroundJobs)
@@ -689,16 +670,9 @@ const TOKEN_REFRESH_INTERVAL = 60 * 60 * 1000; // every hour
 const TOKEN_REFRESH_BUFFER_MS = 30 * 60 * 1000; // refresh if expiring within 30 min
 
 async function refreshExpiringShopeeTokens() {
-  let db;
-  try {
-    db = getDbInstance();
-  } catch (error: any) {
-    console.warn("[BG Worker] Shopee token refresh skipped:", error.message);
-    return;
-  }
   const threshold = new Date(Date.now() + TOKEN_REFRESH_BUFFER_MS);
   try {
-    const expiring = await db
+    const expiring = await dbInst
       .select({ id: shopeeAccounts.id, shopId: shopeeAccounts.shopId })
       .from(shopeeAccounts)
       .where(
