@@ -201,28 +201,47 @@ export function CombinedWizard({
     }
     return map;
   }, [costInfo]);
+  // Stock total real da API (soma de todos warehouses) — mais robusto que
+  // o cache local que pode pegar apenas um warehouse especifico.
+  const stockByProductId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const c of (costInfo ?? []) as Array<{ productId: number; stockTotal: number | null }>) {
+      if (typeof c.stockTotal === "number" && c.stockTotal > 0) {
+        map.set(c.productId, c.stockTotal);
+      }
+    }
+    return map;
+  }, [costInfo]);
+  // IDs de produtos BL que retornaram custo 0 — usado pra mostrar aviso na UI.
+  const blProductIdsWithoutCost = useMemo(() => {
+    const set = new Set<number>();
+    for (const c of (costInfo ?? []) as Array<{ productId: number; averageLandedCost: number | null }>) {
+      if (c.averageLandedCost === 0 || c.averageLandedCost == null) set.add(c.productId);
+    }
+    return set;
+  }, [costInfo]);
 
-  // ── Importar precos do BL ─────────────────────────────────────────────────
-  // Aplica products[idx].price (mainPrice do BL) como override fixo em
-  // todas as celulas do produto. Nao toca celulas de produtos Shopee.
+  // ── Importar mainPrice como Custo ─────────────────────────────────────────
+  // Seta pricingPerProduct[i].unitCost = mainPrice do BL pra cada produto BL.
+  // Antes setava opt.price (override de variacao), o que travava o calculo de
+  // margem. Agora vai como CUSTO BASE — multiplicador/margem aplicam normal.
   function importPricesFromBL() {
-    let updatedCells = 0;
-    let touchedProducts = 0;
-    setOptionDetailsMatrix(matrix => matrix.map((row, productIdx) => {
-      const product = products[productIdx];
-      if (!product || product.source !== "baselinker") return row;
-      const price = parseFloat(product.price);
-      if (!Number.isFinite(price) || price <= 0) return row;
-      touchedProducts++;
-      return row.map(opt => {
-        updatedCells++;
-        return { ...opt, price: price.toFixed(2) };
+    let touched = 0;
+    setPricingPerProduct(prev => {
+      const next = prev.map((pp, idx) => {
+        const product = products[idx];
+        if (!product || product.source !== "baselinker") return pp;
+        const price = parseFloat(product.price);
+        if (!Number.isFinite(price) || price <= 0) return pp;
+        touched++;
+        return { ...pp, unitCost: price.toFixed(2) };
       });
-    }));
-    if (updatedCells === 0) {
+      return next;
+    });
+    if (touched === 0) {
       toast.warning("Nenhum produto BL com preco valido pra importar.");
     } else {
-      toast.success(`${updatedCells} preco(s) importado(s) de ${touchedProducts} produto(s) BL.`);
+      toast.success(`Custos atualizados de ${touched} produto(s) BL com base no mainPrice.`);
     }
   }
 
@@ -330,8 +349,12 @@ export function CombinedWizard({
           if (cost && cost > 0) updates.unitCost = cost.toFixed(2);
         }
         if (!pp.globalStock || pp.globalStock === "0") {
-          if (product.totalStock != null && product.totalStock > 0) {
-            updates.globalStock = String(product.totalStock);
+          // Prefere stock somado de todos warehouses (API), cai no cache local se
+          // a API nao retornou nada.
+          const apiStock = product.source === "baselinker" ? stockByProductId.get(product.sourceId) : undefined;
+          const stockValue = apiStock ?? (product.totalStock != null && product.totalStock > 0 ? product.totalStock : null);
+          if (stockValue != null && stockValue > 0) {
+            updates.globalStock = String(stockValue);
           }
         }
         if (Object.keys(updates).length > 0) {
@@ -343,7 +366,7 @@ export function CombinedWizard({
       return changed ? next : prev;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, products, costByProductId]);
+  }, [hydrated, products, costByProductId, stockByProductId]);
 
   // Auto-save quando brandValue muda (debounced 500ms). Gate em `hydrated`
   // pra nao salvar durante a hidratacao inicial — sem isso, abrir um listing
@@ -1696,20 +1719,20 @@ export function CombinedWizard({
                 </div>
               )}
 
-              {/* Botao "Importar precos do BL": aplica products[i].price (mainPrice
-                  do BL) como override em todas as celulas dos produtos BL. So
-                  aparece quando ha pelo menos um produto BL no listing. */}
+              {/* Botao "Importar mainPrice como Custo": seta unitCost de cada
+                  produto BL com o mainPrice do BL. Wizard segue calculando preco
+                  Shopee aplicando multiplicador/margem por cima desse custo. */}
               {blProductIds.length > 0 && (
                 <div className="flex items-center justify-between border border-amber-200 bg-amber-50 rounded-xl px-4 py-2.5 mb-3">
                   <div className="text-xs text-amber-900">
-                    <strong>Importar preços do BaseLinker:</strong> usa o preço de venda do BL como preço fixo nas variações dos {blProductIds.length} produto(s) BL.
+                    <strong>Importar mainPrice como Custo:</strong> usa o preço de venda do BL como custo base. Multiplicador/margem aplicam normalmente.
                   </div>
                   <button
                     type="button"
                     onClick={importPricesFromBL}
                     className="text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium whitespace-nowrap"
                   >
-                    ⬇ Importar preços
+                    ⬇ Importar como Custo
                   </button>
                 </div>
               )}
@@ -1762,6 +1785,11 @@ export function CombinedWizard({
                         value={pricingPerProduct[productIdx]?.unitCost ?? ""}
                         onChange={e => updateProductPricing(productIdx, "unitCost", e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      {product.source === "baselinker" && blProductIdsWithoutCost.has(product.sourceId) && (
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                          Sem custo cadastrado no BL — preencha manualmente.
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-[11px] text-gray-500 mb-0.5" title="Quantidade base do produto. Ex: comprou 10 unidades? Coloque 10. Ou 1 unidade individual? Coloque 1.">Qty base</label>

@@ -447,9 +447,10 @@ export const appRouter = router({
         return baselinker.listCachedManufacturers(ctx.user.id, input.inventoryId);
       }),
 
-    // Cost info por produto via API BL (getInventoryProductsData). NÃO esta
-    // no cache local porque average_landed_cost so vem com chamada on-demand.
-    // Usado pelo wizard pra hidratar Custo (R$) na Etapa 2.
+    // Cost + stock info por produto via API BL (getInventoryProductsData).
+    // NÃO esta no cache local porque average_landed_cost e p.stock por
+    // warehouse so vem com chamada on-demand. stockTotal soma TODOS warehouses
+    // (mais robusto que cache local que pode pegar so um warehouse especifico).
     getProductsCostInfo: protectedProcedure
       .input(z.object({
         inventoryId: z.number(),
@@ -460,11 +461,19 @@ export const appRouter = router({
         const token = await db.getSetting(ctx.user.id, "baselinker_token");
         if (!token) throw new Error("Token do BaseLinker não configurado");
         const data = await baselinker.getInventoryProductsData(token, input.inventoryId, input.productIds);
-        return Object.entries(data ?? {}).map(([id, p]: [string, any]) => ({
-          productId: Number(id),
-          averageCost: typeof p?.average_cost === "number" ? p.average_cost : null,
-          averageLandedCost: typeof p?.average_landed_cost === "number" ? p.average_landed_cost : null,
-        }));
+        return Object.entries(data ?? {}).map(([id, p]: [string, any]) => {
+          let stockTotal: number | null = null;
+          if (p?.stock && typeof p.stock === "object") {
+            stockTotal = (Object.values(p.stock) as any[])
+              .reduce((sum: number, v: any) => sum + (typeof v === "number" ? v : 0), 0);
+          }
+          return {
+            productId: Number(id),
+            averageCost: typeof p?.average_cost === "number" ? p.average_cost : null,
+            averageLandedCost: typeof p?.average_landed_cost === "number" ? p.average_landed_cost : null,
+            stockTotal,
+          };
+        });
       }),
   }),
 
