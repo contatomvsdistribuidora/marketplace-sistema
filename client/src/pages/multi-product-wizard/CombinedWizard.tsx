@@ -433,6 +433,14 @@ export function CombinedWizard({
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
   const typeName = VARIATION_TYPES.find(t => t.type === selectedType)?.label ?? "";
 
+  // Frete usado no cálculo: o MAIOR entre todos os produtos selecionados.
+  // Anúncio combinado vai pra um único listing Shopee — todas as variações
+  // são despachadas com o mesmo custo de frete (o do item mais caro).
+  const maxShipping = useMemo(
+    () => Math.max(0, ...pricingPerProduct.map(pp => parseFloat(pp.shippingCost) || 0)),
+    [pricingPerProduct],
+  );
+
   // ── Motor de precificação ──────────────────────────────────────────────────
 
   function computePricing(opt: VariationOption, idx: number, productIdx: number = 0): ComputedPricing {
@@ -449,7 +457,7 @@ export function CombinedWizard({
     // Ex: Custo=R$0.50 + Qty base=1 -> unitCost = R$0.50
     const unitCost       = batchCostVal > 0 ? batchCostVal / batchQty : ((parseFloat(p.unitCost) || 0) / batchQty);
     const packaging      = parseFloat(p.packagingCost)  || 0;
-    const shipping       = parseFloat(p.shippingCost)   || 0;
+    const shipping       = maxShipping;
     const txFee          = parseFloat(p.transactionFee) || 0;
     const autoDiscount   = (idx + 1) * (parseFloat(p.defaultDiscount) || 0);
     const hasQtyFactor   = qtyFactors[idx] !== undefined && qtyFactors[idx] !== "";
@@ -1660,11 +1668,19 @@ export function CombinedWizard({
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Custo de envio estimado.">Frete (R$)</label>
+                      <label
+                        className="block text-[11px] text-gray-500 mb-0.5"
+                        title="Custo de envio estimado. O cálculo usa o MAIOR frete entre todos os produtos do anúncio combinado."
+                      >
+                        Frete (R$) <span className="text-amber-600">*</span>
+                      </label>
                       <input type="number" min="0" step="0.01" placeholder="0.00"
                         value={pricingPerProduct[productIdx]?.shippingCost ?? ""}
                         onChange={e => updateProductPricing(productIdx, "shippingCost", e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      <p className="text-[10px] text-amber-700 mt-0.5">
+                        * preço usa o maior frete (R$ {maxShipping.toFixed(2)})
+                      </p>
                     </div>
                     <div>
                       <label className="block text-[11px] text-gray-500 mb-0.5" title="Taxa da processadora (geralmente 2%).">Taxa transação (%)</label>
@@ -2021,7 +2037,7 @@ export function CombinedWizard({
 
                 const txFee = parseFloat(pp.transactionFee) || 0;
                 const packaging = parseFloat(pp.packagingCost) || 0;
-                const shipping = parseFloat(pp.shippingCost) || 0;
+                const shipping = maxShipping;
                 const commissionValue = finalPrice * c.commissionRate + c.commissionFixed;
                 const taxValue = finalPrice * (txFee / 100);
                 const minMargin = parseFloat(pp.minMarginPct) || 0;
@@ -2050,7 +2066,7 @@ export function CombinedWizard({
                         <span className="text-gray-900">R$ {packaging.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-700">+ Frete:</span>
+                        <span className="text-gray-700">+ Frete (maior do anúncio):</span>
                         <span className="text-gray-900">R$ {shipping.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
