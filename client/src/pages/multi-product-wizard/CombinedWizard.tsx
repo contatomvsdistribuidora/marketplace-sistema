@@ -221,6 +221,14 @@ export function CombinedWizard({
     }
     return set;
   }, [costInfo]);
+  // IDs de produtos BL com stockTotal <= 0 — usado pra aviso de estoque.
+  const blProductIdsWithoutStock = useMemo(() => {
+    const set = new Set<number>();
+    for (const c of (costInfo ?? []) as Array<{ productId: number; stockTotal: number | null }>) {
+      if (c.stockTotal === 0 || c.stockTotal == null) set.add(c.productId);
+    }
+    return set;
+  }, [costInfo]);
 
   // ── Importar mainPrice como Custo ─────────────────────────────────────────
   // Seta pricingPerProduct[i].unitCost = mainPrice do BL pra cada produto BL.
@@ -1891,6 +1899,11 @@ export function CombinedWizard({
                         value={pricingPerProduct[productIdx]?.globalStock ?? ""}
                         onChange={e => updateProductPricing(productIdx, "globalStock", e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      {product.source === "baselinker" && blProductIdsWithoutStock.has(product.sourceId) && (
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                          Sem estoque disponível no BL — preencha manualmente.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

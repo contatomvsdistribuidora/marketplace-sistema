@@ -47,6 +47,7 @@ type SelectedItem = {
   price: string;
   imageUrl: string | null;
   manufacturerId: number | null;  // BL only — Shopee products não tem manufacturer no cache
+  totalStock: number | null;      // BL: product_cache.totalStock | Shopee: stock
 };
 
 type SourceFilter = "all" | "baselinker" | "shopee";
@@ -56,6 +57,13 @@ function formatPrice(p: string | number | null | undefined): string {
   const n = typeof p === "number" ? p : Number(p);
   if (!Number.isFinite(n)) return String(p);
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function StockCell({ value }: { value: number | null }) {
+  if (value == null) return <span className="text-gray-300">—</span>;
+  if (value < 0) return <span className="text-red-600 font-semibold tabular-nums">{value}</span>;
+  if (value === 0) return <span className="text-amber-600 font-semibold tabular-nums">0</span>;
+  return <span className="text-gray-700 tabular-nums">{value.toLocaleString("pt-BR")}</span>;
 }
 
 function ProductRow({
@@ -115,6 +123,9 @@ function ProductRow({
       </TableCell>
       <TableCell className="text-xs max-w-[160px] truncate" title={brandName ?? undefined}>
         {brandName ?? "—"}
+      </TableCell>
+      <TableCell className="text-xs text-right">
+        <StockCell value={item.totalStock} />
       </TableCell>
       <TableCell>
         {item.source === "baselinker" ? (
@@ -585,6 +596,7 @@ export default function MultiProductPage() {
           price: String(p.mainPrice ?? "0"),
           imageUrl: p.imageUrl ?? null,
           manufacturerId: Number.isFinite(mid) && mid > 0 ? mid : null,
+          totalStock: typeof p.totalStock === "number" ? p.totalStock : null,
         });
       }
     }
@@ -602,6 +614,7 @@ export default function MultiProductPage() {
           price: String(p.price ?? "0"),
           imageUrl: p.imageUrl ?? null,
           manufacturerId: null, // Shopee não expoe manufacturer no shopee_products
+          totalStock: typeof p.stock === "number" ? p.stock : null,
         });
       }
     }
@@ -1077,6 +1090,7 @@ export default function MultiProductPage() {
                       <TableHead>Produto</TableHead>
                       <TableHead className="w-40">SKU</TableHead>
                       <TableHead className="w-40">Marca</TableHead>
+                      <TableHead className="w-20 text-right">Estoque</TableHead>
                       <TableHead className="w-32">Origem</TableHead>
                       <TableHead className="w-28">Preço</TableHead>
                       <TableHead className="w-10"></TableHead>

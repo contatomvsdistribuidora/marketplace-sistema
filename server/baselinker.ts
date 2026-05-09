@@ -578,8 +578,11 @@ export async function startProductSync(
         for (const [id, product] of Object.entries(detailedData) as [string, any][]) {
           const priceValues = Object.values(product.prices || {}) as number[];
           const mainPrice = priceValues.length > 0 ? priceValues[0] : 0;
+          // Estoque negativo no BL geralmente significa ajuste pendente
+          // (venda sem baixa, devolucao em transito) e nao deve contar como
+          // disponivel. Soma so warehouses com saldo positivo.
           const stockValues = Object.values(product.stock || {}) as number[];
-          const totalStock = stockValues.reduce((sum: number, v: number) => sum + (v || 0), 0);
+          const totalStock = stockValues.reduce((sum: number, v: number) => sum + Math.max(0, v || 0), 0);
           const tags = product.tags || [];
           tags.forEach((t: string) => allTags.add(t));
 

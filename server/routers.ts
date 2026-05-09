@@ -464,8 +464,9 @@ export const appRouter = router({
         return Object.entries(data ?? {}).map(([id, p]: [string, any]) => {
           let stockTotal: number | null = null;
           if (p?.stock && typeof p.stock === "object") {
+            // Negativos por warehouse ignorados (ajuste pendente do BL).
             stockTotal = (Object.values(p.stock) as any[])
-              .reduce((sum: number, v: any) => sum + (typeof v === "number" ? v : 0), 0);
+              .reduce((sum: number, v: any) => sum + (typeof v === "number" ? Math.max(0, v) : 0), 0);
           }
           return {
             productId: Number(id),
