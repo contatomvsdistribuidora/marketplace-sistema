@@ -37,7 +37,7 @@ import * as shopee from "../shopee";
 const SHOPEE_API_BASE = "https://partner.shopeemobile.com";
 const BRAND_LIST_PATH = "/api/v2/product/get_brand_list";
 const PAGE_SIZE = 30;
-const MAX_PAGES = 50;
+const MAX_PAGES = 300;
 const REGION = "BR";
 const LANGUAGE = "pt-br";
 

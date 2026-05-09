@@ -142,6 +142,24 @@ export function BrandPicker({ accountId, categoryId, value, onChange }: Props) {
 
       {open && !disabled && (
         <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-80 overflow-y-auto z-50">
+          {query.trim() && !isFetching && !results.some((r) => (r.display_brand_name ?? r.original_brand_name).toLowerCase() === query.trim().toLowerCase()) && (
+            <button
+              onClick={applyFreeText}
+              className="w-full text-left px-4 py-3 bg-amber-50 hover:bg-amber-100 transition border-b border-amber-200"
+            >
+              {results.length === 0 && (
+                <p className="text-[11px] text-amber-800 font-semibold mb-1 uppercase tracking-wide">
+                  Nenhuma marca encontrada
+                </p>
+              )}
+              <p className="text-sm text-amber-900">
+                ➕ Usar “<b>{query.trim()}</b>” como marca livre
+              </p>
+              <p className="text-[10px] text-amber-700 mt-0.5">
+                A Shopee pode rejeitar se a marca não estiver registrada.
+              </p>
+            </button>
+          )}
           {finalList.map((b, i) => (
             <button
               key={`${b.brandId}-${i}`}
@@ -168,17 +186,6 @@ export function BrandPicker({ accountId, categoryId, value, onChange }: Props) {
               )}
             </button>
           ))}
-          {query.trim() && !isFetching && !results.some((r) => (r.display_brand_name ?? r.original_brand_name).toLowerCase() === query.trim().toLowerCase()) && (
-            <button
-              onClick={applyFreeText}
-              className="w-full text-left px-4 py-2.5 bg-amber-50 hover:bg-amber-100 transition text-sm text-amber-900 border-t border-amber-200"
-            >
-              ➕ Usar “<b>{query.trim()}</b>” como texto livre
-              <p className="text-[10px] text-amber-700 mt-0.5">
-                A Shopee pode rejeitar se a marca não estiver registrada.
-              </p>
-            </button>
-          )}
         </div>
       )}
     </div>
