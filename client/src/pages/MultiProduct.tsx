@@ -42,6 +42,7 @@ type SelectedItem = {
   sku: string;
   price: string;
   imageUrl: string | null;
+  manufacturerId: number | null;  // BL only — Shopee products não tem manufacturer no cache
 };
 
 type SourceFilter = "all" | "baselinker" | "shopee";
@@ -60,6 +61,7 @@ function ProductRow({
   onToggle,
   onSetPrincipal,
   disabled,
+  manufacturerName,
 }: {
   item: SelectedItem;
   isSelected: boolean;
@@ -67,6 +69,7 @@ function ProductRow({
   onToggle: () => void;
   onSetPrincipal: () => void;
   disabled: boolean;
+  manufacturerName: string | null;
 }) {
   return (
     <TableRow data-key={item.key}>
@@ -77,23 +80,28 @@ function ProductRow({
           disabled={disabled && !isSelected}
         />
       </TableCell>
-      <TableCell className="w-20">
+      <TableCell className="w-24">
         {item.imageUrl ? (
           <img
             src={item.imageUrl}
             alt={item.name}
-            className="h-16 w-16 rounded object-cover border"
+            className="h-20 w-20 rounded object-cover border"
             loading="lazy"
           />
         ) : (
-          <div className="h-16 w-16 rounded bg-muted flex items-center justify-center">
-            <Package className="h-6 w-6 text-muted-foreground" />
+          <div className="h-20 w-20 rounded bg-muted flex items-center justify-center">
+            <Package className="h-8 w-8 text-muted-foreground" />
           </div>
         )}
       </TableCell>
       <TableCell>
         <div className="font-medium text-sm line-clamp-2">{item.name}</div>
-        <div className="text-xs text-muted-foreground">{item.sku || "—"}</div>
+      </TableCell>
+      <TableCell className="text-xs font-mono whitespace-nowrap max-w-[180px] truncate">
+        {item.sku || "—"}
+      </TableCell>
+      <TableCell className="text-xs max-w-[160px] truncate" title={manufacturerName ?? undefined}>
+        {manufacturerName ?? "—"}
       </TableCell>
       <TableCell>
         {item.source === "baselinker" ? (
@@ -341,24 +349,32 @@ export default function MultiProductPage() {
     { inventoryId: inventoryId! },
     { enabled: blAvailable, staleTime: 60 * 60 * 1000 },
   );
-  const manufacturerOptions = useMemo(() => {
-    const cached = (cachedManufacturersQuery.data ?? []) as Array<{ manufacturerId: number; productCount: number }>;
-    const namesRaw = manufacturerNamesQuery.data as any;
-    const namesMap = new Map<number, string>();
-    if (namesRaw && typeof namesRaw === "object") {
-      for (const [k, v] of Object.entries(namesRaw)) {
-        const id = Number(k);
-        if (Number.isFinite(id)) namesMap.set(id, String((v as any)?.name ?? v));
+  // Mapa id -> nome (usado tanto no dropdown quanto na coluna Fabricante).
+  // BL retorna array [{manufacturer_id, name, manufacturer_name, ...}].
+  // Alguns vem com name vazio — fallback pra manufacturer_name.
+  const manufacturerNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    const raw = manufacturerNamesQuery.data;
+    if (Array.isArray(raw)) {
+      for (const m of raw as any[]) {
+        const id = Number(m?.manufacturer_id);
+        const name = String(m?.name || m?.manufacturer_name || "").trim();
+        if (Number.isFinite(id) && name) map.set(id, name);
       }
     }
+    return map;
+  }, [manufacturerNamesQuery.data]);
+
+  const manufacturerOptions = useMemo(() => {
+    const cached = (cachedManufacturersQuery.data ?? []) as Array<{ manufacturerId: number; productCount: number }>;
     return cached
       .map(c => ({
         id: c.manufacturerId,
-        label: namesMap.get(c.manufacturerId) ?? `Fabricante #${c.manufacturerId}`,
+        label: manufacturerNameMap.get(c.manufacturerId) ?? `Fabricante #${c.manufacturerId}`,
         productCount: c.productCount,
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-  }, [cachedManufacturersQuery.data, manufacturerNamesQuery.data]);
+  }, [cachedManufacturersQuery.data, manufacturerNameMap]);
 
   // BL filters: termos com espaco -> searchName (preciso). Sem espaco -> searchAny
   // (OR em name/sku/ean). manufacturerId acumula AND quando definido.
@@ -373,28 +389,44 @@ export default function MultiProductPage() {
     return f;
   }, [search, manufacturerId]);
 
+  // Pagina/tamanho efetivos por origem. Em modo "all" pagina simultaneamente
+  // 25 de cada fonte (offset segue a pagina atual).
+  const blPageSize = sourceFilter === "baselinker" ? pageSize : ALL_MODE_PAGE_SIZE;
+  const shopeePageSize = sourceFilter === "shopee" ? pageSize : ALL_MODE_PAGE_SIZE;
+  const blPage = sourceFilter === "shopee" ? 1 : page;
+  const shopeePageOffset = sourceFilter === "baselinker" ? 0 : (page - 1) * shopeePageSize;
+
   const blQueryEnabled = blAvailable && (sourceFilter === "all" || sourceFilter === "baselinker");
-  const { data: blData, isLoading: blLoading } = trpc.baselinker.filterProducts.useQuery(
+  const { data: blData, isLoading: blLoading, error: blError } = trpc.baselinker.filterProducts.useQuery(
     {
       inventoryId: inventoryId!,
       filters: blFilters,
-      page: sourceFilter === "baselinker" ? page : 1,
-      pageSize: sourceFilter === "baselinker" ? pageSize : ALL_MODE_PAGE_SIZE,
+      page: blPage,
+      pageSize: blPageSize,
     },
     { enabled: blQueryEnabled },
   );
 
   const shopeeQueryEnabled = !!shopeeAccountId && (sourceFilter === "all" || sourceFilter === "shopee");
-  const { data: shopeeData, isLoading: shopeeLoading } = trpc.shopee.getProducts.useQuery(
+  const { data: shopeeData, isLoading: shopeeLoading, error: shopeeError } = trpc.shopee.getProducts.useQuery(
     {
       accountId: shopeeAccountId!,
-      offset: sourceFilter === "shopee" ? (page - 1) * pageSize : 0,
-      limit: sourceFilter === "shopee" ? pageSize : ALL_MODE_PAGE_SIZE,
+      offset: shopeePageOffset,
+      limit: shopeePageSize,
       search: search.trim() || undefined,
       hasVariation: false,
     },
     { enabled: shopeeQueryEnabled },
   );
+
+  // Surfaces silent query failures (ex: token expirado, invalid input) que
+  // antes resultavam em "Nenhum produto encontrado" sem feedback ao usuario.
+  useEffect(() => {
+    if (blError) toast.error(`BaseLinker: ${blError.message}`);
+  }, [blError]);
+  useEffect(() => {
+    if (shopeeError) toast.error(`Shopee: ${shopeeError.message}`);
+  }, [shopeeError]);
 
   const isLoading =
     (blQueryEnabled && blLoading) || (shopeeQueryEnabled && shopeeLoading);
@@ -407,6 +439,7 @@ export default function MultiProductPage() {
       for (const p of (blData.products as any[])) {
         const sourceId = Number(p.productId);
         if (!sourceId) continue;
+        const mid = Number(p.manufacturerId);
         out.push({
           key: `baselinker:${sourceId}`,
           source: "baselinker",
@@ -415,6 +448,7 @@ export default function MultiProductPage() {
           sku: p.sku ?? "",
           price: String(p.mainPrice ?? "0"),
           imageUrl: p.imageUrl ?? null,
+          manufacturerId: Number.isFinite(mid) && mid > 0 ? mid : null,
         });
       }
     }
@@ -431,6 +465,7 @@ export default function MultiProductPage() {
           sku: p.itemSku ?? "",
           price: String(p.price ?? "0"),
           imageUrl: p.imageUrl ?? null,
+          manufacturerId: null, // Shopee não expoe manufacturer no shopee_products
         });
       }
     }
@@ -438,13 +473,34 @@ export default function MultiProductPage() {
     return out;
   }, [blData, shopeeData, sourceFilter]);
 
-  const totalCount = useMemo(() => {
-    if (sourceFilter === "baselinker") return (blData as any)?.total ?? normalizedItems.length;
-    if (sourceFilter === "shopee") return (shopeeData as any)?.total ?? normalizedItems.length;
-    return normalizedItems.length;
-  }, [blData, shopeeData, sourceFilter, normalizedItems.length]);
+  // Heuristica: quando a API nao retorna `total`, infere "tem mais paginas"
+  // pelo fato de a pagina atual ter vindo cheia. Subestima paginas finais
+  // mas evita travar o botao Proxima.
+  const blTotal = (blData as any)?.total as number | undefined;
+  const shopeeTotal = (shopeeData as any)?.total as number | undefined;
+  const blReceivedFull = (blData?.products?.length ?? 0) >= blPageSize;
+  const shopeeReceivedFull = (shopeeData?.products?.length ?? 0) >= shopeePageSize;
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const totalPages = useMemo(() => {
+    if (sourceFilter === "baselinker") {
+      if (blTotal != null) return Math.max(1, Math.ceil(blTotal / pageSize));
+      return blReceivedFull ? page + 1 : page; // fallback: avança se veio cheio
+    }
+    if (sourceFilter === "shopee") {
+      if (shopeeTotal != null) return Math.max(1, Math.ceil(shopeeTotal / pageSize));
+      return shopeeReceivedFull ? page + 1 : page;
+    }
+    // Modo "all": pagina simultaneamente, totalPages = max das duas origens.
+    const blPages = blTotal != null ? Math.ceil(blTotal / ALL_MODE_PAGE_SIZE) : (blReceivedFull ? page + 1 : page);
+    const shPages = shopeeTotal != null ? Math.ceil(shopeeTotal / ALL_MODE_PAGE_SIZE) : (shopeeReceivedFull ? page + 1 : page);
+    return Math.max(1, blPages, shPages);
+  }, [sourceFilter, blTotal, shopeeTotal, blReceivedFull, shopeeReceivedFull, pageSize, page]);
+
+  const totalCount = useMemo(() => {
+    if (sourceFilter === "baselinker") return blTotal ?? normalizedItems.length;
+    if (sourceFilter === "shopee") return shopeeTotal ?? normalizedItems.length;
+    return (blTotal ?? 0) + (shopeeTotal ?? 0);
+  }, [sourceFilter, blTotal, shopeeTotal, normalizedItems.length]);
 
   // Seleção
   const isMaxed = selected.size >= remainingSlots;
@@ -759,8 +815,10 @@ export default function MultiProductPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10"></TableHead>
-                      <TableHead className="w-20"></TableHead>
+                      <TableHead className="w-24"></TableHead>
                       <TableHead>Produto</TableHead>
+                      <TableHead className="w-40">SKU</TableHead>
+                      <TableHead className="w-40">Fabricante</TableHead>
                       <TableHead className="w-32">Origem</TableHead>
                       <TableHead className="w-28">Preço</TableHead>
                       <TableHead className="w-10"></TableHead>
@@ -776,17 +834,20 @@ export default function MultiProductPage() {
                         onToggle={() => toggleItem(item)}
                         onSetPrincipal={() => setPrincipal(item.key)}
                         disabled={isMaxed || isLoadingAddToListing}
+                        manufacturerName={item.manufacturerId != null ? manufacturerNameMap.get(item.manufacturerId) ?? null : null}
                       />
                     ))}
                   </TableBody>
                 </Table>
               )}
 
-              {/* Paginação (só ativa quando filtro de origem é único) */}
-              {sourceFilter !== "all" && totalPages > 1 && (
+              {/* Paginação ativa em todos os modos. Em "all" pagina ambas
+                  origens simultaneamente (offset por fonte). */}
+              {totalPages > 1 && (
                 <div className="flex items-center justify-between pt-4">
                   <span className="text-xs text-muted-foreground">
-                    Página {page} de {totalPages}
+                    Pagina {page} de {totalPages}
+                    {totalCount > 0 && ` · ${totalCount.toLocaleString("pt-BR")} produto(s) total`}
                   </span>
                   <div className="flex gap-2">
                     <Button
@@ -810,7 +871,7 @@ export default function MultiProductPage() {
               )}
               {sourceFilter === "all" && (
                 <p className="text-xs text-muted-foreground pt-3">
-                  Modo combinado mostra ate {ALL_MODE_PAGE_SIZE} de cada origem. Filtre por uma fonte específica pra paginar.
+                  Modo combinado mostra ate {ALL_MODE_PAGE_SIZE} de cada origem por pagina.
                 </p>
               )}
             </CardContent>
