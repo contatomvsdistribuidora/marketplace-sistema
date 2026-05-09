@@ -61,7 +61,7 @@ function ProductRow({
   onToggle,
   onSetPrincipal,
   disabled,
-  manufacturerName,
+  brandName,
 }: {
   item: SelectedItem;
   isSelected: boolean;
@@ -69,7 +69,7 @@ function ProductRow({
   onToggle: () => void;
   onSetPrincipal: () => void;
   disabled: boolean;
-  manufacturerName: string | null;
+  brandName: string | null;
 }) {
   return (
     <TableRow data-key={item.key}>
@@ -80,19 +80,28 @@ function ProductRow({
           disabled={disabled && !isSelected}
         />
       </TableCell>
-      <TableCell className="w-24">
+      <TableCell style={{ width: 96, minWidth: 96 }}>
         {item.imageUrl ? (
           <img
             src={item.imageUrl}
             alt={item.name}
             className="h-20 w-20 rounded object-cover border"
             loading="lazy"
+            onError={(e) => {
+              // Imagem quebrada (CDN expirado, URL invalida): substitui por placeholder
+              // pra nao deixar uma area branca que parece "sumiu a coluna".
+              const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+              e.currentTarget.style.display = "none";
+              if (fallback) fallback.style.display = "flex";
+            }}
           />
-        ) : (
-          <div className="h-20 w-20 rounded bg-muted flex items-center justify-center">
-            <Package className="h-8 w-8 text-muted-foreground" />
-          </div>
-        )}
+        ) : null}
+        <div
+          className="h-20 w-20 rounded bg-muted items-center justify-center"
+          style={{ display: item.imageUrl ? "none" : "flex" }}
+        >
+          <Package className="h-8 w-8 text-muted-foreground" />
+        </div>
       </TableCell>
       <TableCell>
         <div className="font-medium text-sm line-clamp-2">{item.name}</div>
@@ -100,8 +109,8 @@ function ProductRow({
       <TableCell className="text-xs font-mono whitespace-nowrap max-w-[180px] truncate">
         {item.sku || "—"}
       </TableCell>
-      <TableCell className="text-xs max-w-[160px] truncate" title={manufacturerName ?? undefined}>
-        {manufacturerName ?? "—"}
+      <TableCell className="text-xs max-w-[160px] truncate" title={brandName ?? undefined}>
+        {brandName ?? "—"}
       </TableCell>
       <TableCell>
         {item.source === "baselinker" ? (
@@ -349,10 +358,12 @@ export default function MultiProductPage() {
     { inventoryId: inventoryId! },
     { enabled: blAvailable, staleTime: 60 * 60 * 1000 },
   );
-  // Mapa id -> nome (usado tanto no dropdown quanto na coluna Fabricante).
+  // Mapa id -> nome (usado tanto no dropdown quanto na coluna Marca).
   // BL retorna array [{manufacturer_id, name, manufacturer_name, ...}].
   // Alguns vem com name vazio — fallback pra manufacturer_name.
-  const manufacturerNameMap = useMemo(() => {
+  // Nota: campo BL chama-se manufacturerId, mas no contexto Shopee/usuario
+  // a label correta e' "Marca" — e' isso que vai pro brand_id da Shopee.
+  const brandNameMap = useMemo(() => {
     const map = new Map<number, string>();
     const raw = manufacturerNamesQuery.data;
     if (Array.isArray(raw)) {
@@ -365,16 +376,16 @@ export default function MultiProductPage() {
     return map;
   }, [manufacturerNamesQuery.data]);
 
-  const manufacturerOptions = useMemo(() => {
+  const brandOptions = useMemo(() => {
     const cached = (cachedManufacturersQuery.data ?? []) as Array<{ manufacturerId: number; productCount: number }>;
     return cached
       .map(c => ({
         id: c.manufacturerId,
-        label: manufacturerNameMap.get(c.manufacturerId) ?? `Fabricante #${c.manufacturerId}`,
+        label: brandNameMap.get(c.manufacturerId) ?? `Marca #${c.manufacturerId}`,
         productCount: c.productCount,
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-  }, [cachedManufacturersQuery.data, manufacturerNameMap]);
+  }, [cachedManufacturersQuery.data, brandNameMap]);
 
   // BL filters: termos com espaco -> searchName (preciso). Sem espaco -> searchAny
   // (OR em name/sku/ean). manufacturerId acumula AND quando definido.
@@ -758,14 +769,14 @@ export default function MultiProductPage() {
                 <Select
                   value={manufacturerId === null ? "__all__" : String(manufacturerId)}
                   onValueChange={(v) => setManufacturerId(v === "__all__" ? null : Number(v))}
-                  disabled={!blAvailable || manufacturerOptions.length === 0}
+                  disabled={!blAvailable || brandOptions.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Fabricante" />
+                    <SelectValue placeholder="Marca" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__all__">Todos os fabricantes</SelectItem>
-                    {manufacturerOptions.map(m => (
+                    <SelectItem value="__all__">Todas as marcas</SelectItem>
+                    {brandOptions.map(m => (
                       <SelectItem key={m.id} value={String(m.id)}>
                         {m.label} ({m.productCount})
                       </SelectItem>
@@ -794,6 +805,21 @@ export default function MultiProductPage() {
             </CardContent>
           </Card>
 
+          {/* Status diagnostico — ajuda a identificar quando a query nao
+              retorna nada por config faltando ou cache vazio. */}
+          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+            <span>BL: {blAvailable ? `inv=${inventoryId}` : "nao configurado"}</span>
+            {blQueryEnabled && (
+              <span>· retornou {blData?.products?.length ?? 0}{blTotal != null && ` de ${blTotal}`}</span>
+            )}
+            <span>· Shopee: {shopeeAccountId ? `acc=${shopeeAccountId}` : "sem conta"}</span>
+            {shopeeQueryEnabled && (
+              <span>· retornou {shopeeData?.products?.length ?? 0}{shopeeTotal != null && ` de ${shopeeTotal}`}</span>
+            )}
+            {blError && <span className="text-red-600">· erro BL: {blError.message}</span>}
+            {shopeeError && <span className="text-red-600">· erro Shopee: {shopeeError.message}</span>}
+          </div>
+
           {/* Tabela */}
           {isLoadingAddToListing && (
             <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 mb-3">
@@ -815,10 +841,10 @@ export default function MultiProductPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10"></TableHead>
-                      <TableHead className="w-24"></TableHead>
+                      <TableHead style={{ width: 96, minWidth: 96 }}></TableHead>
                       <TableHead>Produto</TableHead>
                       <TableHead className="w-40">SKU</TableHead>
-                      <TableHead className="w-40">Fabricante</TableHead>
+                      <TableHead className="w-40">Marca</TableHead>
                       <TableHead className="w-32">Origem</TableHead>
                       <TableHead className="w-28">Preço</TableHead>
                       <TableHead className="w-10"></TableHead>
@@ -834,7 +860,7 @@ export default function MultiProductPage() {
                         onToggle={() => toggleItem(item)}
                         onSetPrincipal={() => setPrincipal(item.key)}
                         disabled={isMaxed || isLoadingAddToListing}
-                        manufacturerName={item.manufacturerId != null ? manufacturerNameMap.get(item.manufacturerId) ?? null : null}
+                        brandName={item.manufacturerId != null ? brandNameMap.get(item.manufacturerId) ?? null : null}
                       />
                     ))}
                   </TableBody>
