@@ -127,6 +127,13 @@
       "when": 1777340000000,
       "tag": "0017_shopee_brand_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1778337944305,
+      "tag": "0018_even_the_hunter",
+      "breakpoints": true
     }
   ]
 }

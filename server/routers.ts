@@ -3300,6 +3300,9 @@ export const appRouter = router({
           attributes:      attrs,
           attributesFilled: filledAttrs,
           attributesTotal:  attrs.length,
+          brand:           item.brand && typeof item.brand.brand_id === "number"
+            ? { brand_id: item.brand.brand_id, original_brand_name: item.brand.original_brand_name ?? "" }
+            : null,
           variations:      item.model_list || null,
           weight:          item.weight?.toString() || "0",
           dimensionLength: item.dimension?.package_length?.toString() || "",

@@ -454,6 +454,12 @@ export const shopeeProducts = mysqlTable("shopee_products", {
   attributes: json("attributes"),
   attributesFilled: int("attributesFilled").default(0),
   attributesTotal: int("attributesTotal").default(0),
+  /**
+   * Marca cadastrada no item Shopee. Capturado de get_item_base_info no sync.
+   * Preserva brand_id pra reuso futuro (publish exige `{ brand_id, original_brand_name }`).
+   * NULL = nao sincronizado ainda OU produto sem marca cadastrada.
+   */
+  brand: json("brand").$type<{ brand_id: number; original_brand_name: string } | null>(),
   qualityScore: varchar("qualityScore", { length: 32 }),
   variations: json("variations"),
   weight: varchar("weight", { length: 32 }),
