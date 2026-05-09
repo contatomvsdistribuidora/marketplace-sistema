@@ -176,6 +176,12 @@ export function CombinedWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products.length]);
 
+  // ── Frete padrao do usuario (Settings) ───────────────────────────────────
+  // Aplicado apenas em wizards FRESCOS (sem wizardStateJson) — drafts salvos
+  // tem o valor que tinham. So roda quando hidratado, evitando race com a
+  // restauracao do JSON.
+  const { data: defaultShippingData } = trpc.settings.getDefaultShippingCost.useQuery();
+
   // ── Hidratacao automatica do BL (Custo + Estoque) ─────────────────────────
   // Custo (R$) vem de average_landed_cost da BL API on-demand. Estoque vem
   // do totalStock ja resolvido em ResolvedProduct. So preenche se o campo
@@ -410,6 +416,18 @@ export function CombinedWizard({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, products, costByProductId, stockByProductId]);
+
+  // Aplica defaultShippingCost (Settings) em wizard fresco. Gate: wizardStateJson
+  // ausente (nao sobrescreve drafts) e shippingCost ainda no bootstrap "20".
+  useEffect(() => {
+    if (!hydrated) return;
+    if (wizardStateJson) return;
+    const v = defaultShippingData?.value;
+    if (!v || v === "20") return;
+    setPricing(p => p.shippingCost === "20" ? { ...p, shippingCost: v } : p);
+    setPricingPerProduct(prev => prev.map(pp => pp.shippingCost === "20" ? { ...pp, shippingCost: v } : pp));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, defaultShippingData?.value]);
 
   // Hidratacao automatica de peso/dimensoes do BL na 1a variacao de cada
   // produto. Gate numerico (parseFloat <= 0) — nao sobrescreve edicao manual.

@@ -164,6 +164,22 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    // ── Frete padrao ──
+    // Valor pre-preenchido em "Frete (R$)" ao criar listings. Hidrata o
+    // CombinedWizard apos JSON hydration; drafts salvos preservam o valor
+    // que tinham. Fallback "20.00" quando setting ausente.
+    getDefaultShippingCost: protectedProcedure.query(async ({ ctx }) => {
+      const v = await db.getSetting(ctx.user.id, "default_shipping_cost");
+      return { value: v ?? "20.00" };
+    }),
+
+    setDefaultShippingCost: protectedProcedure
+      .input(z.object({ value: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.setSetting(ctx.user.id, "default_shipping_cost", input.value);
+        return { success: true };
+      }),
+
     // ── Configurações de IA ──
 
     getAiConfig: protectedProcedure.query(async ({ ctx }) => {

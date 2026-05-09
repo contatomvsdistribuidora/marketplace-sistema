@@ -5,8 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, XCircle, Key, Database, Loader2, Trash2, Sparkles, Zap, CheckCheck } from "lucide-react";
-import { useState } from "react";
+import { CheckCircle, XCircle, Key, Database, Loader2, Trash2, Sparkles, Zap, CheckCheck, Truck } from "lucide-react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 const AI_PROVIDERS = [
@@ -78,6 +78,30 @@ export default function SettingsPage() {
       utils.settings.getInventoryId.invalidate();
     },
   });
+
+  // ── Frete padrao ──
+  const { data: shippingData } = trpc.settings.getDefaultShippingCost.useQuery();
+  const [shippingCost, setShippingCost] = useState("");
+  const setShippingMutation = trpc.settings.setDefaultShippingCost.useMutation({
+    onSuccess: () => {
+      toast.success("Frete padrão salvo!");
+      utils.settings.getDefaultShippingCost.invalidate();
+    },
+    onError: (err) => toast.error(err.message || "Erro ao salvar"),
+  });
+  // Sync local state apos a query carregar — depois disso o input e' fonte de
+  // verdade ate o usuario blur/salvar e o cache invalidar.
+  useEffect(() => {
+    if (shippingData?.value != null && shippingCost === "") {
+      setShippingCost(shippingData.value);
+    }
+  }, [shippingData?.value, shippingCost]);
+  const handleShippingBlur = () => {
+    const trimmed = shippingCost.trim();
+    if (!trimmed) return;
+    if (trimmed === shippingData?.value) return;
+    setShippingMutation.mutate({ value: trimmed });
+  };
 
   const handleSaveToken = async () => {
     if (!token.trim()) {
@@ -255,6 +279,41 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Truck className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle>Frete Padrão</CardTitle>
+              <CardDescription>
+                Valor pré-preenchido em "Frete (R$)" ao criar novos anúncios combinados
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2 max-w-xs">
+            <Label htmlFor="default-shipping">Frete padrão (R$)</Label>
+            <Input
+              id="default-shipping"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="20.00"
+              value={shippingCost}
+              onChange={(e) => setShippingCost(e.target.value)}
+              onBlur={handleShippingBlur}
+              disabled={setShippingMutation.isPending}
+            />
+            <p className="text-xs text-muted-foreground">
+              Salva automaticamente ao sair do campo. Drafts existentes preservam seus valores.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ── Configurações de IA ── */}
       <Card>
