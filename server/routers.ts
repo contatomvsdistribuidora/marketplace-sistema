@@ -2167,6 +2167,36 @@ export const appRouter = router({
         return row.product;
       }),
 
+    // Lista UNIQUE de marcas Shopee em cache (extraidas da coluna brand JSON
+     // populada pelo backfill). Filtra brand_id > 0 — descarta a sentinela
+     // "No Brand" (brand_id=0) usada pra marcar produtos sem marca cadastrada.
+     // Ordena por productCount DESC, brandName ASC.
+    getCachedShopeeBrands: protectedProcedure.query(async () => {
+      const rows: any = await sharedDb.execute(sql`
+        SELECT
+          CAST(JSON_EXTRACT(brand, '$.brand_id') AS UNSIGNED) AS brandId,
+          JSON_UNQUOTE(JSON_EXTRACT(brand, '$.original_brand_name')) AS brandName,
+          COUNT(*) AS productCount
+        FROM shopee_products
+        WHERE brand IS NOT NULL
+          AND CAST(JSON_EXTRACT(brand, '$.brand_id') AS UNSIGNED) > 0
+        GROUP BY brandId, brandName
+        ORDER BY productCount DESC, brandName ASC
+      `);
+      return ((rows as any)[0] ?? []).map((r: any) => ({
+        brandId: Number(r.brandId),
+        brandName: String(r.brandName ?? ""),
+        productCount: Number(r.productCount),
+      }));
+    }),
+
+    // Dispara backfill da coluna brand. Por enquanto so retorna ack — o usuario
+    // (admin) roda manualmente: `pnpm exec tsx scripts/backfill-shopee-brands.ts`.
+    // TODO: futuro — enfileirar como background job e expor progresso pelo UI.
+    runBrandsBackfill: protectedProcedure.mutation(async () => {
+      return { dispatched: true as const };
+    }),
+
     /**
      * Pre-flight check: does this product already have variations on Shopee?
      * The wizard uses this to disable the "Publish" button + show a banner

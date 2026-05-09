@@ -9,12 +9,12 @@
  *   2. Agrupa por shopeeAccountId (cada conta tem token/shopId proprios).
  *   3. Pra cada conta: getValidToken -> getItemBaseInfo em batches de 50.
  *   4. Pra cada item retornado:
- *        - brand.brand_id > 0  -> UPDATE shopee_products SET brand = JSON
- *        - sem brand           -> deixa NULL (sinaliza "ja sincronizado, sem marca")
- *      MAS pra distinguir "nao processado ainda" de "sem marca", marcamos
- *      ambos como NULL — o backfill so re-processa items NULL existentes nesta
- *      execucao. Re-runs futuros pegariam novamente os "sem marca", o que e'
- *      idempotente (UPDATE idempotente, custa so a chamada API).
+ *        - brand.brand_id > 0  -> UPDATE com { brand_id, original_brand_name }
+ *        - sem brand           -> UPDATE com SENTINELA { brand_id: 0, original_brand_name: "No Brand" }
+ *      A sentinela diferencia "ja sincronizado, sem marca" de "ainda nao
+ *      processado". Re-runs com filtro `WHERE brand IS NULL` pulam quem ja
+ *      foi tocado (zero custo de API). Para LEITURA (UI/filtro), tratamos
+ *      brand_id <= 0 como "sem marca".
  *   5. 500ms de pausa entre batches pra nao bater em rate-limit.
  *   6. Log progresso e summary no final.
  */
@@ -107,13 +107,16 @@ async function main() {
         const itemId = Number(it.item_id);
         if (!Number.isFinite(itemId) || itemId <= 0) continue;
         const b = it.brand;
-        if (b && typeof b.brand_id === "number" && b.brand_id > 0) {
-          const brandJson = { brand_id: b.brand_id, original_brand_name: String(b.original_brand_name ?? "") };
-          await sharedDb.execute(sql`
-            UPDATE shopee_products
-            SET brand = ${JSON.stringify(brandJson)}, updatedAt = NOW()
-            WHERE itemId = ${itemId} AND shopeeAccountId = ${accountId}
-          `);
+        const hasBrand = b && typeof b.brand_id === "number" && b.brand_id > 0;
+        const brandJson = hasBrand
+          ? { brand_id: b.brand_id, original_brand_name: String(b.original_brand_name ?? "") }
+          : { brand_id: 0, original_brand_name: "No Brand" };  // sentinela
+        await sharedDb.execute(sql`
+          UPDATE shopee_products
+          SET brand = ${JSON.stringify(brandJson)}, updatedAt = NOW()
+          WHERE itemId = ${itemId} AND shopeeAccountId = ${accountId}
+        `);
+        if (hasBrand) {
           updated++;
           const k = brandJson.original_brand_name || `id:${brandJson.brand_id}`;
           brandHistogram.set(k, (brandHistogram.get(k) ?? 0) + 1);

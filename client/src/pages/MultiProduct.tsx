@@ -52,6 +52,7 @@ type SelectedItem = {
   manufacturerId: number | null;  // BL only — Shopee products não tem manufacturer no cache
   totalStock: number | null;      // BL: product_cache.totalStock | Shopee: stock
   averageCost: number | null;     // BL only — average_landed_cost com fallback pra average_cost; null em Shopee
+  shopeeBrandName: string | null; // Shopee only — extraido de brand.original_brand_name (apenas brand_id > 0; sentinela "No Brand" vira null)
 };
 
 type SourceFilter = "all" | "baselinker" | "shopee";
@@ -645,6 +646,7 @@ export default function MultiProductPage() {
           manufacturerId: Number.isFinite(mid) && mid > 0 ? mid : null,
           totalStock: typeof p.totalStock === "number" ? p.totalStock : null,
           averageCost: costByProductId.get(sourceId) ?? null,
+          shopeeBrandName: null,
         });
       }
     }
@@ -653,6 +655,11 @@ export default function MultiProductPage() {
       for (const p of (shopeeData.products as any[])) {
         const sourceId = Number(p.itemId);
         if (!sourceId) continue;
+        // Brand JSON: { brand_id, original_brand_name }. brand_id <= 0 e' sentinela
+        // "No Brand" do backfill — tratamos como sem marca pra UI.
+        const brandObj = p.brand && typeof p.brand === "object" ? p.brand : null;
+        const brandIdNum = brandObj && typeof brandObj.brand_id === "number" ? brandObj.brand_id : 0;
+        const shopeeBrandName = brandIdNum > 0 ? String(brandObj.original_brand_name ?? "") || null : null;
         out.push({
           key: `shopee:${sourceId}`,
           source: "shopee",
@@ -664,6 +671,7 @@ export default function MultiProductPage() {
           manufacturerId: null, // Shopee não expoe manufacturer no shopee_products
           totalStock: typeof p.stock === "number" ? p.stock : null,
           averageCost: null,
+          shopeeBrandName,
         });
       }
     }
@@ -1156,7 +1164,7 @@ export default function MultiProductPage() {
                         onToggle={() => toggleItem(item)}
                         onSetPrincipal={() => setPrincipal(item.key)}
                         disabled={isMaxed || isLoadingAddToListing}
-                        brandName={item.manufacturerId != null ? brandNameMap.get(item.manufacturerId) ?? null : null}
+                        brandName={item.shopeeBrandName ?? (item.manufacturerId != null ? brandNameMap.get(item.manufacturerId) ?? null : null)}
                       />
                     ))}
                   </TableBody>
