@@ -10,9 +10,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import {
+  Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem,
+} from "@/components/ui/command";
 import {
   Search, Loader2, ChevronLeft, ChevronRight, Star, X,
-  Package, Store, AlertTriangle, ArrowRight, Trash2,
+  Package, Store, AlertTriangle, ArrowRight, Trash2, Check, ChevronsUpDown, SlidersHorizontal,
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { useSearch, useLocation } from "wouter";
@@ -273,6 +277,79 @@ function SelectionSidebar({
   );
 }
 
+/**
+ * Combobox de marca com busca interna. Usado tanto no filtro principal
+ * quanto no painel de busca avancada. value=null significa "todas".
+ */
+function BrandCombobox({
+  value,
+  onChange,
+  options,
+  disabled,
+  placeholder = "Marca",
+  emptyLabel = "Todas as marcas",
+}: {
+  value: number | null;
+  onChange: (id: number | null) => void;
+  options: Array<{ id: number; label: string; productCount: number }>;
+  disabled?: boolean;
+  placeholder?: string;
+  emptyLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = value === null
+    ? null
+    : options.find(o => o.id === value)?.label ?? `Marca #${value}`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate text-left flex-1">
+            {selectedLabel ?? placeholder}
+          </span>
+          <ChevronsUpDown className="h-3 w-3 ml-2 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[260px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Buscar marca..." />
+          <CommandList className="max-h-72">
+            <CommandEmpty>Nenhuma marca encontrada.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                onSelect={() => { onChange(null); setOpen(false); }}
+                className="text-muted-foreground"
+              >
+                <Check className={`mr-2 h-4 w-4 ${value === null ? "opacity-100" : "opacity-0"}`} />
+                {emptyLabel}
+              </CommandItem>
+              {options.map(o => (
+                <CommandItem
+                  key={o.id}
+                  value={o.label}
+                  onSelect={() => { onChange(o.id); setOpen(false); }}
+                >
+                  <Check className={`mr-2 h-4 w-4 ${value === o.id ? "opacity-100" : "opacity-0"}`} />
+                  <span className="flex-1 truncate">{o.label}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{o.productCount}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function MultiProductPage() {
   const urlSearch = useSearch();
   const [, setLocation] = useLocation();
@@ -292,6 +369,25 @@ export default function MultiProductPage() {
   const [manufacturerId, setManufacturerId] = useState<number | null>(null);
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState(1);
+
+  // Painel de busca avancada (F3). Quando aberto E algum campo preenchido,
+  // sobrescreve a busca smart unica (looksLikeCode) com filtros explicitos.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState({
+    name: "",
+    sku: "",
+    ean: "",
+    brandBL: null as number | null,
+    categoryId: "",
+    priceMin: "",
+    priceMax: "",
+    stockMin: "",
+  });
+  const advancedActive = advancedOpen && (
+    !!advancedFilters.name || !!advancedFilters.sku || !!advancedFilters.ean ||
+    advancedFilters.brandBL !== null || !!advancedFilters.categoryId ||
+    !!advancedFilters.priceMin || !!advancedFilters.priceMax || !!advancedFilters.stockMin
+  );
 
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
   const [principalKey, setPrincipalKey] = useState<string | null>(null);
@@ -346,7 +442,7 @@ export default function MultiProductPage() {
   // Reset página quando filtros mudam
   useEffect(() => {
     setPage(1);
-  }, [sourceFilter, search, shopeeAccountId, manufacturerId, pageSize]);
+  }, [sourceFilter, search, shopeeAccountId, manufacturerId, pageSize, advancedActive, advancedFilters]);
 
   // Lista de manufacturers DISTINCT presentes no cache local (instantaneo).
   const cachedManufacturersQuery = trpc.baselinker.getCachedManufacturers.useQuery(
@@ -387,9 +483,35 @@ export default function MultiProductPage() {
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   }, [cachedManufacturersQuery.data, brandNameMap]);
 
-  // BL filters: termos com espaco -> searchName (preciso). Sem espaco -> searchAny
-  // (OR em name/sku/ean). manufacturerId acumula AND quando definido.
+  // BL filters: quando painel avancado tem campos preenchidos, mandam todos
+  // os filtros explicitos (sobrescreve a busca smart). Caso contrario, usa
+  // a busca smart: termo sem espaco -> searchAny (OR em name/sku/ean),
+  // termo com espaco -> searchName.
   const blFilters = useMemo(() => {
+    if (advancedActive) {
+      const f: any = {};
+      if (advancedFilters.name.trim()) f.searchName = advancedFilters.name.trim();
+      if (advancedFilters.sku.trim()) f.searchSku = advancedFilters.sku.trim();
+      if (advancedFilters.ean.trim()) f.searchEan = advancedFilters.ean.trim();
+      if (advancedFilters.brandBL !== null) f.manufacturerId = advancedFilters.brandBL;
+      if (advancedFilters.categoryId.trim()) {
+        const c = parseInt(advancedFilters.categoryId);
+        if (Number.isFinite(c)) f.categoryId = c;
+      }
+      if (advancedFilters.priceMin.trim()) {
+        const v = parseFloat(advancedFilters.priceMin);
+        if (Number.isFinite(v)) f.priceMin = v;
+      }
+      if (advancedFilters.priceMax.trim()) {
+        const v = parseFloat(advancedFilters.priceMax);
+        if (Number.isFinite(v)) f.priceMax = v;
+      }
+      if (advancedFilters.stockMin.trim()) {
+        const v = parseInt(advancedFilters.stockMin);
+        if (Number.isFinite(v)) f.stockMin = v;
+      }
+      return f;
+    }
     const f: any = {};
     const trimmed = search.trim();
     if (trimmed) {
@@ -398,7 +520,7 @@ export default function MultiProductPage() {
     }
     if (manufacturerId !== null) f.manufacturerId = manufacturerId;
     return f;
-  }, [search, manufacturerId]);
+  }, [search, manufacturerId, advancedActive, advancedFilters]);
 
   // Pagina/tamanho efetivos por origem. Em modo "all" pagina simultaneamente
   // 25 de cada fonte (offset segue a pagina atual).
@@ -769,23 +891,13 @@ export default function MultiProductPage() {
                     <SelectItem value="shopee">Shopee</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select
-                  value={manufacturerId === null ? "__all__" : String(manufacturerId)}
-                  onValueChange={(v) => setManufacturerId(v === "__all__" ? null : Number(v))}
+                <BrandCombobox
+                  value={manufacturerId}
+                  onChange={setManufacturerId}
+                  options={brandOptions}
                   disabled={!blAvailable || brandOptions.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Marca" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">Todas as marcas</SelectItem>
-                    {brandOptions.map(m => (
-                      <SelectItem key={m.id} value={String(m.id)}>
-                        {m.label} ({m.productCount})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Marca BL"
+                />
                 <Select
                   value={String(pageSize)}
                   onValueChange={(v) => setPageSize(Number(v))}
@@ -804,6 +916,123 @@ export default function MultiProductPage() {
                 <p className="text-xs text-muted-foreground">
                   BaseLinker não configurado — apenas produtos Shopee aparecerão.
                 </p>
+              )}
+
+              {/* F3: Toggle painel busca avancada */}
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen(o => !o)}
+                  className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5"
+                >
+                  <SlidersHorizontal className="h-3 w-3" />
+                  {advancedOpen ? "− Busca avançada" : "+ Busca avançada"}
+                  {advancedActive && (
+                    <Badge variant="outline" className="ml-1 text-[10px] h-4 px-1 border-orange-300 bg-orange-50 text-orange-700">
+                      ativa
+                    </Badge>
+                  )}
+                </button>
+                {advancedActive && (
+                  <button
+                    type="button"
+                    onClick={() => setAdvancedFilters({
+                      name: "", sku: "", ean: "", brandBL: null,
+                      categoryId: "", priceMin: "", priceMax: "", stockMin: "",
+                    })}
+                    className="text-xs text-muted-foreground hover:text-destructive"
+                  >
+                    Limpar avançada
+                  </button>
+                )}
+              </div>
+
+              {/* F3: Painel de busca avancada */}
+              {advancedOpen && (
+                <div className="grid gap-2 md:grid-cols-3 pt-2 border-t border-gray-100">
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Nome contém</Label>
+                    <Input
+                      value={advancedFilters.name}
+                      onChange={(e) => setAdvancedFilters(f => ({ ...f, name: e.target.value }))}
+                      placeholder="ex: saco lixo"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">SKU</Label>
+                    <Input
+                      value={advancedFilters.sku}
+                      onChange={(e) => setAdvancedFilters(f => ({ ...f, sku: e.target.value }))}
+                      placeholder="ex: SHP-12345"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">EAN</Label>
+                    <Input
+                      value={advancedFilters.ean}
+                      onChange={(e) => setAdvancedFilters(f => ({ ...f, ean: e.target.value }))}
+                      placeholder="ex: 7891234567890"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Marca BL</Label>
+                    <BrandCombobox
+                      value={advancedFilters.brandBL}
+                      onChange={(id) => setAdvancedFilters(f => ({ ...f, brandBL: id }))}
+                      options={brandOptions}
+                      disabled={!blAvailable || brandOptions.length === 0}
+                      placeholder="Marca BL"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Categoria ID (BL)</Label>
+                    <Input
+                      type="number"
+                      value={advancedFilters.categoryId}
+                      onChange={(e) => setAdvancedFilters(f => ({ ...f, categoryId: e.target.value }))}
+                      placeholder="ex: 1234"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Estoque mínimo</Label>
+                    <Input
+                      type="number"
+                      value={advancedFilters.stockMin}
+                      onChange={(e) => setAdvancedFilters(f => ({ ...f, stockMin: e.target.value }))}
+                      placeholder="0"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Preço mínimo (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={advancedFilters.priceMin}
+                      onChange={(e) => setAdvancedFilters(f => ({ ...f, priceMin: e.target.value }))}
+                      placeholder="0.00"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Preço máximo (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={advancedFilters.priceMax}
+                      onChange={(e) => setAdvancedFilters(f => ({ ...f, priceMax: e.target.value }))}
+                      placeholder="999.99"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <p className="md:col-span-3 text-[10px] text-muted-foreground italic">
+                    Filtros avançados aplicam-se a BaseLinker. Todos os campos preenchidos somam (AND). Nome/SKU/EAN substituem a busca smart no campo principal acima.
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
