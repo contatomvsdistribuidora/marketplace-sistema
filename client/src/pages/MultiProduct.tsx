@@ -53,6 +53,7 @@ type SelectedItem = {
   totalStock: number | null;      // BL: product_cache.totalStock | Shopee: stock
   averageCost: number | null;     // BL only — average_landed_cost com fallback pra average_cost; null em Shopee
   shopeeBrandName: string | null; // Shopee only — extraido de brand.original_brand_name (apenas brand_id > 0; sentinela "No Brand" vira null)
+  shopeeBrandId: number | null;   // Shopee only — brand_id real (> 0). Usado pelo filtro client-side de Marca Shopee.
 };
 
 type SourceFilter = "all" | "baselinker" | "shopee";
@@ -409,6 +410,7 @@ export default function MultiProductPage() {
     sku: "",
     ean: "",
     brandBL: null as number | null,
+    shopeeBrandId: null as number | null,
     categoryId: "",
     priceMin: "",
     priceMax: "",
@@ -416,7 +418,8 @@ export default function MultiProductPage() {
   });
   const advancedActive = advancedOpen && (
     !!advancedFilters.name || !!advancedFilters.sku || !!advancedFilters.ean ||
-    advancedFilters.brandBL !== null || !!advancedFilters.categoryId ||
+    advancedFilters.brandBL !== null || advancedFilters.shopeeBrandId !== null ||
+    !!advancedFilters.categoryId ||
     !!advancedFilters.priceMin || !!advancedFilters.priceMax || !!advancedFilters.stockMin
   );
 
@@ -513,6 +516,17 @@ export default function MultiProductPage() {
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   }, [cachedManufacturersQuery.data, brandNameMap]);
+
+  // Marcas Shopee — vem do backfill da coluna brand. Filtra brand_id > 0
+  // (descarta sentinela "No Brand"). Sempre habilitado se houver pelo menos
+  // 1 marca em cache; nao depende de blAvailable.
+  const cachedShopeeBrandsQuery = trpc.shopee.getCachedShopeeBrands.useQuery(undefined, {
+    staleTime: 5 * 60 * 1000,
+  });
+  const shopeeBrandOptions = useMemo(() => {
+    const data = (cachedShopeeBrandsQuery.data ?? []) as Array<{ brandId: number; brandName: string; productCount: number }>;
+    return data.map(b => ({ id: b.brandId, label: b.brandName, productCount: b.productCount }));
+  }, [cachedShopeeBrandsQuery.data]);
 
   // BL filters: quando painel avancado tem campos preenchidos, mandam todos
   // os filtros explicitos (sobrescreve a busca smart). Caso contrario, usa
@@ -647,6 +661,7 @@ export default function MultiProductPage() {
           totalStock: typeof p.totalStock === "number" ? p.totalStock : null,
           averageCost: costByProductId.get(sourceId) ?? null,
           shopeeBrandName: null,
+          shopeeBrandId: null,
         });
       }
     }
@@ -672,12 +687,20 @@ export default function MultiProductPage() {
           totalStock: typeof p.stock === "number" ? p.stock : null,
           averageCost: null,
           shopeeBrandName,
+          shopeeBrandId: brandIdNum > 0 ? brandIdNum : null,
         });
       }
     }
 
+    // Filtro client-side de Marca Shopee. Roda aqui (em vez de no servidor)
+    // porque shopee_products.brand e' coluna nova e o endpoint getProducts
+    // ainda nao expoe o filtro. So afeta items source="shopee"; BL passa direto.
+    const shopeeBrandFilter = advancedActive ? advancedFilters.shopeeBrandId : null;
+    if (shopeeBrandFilter !== null) {
+      return out.filter(it => it.source !== "shopee" || it.shopeeBrandId === shopeeBrandFilter);
+    }
     return out;
-  }, [blData, shopeeData, sourceFilter, costByProductId]);
+  }, [blData, shopeeData, sourceFilter, costByProductId, advancedActive, advancedFilters.shopeeBrandId]);
 
   // Heuristica: quando a API nao retorna `total`, infere "tem mais paginas"
   // pelo fato de a pagina atual ter vindo cheia. Subestima paginas finais
@@ -1007,7 +1030,7 @@ export default function MultiProductPage() {
                   <button
                     type="button"
                     onClick={() => setAdvancedFilters({
-                      name: "", sku: "", ean: "", brandBL: null,
+                      name: "", sku: "", ean: "", brandBL: null, shopeeBrandId: null,
                       categoryId: "", priceMin: "", priceMax: "", stockMin: "",
                     })}
                     className="text-xs text-muted-foreground hover:text-destructive"
@@ -1055,6 +1078,16 @@ export default function MultiProductPage() {
                       options={brandOptions}
                       disabled={!blAvailable || brandOptions.length === 0}
                       placeholder="Marca BL"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Marca Shopee</Label>
+                    <BrandCombobox
+                      value={advancedFilters.shopeeBrandId}
+                      onChange={(id) => setAdvancedFilters(f => ({ ...f, shopeeBrandId: id }))}
+                      options={shopeeBrandOptions}
+                      disabled={shopeeBrandOptions.length === 0}
+                      placeholder="Marca Shopee"
                     />
                   </div>
                   <div>

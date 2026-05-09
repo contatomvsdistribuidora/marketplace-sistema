@@ -429,8 +429,12 @@ export function CombinedWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, defaultShippingData?.value]);
 
-  // Hidratacao automatica de peso/dimensoes do BL na 1a variacao de cada
-  // produto. Gate numerico (parseFloat <= 0) — nao sobrescreve edicao manual.
+  // Hidratacao automatica de peso/dimensoes do BL pra TODAS variacoes.
+  // - Peso: linear * qty, sem cap.
+  // - Dimensoes: tenta crescer comprimento ate 80cm; ao saturar, distribui
+  //   o "extra" em altura ou largura (a menor primeiro), sem ultrapassar 80.
+  // - Gate por bloco: dim so e' preenchida se TODAS as 3 estao vazias na
+  //   variacao (preserva edicao manual coerente).
   useEffect(() => {
     if (!hydrated) return;
     if (optionDetailsMatrix.length !== products.length) return;
@@ -442,19 +446,79 @@ export function CombinedWizard({
         const dims = dimsByProductId.get(product.sourceId);
         if (!dims) return row;
         if (!row.length) return row;
-        const first = row[0];
-        const updates: Partial<VariationOption> = {};
-        const cw = parseFloat(first.weight ?? "");
-        if (dims.weight > 0 && (!Number.isFinite(cw) || cw <= 0)) updates.weight = dims.weight.toFixed(2);
-        const cl = parseFloat(first.length ?? "");
-        if (dims.length > 0 && (!Number.isFinite(cl) || cl <= 0)) updates.length = dims.length.toFixed(1);
-        const cwd = parseFloat(first.width ?? "");
-        if (dims.width  > 0 && (!Number.isFinite(cwd) || cwd <= 0)) updates.width  = dims.width.toFixed(1);
-        const ch = parseFloat(first.height ?? "");
-        if (dims.height > 0 && (!Number.isFinite(ch) || ch <= 0)) updates.height = dims.height.toFixed(1);
-        if (Object.keys(updates).length === 0) return row;
+
+        const baseWeight = dims.weight > 0 ? dims.weight : 0;
+        const baseLength = dims.length > 0 ? dims.length : 0;
+        const baseWidth  = dims.width  > 0 ? dims.width  : 0;
+        const baseHeight = dims.height > 0 ? dims.height : 0;
+
+        let rowChanged = false;
+        const newRow = row.map((opt) => {
+          const qty = extractQty(opt.label) || 1;
+          const updates: Partial<VariationOption> = {};
+
+          // Peso = base * qty (sem limite). So preenche se vazio.
+          const cw = parseFloat(opt.weight ?? "");
+          if (baseWeight > 0 && (!Number.isFinite(cw) || cw <= 0)) {
+            updates.weight = (baseWeight * qty).toFixed(2);
+          }
+
+          // Dim: trata os 3 campos como bloco.
+          if (baseLength > 0 && baseWidth > 0 && baseHeight > 0) {
+            const cl  = parseFloat(opt.length ?? "");
+            const cwd = parseFloat(opt.width  ?? "");
+            const ch  = parseFloat(opt.height ?? "");
+            const allEmpty =
+              (!Number.isFinite(cl)  || cl  <= 0) &&
+              (!Number.isFinite(cwd) || cwd <= 0) &&
+              (!Number.isFinite(ch)  || ch  <= 0);
+            if (allEmpty) {
+              const targetLength = baseLength * qty;
+              let l: number, w: number, h: number;
+              if (targetLength <= 80) {
+                l = targetLength;
+                w = baseWidth;
+                h = baseHeight;
+              } else {
+                l = 80;
+                const extraQty = (baseLength * qty) / 80;
+                if (baseHeight <= baseWidth) {
+                  // cresce altura primeiro
+                  const newH = baseHeight * extraQty;
+                  if (newH <= 80) {
+                    h = newH;
+                    w = baseWidth;
+                  } else {
+                    h = 80;
+                    w = baseWidth * (extraQty * baseHeight / 80);
+                  }
+                } else {
+                  // cresce largura primeiro (espelhada)
+                  const newW = baseWidth * extraQty;
+                  if (newW <= 80) {
+                    w = newW;
+                    h = baseHeight;
+                  } else {
+                    w = 80;
+                    h = baseHeight * (extraQty * baseWidth / 80);
+                  }
+                }
+              }
+              // Cap final defensivo (evita overflow numerico).
+              updates.length = Math.min(l, 80).toFixed(1);
+              updates.width  = Math.min(w, 80).toFixed(1);
+              updates.height = Math.min(h, 80).toFixed(1);
+            }
+          }
+
+          if (Object.keys(updates).length === 0) return opt;
+          rowChanged = true;
+          return { ...opt, ...updates };
+        });
+
+        if (!rowChanged) return row;
         changed = true;
-        return row.map((opt, idx) => idx === 0 ? { ...opt, ...updates } : opt);
+        return newRow;
       });
       return changed ? next : matrix;
     });
@@ -2247,41 +2311,39 @@ export function CombinedWizard({
                               />
                             </td>
 
-                            {/* Preço */}
+                            {/* Preço — value sempre mostra um numero quando ha calc:
+                                vazio cai pro c.price (calculado); digitado vira override.
+                                Apagar o input volta pro calc automaticamente porque
+                                opt.price="" cai no fallback c.price. */}
                             <td className="px-2 py-1.5">
-                              <div className="flex flex-col">
-                                <input
-                                  type="number"
-                                  min="0.01"
-                                  step="0.01"
-                                  placeholder={c.price > 0 ? c.price.toFixed(2) : "0.00"}
-                                  value={opt.price}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => updateDetail(opt.id, "price", e.target.value, productIdx)}
-                                  title={(() => {
-                                    const v = parseFloat(opt.price as any);
-                                    const effPrice = v > 0 ? v : c.price;
-                                    if (__targetMin > 0 && effPrice > 0 && effPrice < __targetMin) {
-                                      return `Preco abaixo do minimo Shopee 4x (R$ ${__targetMin.toFixed(2)})`;
-                                    }
-                                    return "";
-                                  })()}
-                                  className={`w-20 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
-                                    isNeg
-                                      ? "border-red-400"
-                                      : (() => {
-                                          const v = parseFloat(opt.price as any);
-                                          const effPrice = v > 0 ? v : c.price;
-                                          return __targetMin > 0 && effPrice > 0 && effPrice < __targetMin
-                                            ? "border-amber-400 bg-amber-50"
-                                            : "border-gray-200";
-                                        })()
-                                  }`}
-                                />
-                                {!opt.price && hasPricing && (
-                                  <span className="text-[10px] text-gray-400 mt-0.5">calc: R$ {c.price.toFixed(2)}</span>
-                                )}
-                              </div>
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={opt.price || (c.price > 0 ? c.price.toFixed(2) : "")}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateDetail(opt.id, "price", e.target.value, productIdx)}
+                                title={(() => {
+                                  const v = parseFloat(opt.price as any);
+                                  const effPrice = v > 0 ? v : c.price;
+                                  if (__targetMin > 0 && effPrice > 0 && effPrice < __targetMin) {
+                                    return `Preco abaixo do minimo Shopee 4x (R$ ${__targetMin.toFixed(2)})`;
+                                  }
+                                  return "";
+                                })()}
+                                className={`w-20 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
+                                  isNeg
+                                    ? "border-red-400"
+                                    : (() => {
+                                        const v = parseFloat(opt.price as any);
+                                        const effPrice = v > 0 ? v : c.price;
+                                        return __targetMin > 0 && effPrice > 0 && effPrice < __targetMin
+                                          ? "border-amber-400 bg-amber-50"
+                                          : "border-gray-200";
+                                      })()
+                                }`}
+                              />
                             </td>
 
                             {/* Estoque */}
