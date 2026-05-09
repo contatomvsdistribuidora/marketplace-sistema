@@ -171,8 +171,10 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
 
   // 6. Monta payload Shopee SIMULADO
   const categoryId = ws.categoryId ?? principal?.categoryId ?? null;
-  const brand = ws.brandValue?.brandId
-    ? { brand_id: ws.brandValue.brandId, original_brand_name: ws.brandValue.brandName ?? "" }
+  // brandId=0 e' a sentinela Shopee pra "free-text": o nome digitado vai
+  // como original_brand_name. Truthy-check em brandId quebraria esse contrato.
+  const brand = ws.brandValue
+    ? { brand_id: ws.brandValue.brandId ?? 0, original_brand_name: ws.brandValue.brandName ?? "No Brand" }
     : { brand_id: 0, original_brand_name: "No Brand" };
 
   // ===== Variacoes Shopee (CORRETO) =====
@@ -285,7 +287,16 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
   if (!listing.description || listing.description.length < 30) issues.push({ severity: "error", field: "description", message: "Descricao precisa ter ao menos 30 caracteres" });
   if (!listing.thumbUrl) issues.push({ severity: "error", field: "thumbUrl", message: "Thumb (capa) nao definida" });
   if (!categoryId) issues.push({ severity: "error", field: "categoryId", message: "Categoria Shopee nao definida" });
-  if (!ws.brandValue?.brandId) issues.push({ severity: "warning", field: "brand", message: "Marca nao escolhida - sera publicado como 'No Brand'" });
+  // Diferencia "sem marca" de "marca livre" (free-text). Free-text usa brandId=0
+  // mas com brandName != "No Brand", e a Shopee pode rejeitar se nao registrada.
+  const bv = ws.brandValue;
+  const isNoBrand = !bv || (bv.brandId === 0 && (!bv.brandName || bv.brandName === "No Brand"));
+  const isFreeText = !!bv && bv.brandId === 0 && !!bv.brandName && bv.brandName !== "No Brand";
+  if (isNoBrand) {
+    issues.push({ severity: "warning", field: "brand", message: "Sem marca - publicado como 'No Brand'" });
+  } else if (isFreeText) {
+    issues.push({ severity: "warning", field: "brand", message: `Marca livre "${bv!.brandName}" - Shopee pode rejeitar se nao registrada` });
+  }
   if (resolved.length < 2) issues.push({ severity: "warning", field: "items", message: "Anuncio combinado faz mais sentido com 2+ produtos" });
   if (!ws.optionDetailsMatrix || ws.optionDetailsMatrix.length === 0) issues.push({ severity: "error", field: "variations", message: "Matriz de variacoes vazia" });
   if (!listing.videoUrl && !listing.videoBankId) issues.push({ severity: "warning", field: "video", message: "Sem video - anuncios com video tem mais conversao" });

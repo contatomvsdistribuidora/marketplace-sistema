@@ -407,8 +407,10 @@ export async function publishMultiProductListing(
     const finalCategoryId = Number(ws.categoryId ?? principalData.categoryId);
 
     // Marca: prefere a do wizard
-    const finalBrand = ws.brandValue?.brandId
-      ? { brandId: Number(ws.brandValue.brandId), originalBrandName: String(ws.brandValue.brandName ?? "") }
+    // brandId=0 e' a sentinela Shopee pra "free-text": o nome digitado vai
+    // como originalBrandName. Truthy-check em brandId quebraria esse contrato.
+    const finalBrand = ws.brandValue
+      ? { brandId: Number(ws.brandValue.brandId ?? 0), originalBrandName: String(ws.brandValue.brandName ?? "No Brand") }
       : { brandId: 0, originalBrandName: "No Brand" };
 
     // Monta opcoes da variacao (1D concatenado: "Produto | Opcao")
