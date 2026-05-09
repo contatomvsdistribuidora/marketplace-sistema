@@ -46,6 +46,9 @@ type SelectedItem = {
   sku: string;
   price: string;
   imageUrl: string | null;
+  // Galeria opcional — so BL via getProductsCostInfo (que o picker nao chama).
+  // Picker deixa undefined; ProductImage cai pro single imageUrl.
+  imageUrls?: string[];
   manufacturerId: number | null;  // BL only — Shopee products não tem manufacturer no cache
   totalStock: number | null;      // BL: product_cache.totalStock | Shopee: stock
 };
@@ -64,6 +67,33 @@ function StockCell({ value }: { value: number | null }) {
   if (value < 0) return <span className="text-red-600 font-semibold tabular-nums">{value}</span>;
   if (value === 0) return <span className="text-amber-600 font-semibold tabular-nums">0</span>;
   return <span className="text-gray-700 tabular-nums">{value.toLocaleString("pt-BR")}</span>;
+}
+
+/**
+ * Renderiza imagem com cadeia de fallback: tenta urls[0], se onError dispara
+ * avanca pra urls[1], etc. Quando esgota, mostra placeholder Package. Aceita
+ * `single` como fallback final pra quando `urls` esta vazio.
+ */
+function ProductImage({ urls, single, alt }: { urls?: string[]; single: string | null; alt: string }) {
+  const list = (urls && urls.length > 0) ? urls : (single ? [single] : []);
+  const [idx, setIdx] = useState(0);
+  const url = list[idx];
+  if (!url) {
+    return (
+      <div className="h-20 w-20 rounded bg-muted flex items-center justify-center">
+        <Package className="h-8 w-8 text-muted-foreground" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className="h-20 w-20 rounded object-cover border"
+      loading="lazy"
+      onError={() => setIdx((i) => i + 1)}
+    />
+  );
 }
 
 function ProductRow({
@@ -93,27 +123,7 @@ function ProductRow({
         />
       </TableCell>
       <TableCell style={{ width: 96, minWidth: 96 }}>
-        {item.imageUrl ? (
-          <img
-            src={item.imageUrl}
-            alt={item.name}
-            className="h-20 w-20 rounded object-cover border"
-            loading="lazy"
-            onError={(e) => {
-              // Imagem quebrada (CDN expirado, URL invalida): substitui por placeholder
-              // pra nao deixar uma area branca que parece "sumiu a coluna".
-              const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
-              e.currentTarget.style.display = "none";
-              if (fallback) fallback.style.display = "flex";
-            }}
-          />
-        ) : null}
-        <div
-          className="h-20 w-20 rounded bg-muted items-center justify-center"
-          style={{ display: item.imageUrl ? "none" : "flex" }}
-        >
-          <Package className="h-8 w-8 text-muted-foreground" />
-        </div>
+        <ProductImage urls={item.imageUrls} single={item.imageUrl} alt={item.name} />
       </TableCell>
       <TableCell>
         <div className="font-medium text-sm line-clamp-2">{item.name}</div>

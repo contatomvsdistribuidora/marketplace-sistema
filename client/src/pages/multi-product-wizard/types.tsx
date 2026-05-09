@@ -22,6 +22,10 @@ export type ResolvedProduct = {
   sku: string;
   price: string;
   imageUrl: string | null;
+  // Galeria de imagens (so BL via getProductsCostInfo). Se vazio/undefined,
+  // usar imageUrl como fallback. ProductImage component itera o array com
+  // onError pra tentar a proxima quando a anterior quebra.
+  imageUrls?: string[];
   weight: string | null;
   dimensionLength: string | null;
   dimensionWidth: string | null;

@@ -34,6 +34,21 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
     { enabled: blAvailable && hasBl },
   );
 
+  // getProductsCostInfo retorna images[] da API live do BL (cache so guarda 1).
+  // Compartilha cache do React Query com o CombinedWizard que ja chama essa
+  // mesma query — staleTime 5min evita request duplicado.
+  const { data: blCostInfo } = trpc.baselinker.getProductsCostInfo.useQuery(
+    { inventoryId: inventoryId!, productIds: blIds },
+    { enabled: blAvailable && hasBl, staleTime: 5 * 60 * 1000 },
+  );
+  const blImagesByProductId = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const c of (blCostInfo ?? []) as Array<{ productId: number; images: string[] }>) {
+      if (Array.isArray(c.images) && c.images.length > 0) map.set(c.productId, c.images);
+    }
+    return map;
+  }, [blCostInfo]);
+
   const { data: shopeeData, isLoading: shopeeLoading } = trpc.shopee.getProducts.useQuery(
     { accountId: listing.shopeeAccountId, offset: 0, limit: 200, hasVariation: false },
     { enabled: hasShopee },
@@ -47,13 +62,18 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
       for (const p of blData as any[]) {
         const sourceId = Number(p.id);
         if (!sourceId) continue;
+        const live = blImagesByProductId.get(sourceId);
+        const imageUrls = live && live.length > 0
+          ? live
+          : (p.imageUrl ? [p.imageUrl] : []);
         map.set(itemKey("baselinker", sourceId), {
           source: "baselinker",
           sourceId,
           name: p.name ?? "",
           sku: p.sku ?? "",
           price: String(p.mainPrice ?? "0"),
-          imageUrl: p.imageUrl ?? null,
+          imageUrl: imageUrls[0] ?? null,
+          imageUrls,
           weight: p.weight != null ? String(p.weight) : null,
           dimensionLength: null,
           dimensionWidth: null,

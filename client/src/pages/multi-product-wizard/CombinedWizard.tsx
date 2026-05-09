@@ -193,12 +193,16 @@ export function CombinedWizard({
     { inventoryId: blInventoryId!, productIds: blProductIds },
     { enabled: !!blInventoryId && blProductIds.length > 0, staleTime: 5 * 60 * 1000 },
   );
+  // Custo: prefere average_landed_cost (com frete de aquisicao); cai em
+  // average_cost se landed for 0 ou ausente. BL costuma cadastrar so um
+  // dos dois — sem fallback, produtos com so cost ficavam sem hidratar.
   const costByProductId = useMemo(() => {
     const map = new Map<number, number>();
-    for (const c of (costInfo ?? []) as Array<{ productId: number; averageLandedCost: number | null }>) {
-      if (typeof c.averageLandedCost === "number" && c.averageLandedCost > 0) {
-        map.set(c.productId, c.averageLandedCost);
-      }
+    for (const c of (costInfo ?? []) as Array<{ productId: number; averageCost: number | null; averageLandedCost: number | null }>) {
+      const landed = typeof c.averageLandedCost === "number" ? c.averageLandedCost : 0;
+      const avg = typeof c.averageCost === "number" ? c.averageCost : 0;
+      const cost = landed > 0 ? landed : avg;
+      if (cost > 0) map.set(c.productId, cost);
     }
     return map;
   }, [costInfo]);
@@ -213,11 +217,14 @@ export function CombinedWizard({
     }
     return map;
   }, [costInfo]);
-  // IDs de produtos BL que retornaram custo 0 — usado pra mostrar aviso na UI.
+  // IDs de produtos BL sem custo (ambos average_landed_cost E average_cost
+  // sao 0/null). Usado pra mostrar aviso "preencha manualmente".
   const blProductIdsWithoutCost = useMemo(() => {
     const set = new Set<number>();
-    for (const c of (costInfo ?? []) as Array<{ productId: number; averageLandedCost: number | null }>) {
-      if (c.averageLandedCost === 0 || c.averageLandedCost == null) set.add(c.productId);
+    for (const c of (costInfo ?? []) as Array<{ productId: number; averageCost: number | null; averageLandedCost: number | null }>) {
+      const landed = typeof c.averageLandedCost === "number" ? c.averageLandedCost : 0;
+      const avg = typeof c.averageCost === "number" ? c.averageCost : 0;
+      if (landed <= 0 && avg <= 0) set.add(c.productId);
     }
     return set;
   }, [costInfo]);

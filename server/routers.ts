@@ -468,11 +468,16 @@ export const appRouter = router({
             stockTotal = (Object.values(p.stock) as any[])
               .reduce((sum: number, v: any) => sum + (typeof v === "number" ? Math.max(0, v) : 0), 0);
           }
+          // p.images vem como objeto { "key": "url", ... } — ordem preservada via Object.values.
+          const images = (p?.images && typeof p.images === "object")
+            ? (Object.values(p.images) as any[]).filter(v => typeof v === "string" && v.length > 0)
+            : [];
           return {
             productId: Number(id),
             averageCost: typeof p?.average_cost === "number" ? p.average_cost : null,
             averageLandedCost: typeof p?.average_landed_cost === "number" ? p.average_landed_cost : null,
             stockTotal,
+            images,
           };
         });
       }),
