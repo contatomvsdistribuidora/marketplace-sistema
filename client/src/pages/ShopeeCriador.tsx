@@ -1295,6 +1295,7 @@ function VariationWizard({
     defaultDiscount: "1",
     desiredMargin: "30",
     minProfit: "20",
+    blSalePrice: "",
     globalStock: "",
   });
 

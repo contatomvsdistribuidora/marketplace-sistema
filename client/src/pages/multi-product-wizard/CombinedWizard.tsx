@@ -154,6 +154,7 @@ export function CombinedWizard({
     defaultDiscount: "1",
     desiredMargin: "30",
     minProfit: "20",
+    blSalePrice: "",
     globalStock: "",
   });
 
@@ -347,6 +348,12 @@ export function CombinedWizard({
         if (product.source === "baselinker" && (!pp.unitCost || pp.unitCost === "0")) {
           const cost = costByProductId.get(product.sourceId);
           if (cost && cost > 0) updates.unitCost = cost.toFixed(2);
+        }
+        // Preco de venda BL: hidrata do mainPrice (ja em product.price).
+        // So preenche se vazio — edicao manual nao sobrescrita.
+        if (product.source === "baselinker" && (!pp.blSalePrice || pp.blSalePrice === "0")) {
+          const blPrice = parseFloat(product.price);
+          if (Number.isFinite(blPrice) && blPrice > 0) updates.blSalePrice = blPrice.toFixed(2);
         }
         if (!pp.globalStock || pp.globalStock === "0") {
           // Prefere stock somado de todos warehouses (API), cai no cache local se
@@ -592,15 +599,22 @@ export function CombinedWizard({
     } else if (pricingMode === "margin") {
       const desiredMarginPct = parseFloat(paramOverride || p.desiredMargin) || 0;
       price = solvePriceByMargin(totalProductCost, packaging, shipping, txFee, desiredMarginPct);
+    } else if (pricingMode === "blPrice") {
+      // Preço final = blSalePrice × qty. Sem motor de margem; usuario decidiu.
+      // Comissao/taxa Shopee aparecem so no breakdown pra visibilidade.
+      const blSale = parseFloat(paramOverride || p.blSalePrice) || 0;
+      price = blSale * qty;
     } else {
       const minProfit = parseFloat(paramOverride || p.minProfit) || 0;
       price = solvePriceByMinProfit(totalProductCost, packaging, shipping, txFee, minProfit);
     }
 
-    // Aplica margem mínima desejada (piso) sobre o preço base
+    // Aplica margem mínima desejada (piso) sobre o preço base.
+    // Skip pra blPrice — preco e' decisao manual; alerta vermelho de margem
+    // baixa segue funcionando via badge de profitPct calculado no final.
     let minMarginAdjusted = false;
     const minMarginFloor = parseFloat(p.minMarginPct) || 0;
-    if (minMarginFloor > 0 && price > 0 && totalProductCost > 0) {
+    if (pricingMode !== "blPrice" && minMarginFloor > 0 && price > 0 && totalProductCost > 0) {
       const { rate: cr, fixed: cf } = shopeeCommission(price);
       const pc = price * (cr + txFee / 100) + cf + packaging + shipping;
       const curMargin = price > 0 ? ((price - totalProductCost - pc) / price) * 100 : 0;
@@ -610,12 +624,14 @@ export function CombinedWizard({
       }
     }
 
-    // Aplica teto de 4× Shopee se definido (anula desconto progressivo nesse caso)
+    // Override por celula sempre vence; demais modos aplicam factor de
+    // desconto progressivo. blPrice nao aplica desconto — preco eh literal.
     if (priceOverrides[idx] != null) {
       price = priceOverrides[idx]!;
       minMarginAdjusted = false;
+    } else if (pricingMode === "blPrice") {
+      price = Math.max(price, 0.01);
     } else {
-      // Aplica desconto progressivo sobre o preço final
       price = Math.max(price * factor, 0.01);
     }
 
@@ -725,6 +741,8 @@ export function CombinedWizard({
   }
 
   function applyFourTimesRule() {
+    // No modo blPrice o preço é literal (vem do BL × qty); regra 4x não se aplica.
+    if (pricingMode === "blPrice") return;
     const batchCostVal = parseFloat(pricing.batchCost) || 0;
     const batchQty     = Math.max(parseFloat(pricing.baseProductQty) || 1, 0.001);
     const baseUc       = batchCostVal > 0 ? batchCostVal / batchQty : (parseFloat(pricing.unitCost) || 0);
@@ -1334,9 +1352,21 @@ export function CombinedWizard({
   }
 
   // Labels por modo
-  const modeParamLabel = pricingMode === "multiplier" ? "Multiplicador" : pricingMode === "margin" ? "Margem %" : "Lucro mín. R$";
-  const modeGlobalKey  = pricingMode === "multiplier" ? "marginMultiplier" as const : pricingMode === "margin" ? "desiredMargin" as const : "minProfit" as const;
-  const modeGlobalPlaceholder = pricingMode === "multiplier" ? "2.5" : pricingMode === "margin" ? "30" : "20";
+  const modeParamLabel =
+    pricingMode === "multiplier" ? "Multiplicador"
+    : pricingMode === "margin"   ? "Margem %"
+    : pricingMode === "blPrice"  ? "Preço BL (R$)"
+    : "Lucro mín. R$";
+  const modeGlobalKey =
+    pricingMode === "multiplier" ? "marginMultiplier" as const
+    : pricingMode === "margin"   ? "desiredMargin" as const
+    : pricingMode === "blPrice"  ? "blSalePrice" as const
+    : "minProfit" as const;
+  const modeGlobalPlaceholder =
+    pricingMode === "multiplier" ? "2.5"
+    : pricingMode === "margin"   ? "30"
+    : pricingMode === "blPrice"  ? "0.00"
+    : "20";
 
   return (
     <div className="w-full">
@@ -1475,6 +1505,7 @@ export function CombinedWizard({
                   { key: "multiplier" as PricingMode, label: "Multiplicador" },
                   { key: "margin"     as PricingMode, label: "Margem %"      },
                   { key: "profit"     as PricingMode, label: "Lucro R$"      },
+                  { key: "blPrice"    as PricingMode, label: "Preço BL"      },
                 ] as const).map(m => (
                   <button key={m.key} onClick={() => setPricingMode(m.key)}
                     className={`flex-1 py-2 text-sm font-semibold transition-all ${
@@ -1492,20 +1523,24 @@ export function CombinedWizard({
                 {pricingMode === "multiplier" && "Preço = custo × quantidade × multiplicador. Desconto por faixa reduz o multiplicador a cada variação."}
                 {pricingMode === "margin"     && "Preço calculado via iteração para atingir exatamente a margem desejada, considerando a tabela de comissões Shopee 2026."}
                 {pricingMode === "profit"     && "Preço calculado via iteração para garantir o lucro mínimo em R$ por variação, considerando todos os custos da Shopee."}
+                {pricingMode === "blPrice"    && "Preço final = preço de venda do BL × quantidade da variação. Sem motor de margem; comissão/taxa Shopee só aparecem no breakdown. Use o badge de margem como alerta se ficar abaixo do mínimo."}
               </div>
 
               {/* Modo de pricing — global do anuncio (regra comum a todos os produtos) */}
               <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <span className="text-xs font-semibold text-gray-700">Modo:</span>
-                <div className="flex gap-1">
-                  {(["multiplier", "margin", "profit"] as const).map(m => (
+                <div className="flex gap-1 flex-wrap">
+                  {(["multiplier", "margin", "profit", "blPrice"] as const).map(m => (
                     <button key={m} onClick={() => setPricingMode(m)}
                       className={`px-3 py-1.5 text-xs rounded border transition ${
                         pricingMode === m
                           ? "bg-orange-500 text-white border-orange-500"
                           : "bg-white text-gray-600 border-gray-200 hover:border-orange-300"
                       }`}>
-                      {m === "multiplier" ? "× Multiplicador" : m === "margin" ? "% Margem" : "R$ Lucro"}
+                      {m === "multiplier" ? "× Multiplicador"
+                        : m === "margin"  ? "% Margem"
+                        : m === "blPrice" ? "Preço BL"
+                        : "R$ Lucro"}
                     </button>
                   ))}
                 </div>
@@ -1513,6 +1548,7 @@ export function CombinedWizard({
                   {pricingMode === "multiplier" && "Preço = custo × multiplicador. Desconto reduz por faixa."}
                   {pricingMode === "margin"     && "Preço calculado para garantir margem percentual desejada após custos Shopee."}
                   {pricingMode === "profit"     && "Preço calculado para garantir lucro mínimo em R$ por variação."}
+                  {pricingMode === "blPrice"    && "Preço final = preço BL × quantidade. Sem motor de margem."}
                 </span>
               </div>
 
@@ -1719,23 +1755,9 @@ export function CombinedWizard({
                 </div>
               )}
 
-              {/* Botao "Importar mainPrice como Custo": seta unitCost de cada
-                  produto BL com o mainPrice do BL. Wizard segue calculando preco
-                  Shopee aplicando multiplicador/margem por cima desse custo. */}
-              {blProductIds.length > 0 && (
-                <div className="flex items-center justify-between border border-amber-200 bg-amber-50 rounded-xl px-4 py-2.5 mb-3">
-                  <div className="text-xs text-amber-900">
-                    <strong>Importar mainPrice como Custo:</strong> usa o preço de venda do BL como custo base. Multiplicador/margem aplicam normalmente.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={importPricesFromBL}
-                    className="text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium whitespace-nowrap"
-                  >
-                    ⬇ Importar como Custo
-                  </button>
-                </div>
-              )}
+              {/* importPricesFromBL mantido na funcao (linha acima) caso volte
+                  a ser util como atalho manual; banner removido em favor da
+                  hidratacao automatica de Custo e Preco BL. */}
 
               {/* ── CARDS DE CONFIGURACAO PER-PRODUCT (empilhados no topo) ── */}
               {products.map((product, productIdx) => (
@@ -1790,6 +1812,14 @@ export function CombinedWizard({
                           Sem custo cadastrado no BL — preencha manualmente.
                         </p>
                       )}
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5" title="Preço de venda no BaseLinker (mainPrice). Hidratado automatico ao abrir o Step 2. Usado pelo modo 'Preço BL'.">Preço BL (R$)</label>
+                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                        value={pricingPerProduct[productIdx]?.blSalePrice ?? ""}
+                        onChange={e => updateProductPricing(productIdx, "blSalePrice", e.target.value)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
+                        disabled={product.source !== "baselinker"} />
                     </div>
                     <div>
                       <label className="block text-[11px] text-gray-500 mb-0.5" title="Quantidade base do produto. Ex: comprou 10 unidades? Coloque 10. Ou 1 unidade individual? Coloque 1.">Qty base</label>

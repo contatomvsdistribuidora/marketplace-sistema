@@ -22,7 +22,7 @@ export interface VariationGroup {
   options: VariationOption[];
 }
 
-export type PricingMode = "multiplier" | "margin" | "profit";
+export type PricingMode = "multiplier" | "margin" | "profit" | "blPrice";
 
 export interface PricingGlobals {
   unitCost: string;
@@ -36,6 +36,10 @@ export interface PricingGlobals {
   defaultDiscount: string;
   desiredMargin: string;
   minProfit: string;
+  // Preco de venda no BaseLinker (mainPrice). Hidratado automatico ao
+  // abrir Step 2 com produto BL. Usado pelo modo "blPrice": preco final
+  // Shopee = blSalePrice × qty + frete + taxa.
+  blSalePrice: string;
   globalStock: string;
 }
 
