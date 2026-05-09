@@ -142,6 +142,19 @@ export function BrandPicker({ accountId, categoryId, value, onChange }: Props) {
 
       {open && !disabled && (
         <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-80 overflow-y-auto z-50">
+          {!query.trim() && value.brandId === 0 && value.brandName !== "No Brand" && (
+            <div className="w-full text-left px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-start gap-2">
+              <Check className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm text-amber-900">
+                  Marca livre selecionada: <b>{value.brandName}</b>
+                </p>
+                <p className="text-[10px] text-amber-700 mt-0.5">
+                  Digite pra trocar, ou escolha "No Brand" abaixo.
+                </p>
+              </div>
+            </div>
+          )}
           {query.trim() && !isFetching && !results.some((r) => (r.display_brand_name ?? r.original_brand_name).toLowerCase() === query.trim().toLowerCase()) && (
             <button
               onClick={applyFreeText}

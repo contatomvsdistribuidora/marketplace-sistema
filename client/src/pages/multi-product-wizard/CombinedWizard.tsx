@@ -263,6 +263,16 @@ export function CombinedWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wizardStateJson]);
 
+  // Auto-save quando brandValue muda (debounced 500ms). Gate em `hydrated`
+  // pra nao salvar durante a hidratacao inicial — sem isso, abrir um listing
+  // dispararia um save imediato.
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(() => autoSaveWizardState(), 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandValue.brandId, brandValue.brandName, hydrated]);
+
   function autoSaveWizardState() {
     if (!multiListingId) return;
     updateListingMutation
