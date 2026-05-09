@@ -808,11 +808,30 @@ export function CombinedWizard({
     });
   }
 
-  // Copia 10 valores de pricing do produto fonte pra todos os outros.
-  // Substituiu autoGenerateFromFirst no botao "Propagar" — fluxo cross-produto
-  // agora; replicacao within-product (pesos/dim por variacao) ficou sem UI mas
-  // a funcao acima permanece pra uso futuro.
-  function propagatePricingToOthers(sourceIdx: number) {
+  const getNextSkuMutation = trpc.baselinker.getNextSkuNumber.useMutation();
+
+  // Gera SKUs sequenciais pra todos os produtos × variacoes a partir de
+  // startingNumber. Cada produto p ganha um numero base = startingNumber + p.
+  // SKUs vazios ou ja no padrao HIG-VIRT-EML-N-V sao sobrescritos; qualquer
+  // outro formato (edicao manual) e' preservado.
+  function generateSkusForAll(startingNumber: number) {
+    const pattern = /^HIG-VIRT-EML-\d+-\d+$/;
+    setOptionDetailsMatrix(matrix => matrix.map((row, p) => {
+      const baseNumber = startingNumber + p;
+      return row.map((opt, v) => {
+        const cur = opt.sku ?? "";
+        if (cur && !pattern.test(cur)) return opt;
+        return { ...opt, sku: `HIG-VIRT-EML-${baseNumber}-${v + 1}` };
+      });
+    }));
+  }
+
+  // Copia 10 valores de pricing do produto fonte pra todos os outros e gera
+  // SKUs sequenciais HIG-VIRT-EML-NNNNNN-V (numero do servidor pra evitar
+  // colisao com BL/drafts). Substituiu autoGenerateFromFirst no botao
+  // "Propagar"; replicacao within-product ficou sem UI mas a funcao acima
+  // permanece pra uso futuro.
+  async function propagatePricingToOthers(sourceIdx: number) {
     if (products.length < 2) {
       toast.warning("Adicione mais de um produto para propagar.");
       return;
@@ -831,7 +850,13 @@ export function CombinedWizard({
       touched++;
       return { ...pp, ...updates };
     }));
-    toast.success(`Valores copiados pra ${touched} produto(s).`);
+    try {
+      const { nextNumber } = await getNextSkuMutation.mutateAsync();
+      generateSkusForAll(nextNumber);
+      toast.success(`Valores e SKUs copiados pra ${touched} produto(s).`);
+    } catch {
+      toast.success(`Valores copiados pra ${touched} produto(s).`);
+    }
   }
 
   function applyFourTimesRule() {

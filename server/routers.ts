@@ -485,6 +485,31 @@ export const appRouter = router({
           };
         });
       }),
+
+    // Proximo numero sequencial do padrao SKU HIG-VIRT-EML-NNNNNN-V. Olha
+    // produtos sincronizados (product_cache) E itens de listings ja salvos
+    // (multi_product_listing_items.custom_sku) pra evitar colisao. Inicia em
+    // 100000 se nao houver nenhum SKU desse padrao.
+    getNextSkuNumber: protectedProcedure.mutation(async ({ ctx }) => {
+      const result: any = await sharedDb.execute(sql`
+        SELECT GREATEST(
+          COALESCE((
+            SELECT MAX(CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(sku, '-', -2), '-', 1) AS UNSIGNED))
+            FROM product_cache
+            WHERE userId = ${ctx.user.id} AND sku LIKE 'HIG-VIRT-EML-%'
+          ), 0),
+          COALESCE((
+            SELECT MAX(CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(custom_sku, '-', -2), '-', 1) AS UNSIGNED))
+            FROM multi_product_listing_items
+            WHERE custom_sku LIKE 'HIG-VIRT-EML-%'
+          ), 0)
+        ) AS max_num
+      `);
+      const rows = (result as any)[0] ?? [];
+      const maxNum = Number(rows[0]?.max_num ?? 0) || 0;
+      const base = 100000;
+      return { nextNumber: Math.max(maxNum, base - 1) + 1 };
+    }),
   }),
 
   // ============ MARKETPLACES ============
