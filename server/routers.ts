@@ -70,6 +70,10 @@ export function ensureBrandAttribute(list: any[]): any[] {
   return [brandEntry, ...arr];
 }
 
+// Lock pra impedir duplo-disparo do backfill de marcas Shopee. Por-processo
+// (single-instance Railway). Concurrent calls retornam erro 409 imediato.
+let brandsBackfillRunning = false;
+
 export const appRouter = router({
   system: systemRouter,
 
@@ -2190,11 +2194,131 @@ export const appRouter = router({
       }));
     }),
 
-    // Dispara backfill da coluna brand. Por enquanto so retorna ack — o usuario
-    // (admin) roda manualmente: `pnpm exec tsx scripts/backfill-shopee-brands.ts`.
-    // TODO: futuro — enfileirar como background job e expor progresso pelo UI.
+    // Estatisticas da coluna brand pra UI de Settings.
+    // comMarca: brand_id > 0 (marca real cadastrada).
+    // semMarca: NULL (nao sincronizado ainda) OU brand_id <= 0 (sentinela "No Brand").
+    getBrandStats: protectedProcedure.query(async () => {
+      const rows: any = await sharedDb.execute(sql`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE
+            WHEN brand IS NOT NULL
+             AND CAST(JSON_EXTRACT(brand, '$.brand_id') AS UNSIGNED) > 0
+            THEN 1 ELSE 0
+          END) AS comMarca,
+          SUM(CASE
+            WHEN brand IS NULL
+              OR CAST(JSON_EXTRACT(brand, '$.brand_id') AS UNSIGNED) = 0
+            THEN 1 ELSE 0
+          END) AS semMarca
+        FROM shopee_products
+      `);
+      const r = ((rows as any)[0] ?? [])[0] ?? {};
+      return {
+        total:    Number(r.total)    || 0,
+        comMarca: Number(r.comMarca) || 0,
+        semMarca: Number(r.semMarca) || 0,
+      };
+    }),
+
+    // Roda backfill da coluna brand inline (filtra brand IS NULL — idempotente).
+    // Mutation longa: ~3-5min pra 3.4k produtos. Lock per-processo evita
+    // concorrencia. Pra muitos itens, considere mover pra background job.
     runBrandsBackfill: protectedProcedure.mutation(async () => {
-      return { dispatched: true as const };
+      if (brandsBackfillRunning) {
+        throw new TRPCError({ code: "CONFLICT", message: "Sincronizacao ja em andamento. Aguarde finalizar." });
+      }
+      brandsBackfillRunning = true;
+      const startedAt = Date.now();
+      const BATCH_SIZE = 50;
+      const SLEEP_MS = 500;
+      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+      try {
+        const rowsRaw: any = await sharedDb.execute(sql`
+          SELECT itemId, shopeeAccountId
+          FROM shopee_products
+          WHERE brand IS NULL
+          ORDER BY shopeeAccountId, itemId
+        `);
+        const candidates: Array<{ itemId: number; shopeeAccountId: number }> =
+          ((rowsRaw as any)[0] ?? [])
+            .map((r: any) => ({ itemId: Number(r.itemId), shopeeAccountId: Number(r.shopeeAccountId) }))
+            .filter((r: any) => Number.isFinite(r.itemId) && r.itemId > 0);
+
+        if (candidates.length === 0) {
+          return {
+            totalProcessed: 0, updated: 0, noBrand: 0, failed: 0,
+            durationMs: Date.now() - startedAt,
+          };
+        }
+
+        const byAccount = new Map<number, number[]>();
+        for (const r of candidates) {
+          let arr = byAccount.get(r.shopeeAccountId);
+          if (!arr) { arr = []; byAccount.set(r.shopeeAccountId, arr); }
+          arr.push(r.itemId);
+        }
+
+        let updated = 0;
+        let noBrand = 0;
+        let failed = 0;
+
+        for (const [accountId, itemIds] of Array.from(byAccount.entries())) {
+          let accessToken: string;
+          let shopId: number;
+          try {
+            const tok = await shopee.getValidToken(accountId);
+            accessToken = tok.accessToken;
+            shopId = tok.shopId;
+          } catch {
+            failed += itemIds.length;
+            continue;
+          }
+
+          for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+            const slice = itemIds.slice(i, i + BATCH_SIZE);
+            let items: any[] = [];
+            try {
+              items = await shopee.getItemBaseInfo(accessToken, shopId, slice);
+            } catch {
+              failed += slice.length;
+              await sleep(SLEEP_MS);
+              continue;
+            }
+
+            for (const it of items) {
+              const itemId = Number(it.item_id);
+              if (!Number.isFinite(itemId) || itemId <= 0) continue;
+              const b = it.brand;
+              const hasBrand = b && typeof b.brand_id === "number" && b.brand_id > 0;
+              const brandJson = hasBrand
+                ? { brand_id: b.brand_id, original_brand_name: String(b.original_brand_name ?? "") }
+                : { brand_id: 0, original_brand_name: "No Brand" };
+              await sharedDb.execute(sql`
+                UPDATE shopee_products
+                SET brand = ${JSON.stringify(brandJson)}, updatedAt = NOW()
+                WHERE itemId = ${itemId} AND shopeeAccountId = ${accountId}
+              `);
+              if (hasBrand) updated++; else noBrand++;
+            }
+
+            // Items que nao retornaram da API — contabiliza como falha.
+            const missing = slice.length - items.length;
+            if (missing > 0) failed += missing;
+
+            await sleep(SLEEP_MS);
+          }
+        }
+
+        return {
+          totalProcessed: updated + noBrand + failed,
+          updated, noBrand, failed,
+          durationMs: Date.now() - startedAt,
+        };
+      } finally {
+        brandsBackfillRunning = false;
+      }
     }),
 
     /**

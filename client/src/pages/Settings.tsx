@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, XCircle, Key, Database, Loader2, Trash2, Sparkles, Zap, CheckCheck, Truck } from "lucide-react";
+import { CheckCircle, XCircle, Key, Database, Loader2, Trash2, Sparkles, Zap, CheckCheck, Truck, Tag, RefreshCw } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
@@ -102,6 +102,22 @@ export default function SettingsPage() {
     if (trimmed === shippingData?.value) return;
     setShippingMutation.mutate({ value: trimmed });
   };
+
+  // ── Marca Shopee ──
+  const { data: brandStats } = trpc.shopee.getBrandStats.useQuery(undefined, {
+    staleTime: 60 * 1000,
+  });
+  const runBrandsBackfillMutation = trpc.shopee.runBrandsBackfill.useMutation({
+    onSuccess: (data) => {
+      toast.success(
+        `Sincronização concluída em ${(data.durationMs / 1000).toFixed(0)}s — ` +
+        `Atualizados: ${data.updated} / Sem marca: ${data.noBrand} / Falhas: ${data.failed}`
+      );
+      utils.shopee.getBrandStats.invalidate();
+      utils.shopee.getCachedShopeeBrands.invalidate();
+    },
+    onError: (err) => toast.error(err.message || "Erro ao sincronizar marcas"),
+  });
 
   const handleSaveToken = async () => {
     if (!token.trim()) {
@@ -311,6 +327,46 @@ export default function SettingsPage() {
             <p className="text-xs text-muted-foreground">
               Salva automaticamente ao sair do campo. Drafts existentes preservam seus valores.
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Tag className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle>Marca Shopee</CardTitle>
+              <CardDescription>
+                Sincroniza a marca de produtos Shopee da API. Demora ~3-5 minutos para ~3.400 produtos. Idempotente — re-runs só processam produtos novos.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            <Button
+              onClick={() => runBrandsBackfillMutation.mutate()}
+              disabled={runBrandsBackfillMutation.isPending}
+              className="bg-orange-500 hover:bg-orange-600 text-white"
+            >
+              {runBrandsBackfillMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sincronizando... (não feche a aba)</>
+              ) : (
+                <><RefreshCw className="h-4 w-4 mr-2" />Sincronizar marcas</>
+              )}
+            </Button>
+            {brandStats && (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{brandStats.comMarca.toLocaleString("pt-BR")}</span> com marca
+                {" / "}
+                <span className="font-medium text-foreground">{brandStats.semMarca.toLocaleString("pt-BR")}</span> sem marca
+                {" "}
+                ({brandStats.total.toLocaleString("pt-BR")} total)
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
