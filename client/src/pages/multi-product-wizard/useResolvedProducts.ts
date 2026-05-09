@@ -5,11 +5,11 @@ import { itemKey, type Listing, type ListingItem, type ResolvedProduct } from ".
 /**
  * Resolves human-readable product details (name, sku, price, image) for a list
  * of multi_product_listing_items. Items only carry { source, sourceId } so we
- * batch-fetch from the BaseLinker cache (productCache) and Shopee products to
- * build a Map<key, ResolvedProduct> for O(1) lookup.
+ * batch-fetch by exact IDs and build a Map<key, ResolvedProduct> for O(1) lookup.
  *
- * Limit 200 covers up to MAX_SELECTION=50 with margin. If more is needed, swap
- * for a dedicated "products by ids" endpoint.
+ * Usa getProductsByIds (BL) ao inves de filterProducts({pageSize:200}): o
+ * endpoint dedicado busca apenas os IDs necessarios, sem teto de 200 nem
+ * dependencia de quais produtos estao nas primeiras paginas do inventario.
  */
 export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
   const { data: tokenData } = trpc.settings.getToken.useQuery();
@@ -17,11 +17,20 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
   const inventoryId = inventoryData?.inventoryId;
   const blAvailable = !!tokenData?.hasToken && !!inventoryId;
 
-  const hasBl = items.some((it) => it.source === "baselinker");
+  // IDs especificos pra batch — evita dependencia da paginacao do inventario.
+  // Memoizado pra que useQuery nao refaz fetch a cada render.
+  const blIds = useMemo(
+    () => items
+      .filter((it) => it.source === "baselinker")
+      .map((it) => Number(it.sourceId))
+      .filter((n) => Number.isFinite(n) && n > 0),
+    [items],
+  );
+  const hasBl = blIds.length > 0;
   const hasShopee = items.some((it) => it.source === "shopee");
 
-  const { data: blData, isLoading: blLoading } = trpc.baselinker.filterProducts.useQuery(
-    { inventoryId: inventoryId!, filters: {}, page: 1, pageSize: 200 },
+  const { data: blData, isLoading: blLoading } = trpc.baselinker.getProductsByIds.useQuery(
+    { inventoryId: inventoryId!, productIds: blIds },
     { enabled: blAvailable && hasBl },
   );
 
@@ -32,9 +41,11 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
 
   const productMap = useMemo(() => {
     const map = new Map<string, ResolvedProduct>();
-    if (blData?.products) {
-      for (const p of blData.products as any[]) {
-        const sourceId = Number(p.productId);
+    // getProductsByIdsFromCache mapeia productCache.productId -> chave `id`.
+    // Procurar `productId` aqui retornaria undefined e pularia tudo.
+    if (Array.isArray(blData)) {
+      for (const p of blData as any[]) {
+        const sourceId = Number(p.id);
         if (!sourceId) continue;
         map.set(itemKey("baselinker", sourceId), {
           source: "baselinker",
