@@ -25,6 +25,12 @@ type ComputedCell = {
   optionLabel: string;
   pricing: ComputedPricing;
 };
+
+// Limites Shopee descobertos via getLogisticsChannels (todos os canais ativos
+// reportam o mesmo cap). Se um item exceder, a Shopee rejeita o publish.
+const SHOPEE_MAX_WEIGHT_KG = 30;
+const SHOPEE_MAX_DIMENSION_CM = 120;
+const SHOPEE_MAX_DIMENSION_SUM_CM = 200;
 import {
   uid, emptyOption, isValidEan, suggestNewName, truncateVariationName,
 } from "../shopee-criador/helpers";
@@ -839,6 +845,82 @@ export function CombinedWizard({
     }
     return out;
   }, [optionDetailsMatrix, products, pricing, pricingPerProduct, pricingMode, perRowBaseQty, qtyFactors, perVarParam, perVarEnabled, priceOverrides, selectedType]);
+
+  // Validacao de limites Shopee: peso, dim individual, soma das 3 dim. Roda
+  // sobre TODAS as variacoes (Shopee rejeitaria no publish; bloqueamos antes).
+  // errorsByField permite tooltip+border especifica por campo no input.
+  type LimitError = {
+    productIdx: number;
+    optIdx: number;
+    productName: string;
+    variationLabel: string;
+    errors: string[];
+    errorsByField: Partial<Record<"weight" | "length" | "width" | "height", string>>;
+  };
+  const shopeeLimitErrors: LimitError[] = useMemo(() => {
+    const out: LimitError[] = [];
+    for (let p = 0; p < optionDetailsMatrix.length; p++) {
+      const row = optionDetailsMatrix[p];
+      const product = products[p];
+      if (!Array.isArray(row) || !product) continue;
+      for (let i = 0; i < row.length; i++) {
+        const opt = row[i];
+        const errors: string[] = [];
+        const errorsByField: LimitError["errorsByField"] = {};
+        const w  = parseFloat(opt.weight ?? "");
+        const l  = parseFloat(opt.length ?? "");
+        const wd = parseFloat(opt.width  ?? "");
+        const h  = parseFloat(opt.height ?? "");
+        if (Number.isFinite(w) && w > SHOPEE_MAX_WEIGHT_KG) {
+          const msg = `Peso ${w.toFixed(2)}kg excede limite Shopee de ${SHOPEE_MAX_WEIGHT_KG}kg`;
+          errors.push(msg); errorsByField.weight = msg;
+        }
+        if (Number.isFinite(l) && l > SHOPEE_MAX_DIMENSION_CM) {
+          const msg = `Comprimento ${l.toFixed(0)}cm excede limite Shopee de ${SHOPEE_MAX_DIMENSION_CM}cm`;
+          errors.push(msg); errorsByField.length = msg;
+        }
+        if (Number.isFinite(wd) && wd > SHOPEE_MAX_DIMENSION_CM) {
+          const msg = `Largura ${wd.toFixed(0)}cm excede limite Shopee de ${SHOPEE_MAX_DIMENSION_CM}cm`;
+          errors.push(msg); errorsByField.width = msg;
+        }
+        if (Number.isFinite(h) && h > SHOPEE_MAX_DIMENSION_CM) {
+          const msg = `Altura ${h.toFixed(0)}cm excede limite Shopee de ${SHOPEE_MAX_DIMENSION_CM}cm`;
+          errors.push(msg); errorsByField.height = msg;
+        }
+        const safeL  = Number.isFinite(l)  && l  > 0 ? l  : 0;
+        const safeW  = Number.isFinite(wd) && wd > 0 ? wd : 0;
+        const safeH  = Number.isFinite(h)  && h  > 0 ? h  : 0;
+        const sum    = safeL + safeW + safeH;
+        if (sum > SHOPEE_MAX_DIMENSION_SUM_CM) {
+          const msg = `Soma das dimensões ${sum.toFixed(0)}cm excede limite Shopee de ${SHOPEE_MAX_DIMENSION_SUM_CM}cm`;
+          errors.push(msg);
+          // Soma estourada — todos os 3 campos contribuem; marca os 3 se ainda nao tiverem msg.
+          errorsByField.length = errorsByField.length ?? msg;
+          errorsByField.width  = errorsByField.width  ?? msg;
+          errorsByField.height = errorsByField.height ?? msg;
+        }
+        if (errors.length > 0) {
+          out.push({
+            productIdx: p,
+            optIdx: i,
+            productName: productNameOverrides[p] ?? product.name ?? `Produto ${p + 1}`,
+            variationLabel: opt.label || `Var ${i + 1}`,
+            errors,
+            errorsByField,
+          });
+        }
+      }
+    }
+    return out;
+  }, [optionDetailsMatrix, products, productNameOverrides]);
+
+  // Lookup O(1) no render da tabela.
+  const limitErrorByCell = useMemo(() => {
+    const m = new Map<string, LimitError>();
+    for (const e of shopeeLimitErrors) m.set(`${e.productIdx}-${e.optIdx}`, e);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shopeeLimitErrors]);
 
   function profitBadge(pct: number) {
     if (pct >= 20) return { bg: "bg-green-100 text-green-700 border-green-300",    dot: "bg-green-500"  };
@@ -2177,6 +2259,25 @@ export function CombinedWizard({
                 );
               })()}
 
+              {/* ── Erros de limite Shopee (peso > 30kg / dim > 120cm / soma > 200cm) ── */}
+              {shopeeLimitErrors.length > 0 && (
+                <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                  <div className="flex items-center gap-2 mb-2 text-amber-800 font-semibold text-sm">
+                    <AlertTriangle className="w-4 h-4" />
+                    {shopeeLimitErrors.length} variação(ões) excedem limite Shopee — corrija antes de publicar (a Shopee vai rejeitar)
+                  </div>
+                  <ul className="space-y-1 text-xs text-amber-900 max-h-40 overflow-y-auto">
+                    {shopeeLimitErrors.flatMap(e =>
+                      e.errors.map((msg, i) => (
+                        <li key={`${e.productIdx}-${e.optIdx}-${i}`}>
+                          <span className="font-medium">{e.productName} / {e.variationLabel}:</span> {msg}
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+              )}
+
               {/* ── TABELA UNICA com TODAS as combinacoes (Produto x Opcao) ── */}
               <div className="overflow-x-auto border border-gray-200 rounded-xl bg-white">
                 <table className="w-full text-xs">
@@ -2212,6 +2313,7 @@ export function CombinedWizard({
                         const groupBorder = isFirstInGroup && productIdx > 0 ? "border-t-2 border-t-gray-300" : "";
 
                         const isSelected = selectedCell?.productIdx === productIdx && selectedCell?.optIdx === idx;
+                        const cellLimitError = limitErrorByCell.get(`${productIdx}-${idx}`);
                         return (
                           <tr
                             key={opt.id}
@@ -2221,6 +2323,8 @@ export function CombinedWizard({
                                 ? "bg-orange-50 ring-2 ring-orange-300"
                                 : isNeg
                                 ? "bg-red-50"
+                                : cellLimitError
+                                ? "bg-amber-50 hover:bg-amber-100/60"
                                 : "hover:bg-gray-50/50"
                             } ${groupBorder}`}
                           >
@@ -2274,29 +2378,35 @@ export function CombinedWizard({
                               { field: "length" as const, ph: c.length > 0 ? String(Math.round(c.length)) : "20", integer: true },
                               { field: "width"  as const, ph: c.width  > 0 ? String(Math.round(c.width))  : "15", integer: true },
                               { field: "height" as const, ph: c.height > 0 ? String(Math.round(c.height)) : "10", integer: true },
-                            ]).map(({ field, ph, integer }) => (
-                              <td key={field} className="px-1.5 py-1.5">
-                                <input
-                                  type="number"
-                                  min={integer ? "1" : "0"}
-                                  step={integer ? "1" : "0.01"}
-                                  placeholder={ph}
-                                  value={(opt as any)[field]}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onKeyDown={integer ? (e) => { if (e.key === "." || e.key === ",") e.preventDefault(); } : undefined}
-                                  onChange={e => {
-                                    let v = e.target.value;
-                                    if (integer && v !== "") v = String(Math.floor(Number(v) || 0));
-                                    updateDetail(opt.id, field, v, productIdx);
-                                    if (idx > 0) {
-                                      setManuallyEdited(s => new Set(s).add(opt.id));
-                                      setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
-                                    }
-                                  }}
-                                  className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
-                                />
-                              </td>
-                            ))}
+                            ]).map(({ field, ph, integer }) => {
+                              const fieldError = cellLimitError?.errorsByField[field];
+                              return (
+                                <td key={field} className="px-1.5 py-1.5">
+                                  <input
+                                    type="number"
+                                    min={integer ? "1" : "0"}
+                                    step={integer ? "1" : "0.01"}
+                                    placeholder={ph}
+                                    value={(opt as any)[field]}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onKeyDown={integer ? (e) => { if (e.key === "." || e.key === ",") e.preventDefault(); } : undefined}
+                                    onChange={e => {
+                                      let v = e.target.value;
+                                      if (integer && v !== "") v = String(Math.floor(Number(v) || 0));
+                                      updateDetail(opt.id, field, v, productIdx);
+                                      if (idx > 0) {
+                                        setManuallyEdited(s => new Set(s).add(opt.id));
+                                        setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
+                                      }
+                                    }}
+                                    title={fieldError ?? ""}
+                                    className={`w-16 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
+                                      fieldError ? "border-amber-500 bg-amber-50" : "border-gray-200"
+                                    }`}
+                                  />
+                                </td>
+                              );
+                            })}
 
                             {/* SKU */}
                             <td className="px-2 py-1.5">
@@ -2671,8 +2781,17 @@ export function CombinedWizard({
                   <AlertTriangle className="w-3 h-3" /> Verificar 4×
                 </button>
               )}
-              <button onClick={() => { applyFourTimesRule(); autoSaveWizardState(); setStep("D"); }} disabled={hasNegativeMargin}
-                className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
+              {shopeeLimitErrors.length > 0 && (
+                <span className="text-xs text-amber-700 font-medium flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" /> {shopeeLimitErrors.length} limite(s) Shopee
+                </span>
+              )}
+              <button
+                onClick={() => { applyFourTimesRule(); autoSaveWizardState(); setStep("D"); }}
+                disabled={hasNegativeMargin || shopeeLimitErrors.length > 0}
+                title={shopeeLimitErrors.length > 0 ? `Corrija ${shopeeLimitErrors.length} erro(s) de limite Shopee antes de avançar` : ""}
+                className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition"
+              >
                 Revisar <ArrowRight className="w-4 h-4" />
               </button>
             </div>
