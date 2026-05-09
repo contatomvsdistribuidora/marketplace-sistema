@@ -21,6 +21,7 @@ import * as shopeePublish from "./shopee-publish";
 import * as shopeeOptimizer from "./shopee-optimizer";
 import * as multiProductAi from "./multi-product-ai";
 import * as multiProductPublish from "./multi-product-publish";
+import { fetchContentDiagnosis } from "./shopee/content-diagnosis";
 import * as multiProductPublishPreview from "./multi-product-publish-preview";
 import { storagePut } from "./storage";
 import * as videoStorage from "./storage-video";
@@ -4235,6 +4236,32 @@ export const appRouter = router({
             message: e?.message ?? "Falha ao gerar preview",
           });
         }
+      }),
+
+    refreshDiagnosis: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "Listing não encontrado" });
+        if (!listing.shopeeItemId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Listing ainda não foi publicado" });
+        }
+        const { accessToken, shopId } = await shopee.getValidToken(listing.shopeeAccountId);
+        const [diag] = await fetchContentDiagnosis(accessToken, Number(shopId), [Number(listing.shopeeItemId)]);
+        const qualityLevel = diag?.qualityLevel ?? null;
+        const unfinishedTasks = diag?.unfinishedTasks ?? null;
+        await sharedDb
+          .update(multiProductListings)
+          .set({ qualityLevel, unfinishedTasks })
+          .where(eq(multiProductListings.id, input.id));
+        return { qualityLevel, unfinishedTasks };
       }),
   }),
 

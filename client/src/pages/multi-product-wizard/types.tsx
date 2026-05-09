@@ -56,6 +56,8 @@ export type Listing = {
   videoUrl: string | null;
   videoBankId: number | null;
   lastError: string | null;
+  qualityLevel: number | null;
+  unfinishedTasks: Array<{ issue_type: number; suggestion: string }> | null;
   wizardStateJson?: string | null;
 };
 

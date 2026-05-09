@@ -648,6 +648,8 @@ export const multiProductListings = mysqlTable("multi_product_listings", {
   wizardStateJson: text("wizard_state_json"),
   lastError: text("last_error"),
   publishedAt: timestamp("published_at"),
+  qualityLevel: int("quality_level"),
+  unfinishedTasks: json("unfinished_tasks"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });

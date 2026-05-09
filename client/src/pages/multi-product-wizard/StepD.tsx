@@ -15,6 +15,7 @@ import {
   type Listing, type ListingItem, type WizardStep,
 } from "./types";
 import { useResolvedProducts } from "./useResolvedProducts";
+import { ContentDiagnosis } from "@/components/shopee/ContentDiagnosis";
 
 export function StepD({
   listing,
@@ -53,6 +54,14 @@ export function StepD({
   );
 
   const autoFixMutation = trpc.multiProduct.autoFixPricesMultiProduct.useMutation();
+
+  const refreshDiagnosisMutation = trpc.multiProduct.refreshDiagnosis.useMutation({
+    onSuccess: () => {
+      onChange();
+      toast.success("Diagnóstico atualizado");
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const isPrincipalShopee = listing.mainProductSource === "shopee";
 
@@ -304,6 +313,15 @@ export function StepD({
             >
               Ver anúncio na Shopee →
             </a>
+          )}
+
+          {listing.status === "published" && (
+            <ContentDiagnosis
+              qualityLevel={listing.qualityLevel}
+              unfinishedTasks={listing.unfinishedTasks}
+              onRefresh={() => refreshDiagnosisMutation.mutate({ id: listing.id })}
+              refreshing={refreshDiagnosisMutation.isPending}
+            />
           )}
 
           {listing.status === "published" && (

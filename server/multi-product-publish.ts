@@ -22,6 +22,7 @@ import {
 import * as shopeePublish from "./shopee-publish";
 import * as shopeeVideo from "./shopee-video";
 import { getValidToken } from "./shopee";
+import { fetchContentDiagnosis } from "./shopee/content-diagnosis";
 
 export class PublishMultiProductError extends Error {
   constructor(public code: string, message: string) {
@@ -663,6 +664,20 @@ export async function publishMultiProductListing(
 
     // ============ 12. Sucesso
     onProgress?.("Finalizando");
+
+    let qualityLevel: number | null = null;
+    let unfinishedTasks: unknown = null;
+    try {
+      onProgress?.("Diagnosticando qualidade");
+      const [diag] = await fetchContentDiagnosis(accessToken, shopId, [shopeeItemId]);
+      if (diag) {
+        qualityLevel = diag.qualityLevel;
+        unfinishedTasks = diag.unfinishedTasks;
+      }
+    } catch (e: any) {
+      console.warn(`[multi-publish] diagnose falhou (item ${shopeeItemId}): ${e?.message}`);
+    }
+
     await sharedDb
       .update(multiProductListings)
       .set({
@@ -670,6 +685,8 @@ export async function publishMultiProductListing(
         shopeeItemId,
         publishedAt: new Date(),
         lastError: null,
+        qualityLevel,
+        unfinishedTasks,
       })
       .where(eq(multiProductListings.id, listingId));
 
