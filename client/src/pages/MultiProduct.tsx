@@ -448,7 +448,10 @@ export default function MultiProductPage() {
 
     if (sourceFilter !== "shopee" && blData?.products) {
       for (const p of (blData.products as any[])) {
-        const sourceId = Number(p.productId);
+        // filterProductsFromCache mapeia productCache.productId -> chave `id`.
+        // Procurar `productId` aqui retornava undefined -> NaN -> todos pulados,
+        // tabela ficava vazia mesmo com 25 produtos chegando.
+        const sourceId = Number(p.id);
         if (!sourceId) continue;
         const mid = Number(p.manufacturerId);
         out.push({
