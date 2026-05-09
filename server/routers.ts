@@ -478,6 +478,10 @@ export const appRouter = router({
             averageLandedCost: typeof p?.average_landed_cost === "number" ? p.average_landed_cost : null,
             stockTotal,
             images,
+            weight: typeof p?.weight === "number" ? p.weight : null,
+            length: typeof p?.length === "number" ? p.length : null,
+            width: typeof p?.width === "number" ? p.width : null,
+            height: typeof p?.height === "number" ? p.height : null,
           };
         });
       }),

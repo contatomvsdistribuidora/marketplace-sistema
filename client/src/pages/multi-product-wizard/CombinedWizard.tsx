@@ -236,6 +236,21 @@ export function CombinedWizard({
     }
     return set;
   }, [costInfo]);
+  // Peso (kg) e dimensoes (cm) do BL — usados pra hidratar a 1a variacao do
+  // optionDetailsMatrix. Nao tem fallback: se o produto nao tiver no BL,
+  // o usuario preenche manualmente.
+  const dimsByProductId = useMemo(() => {
+    const map = new Map<number, { weight: number; length: number; width: number; height: number }>();
+    for (const c of (costInfo ?? []) as Array<{ productId: number; weight: number | null; length: number | null; width: number | null; height: number | null }>) {
+      map.set(c.productId, {
+        weight: typeof c.weight === "number" ? c.weight : 0,
+        length: typeof c.length === "number" ? c.length : 0,
+        width:  typeof c.width  === "number" ? c.width  : 0,
+        height: typeof c.height === "number" ? c.height : 0,
+      });
+    }
+    return map;
+  }, [costInfo]);
 
   // ── Importar mainPrice como Custo ─────────────────────────────────────────
   // Seta pricingPerProduct[i].unitCost = mainPrice do BL pra cada produto BL.
@@ -395,6 +410,38 @@ export function CombinedWizard({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, products, costByProductId, stockByProductId]);
+
+  // Hidratacao automatica de peso/dimensoes do BL na 1a variacao de cada
+  // produto. Gate numerico (parseFloat <= 0) — nao sobrescreve edicao manual.
+  useEffect(() => {
+    if (!hydrated) return;
+    if (optionDetailsMatrix.length !== products.length) return;
+    setOptionDetailsMatrix(matrix => {
+      let changed = false;
+      const next = matrix.map((row, productIdx) => {
+        const product = products[productIdx];
+        if (!product || product.source !== "baselinker") return row;
+        const dims = dimsByProductId.get(product.sourceId);
+        if (!dims) return row;
+        if (!row.length) return row;
+        const first = row[0];
+        const updates: Partial<VariationOption> = {};
+        const cw = parseFloat(first.weight ?? "");
+        if (dims.weight > 0 && (!Number.isFinite(cw) || cw <= 0)) updates.weight = dims.weight.toFixed(2);
+        const cl = parseFloat(first.length ?? "");
+        if (dims.length > 0 && (!Number.isFinite(cl) || cl <= 0)) updates.length = dims.length.toFixed(1);
+        const cwd = parseFloat(first.width ?? "");
+        if (dims.width  > 0 && (!Number.isFinite(cwd) || cwd <= 0)) updates.width  = dims.width.toFixed(1);
+        const ch = parseFloat(first.height ?? "");
+        if (dims.height > 0 && (!Number.isFinite(ch) || ch <= 0)) updates.height = dims.height.toFixed(1);
+        if (Object.keys(updates).length === 0) return row;
+        changed = true;
+        return row.map((opt, idx) => idx === 0 ? { ...opt, ...updates } : opt);
+      });
+      return changed ? next : matrix;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, products, dimsByProductId]);
 
   // Auto-save quando brandValue muda (debounced 500ms). Gate em `hydrated`
   // pra nao salvar durante a hidratacao inicial — sem isso, abrir um listing
@@ -759,6 +806,32 @@ export function CombinedWizard({
       newAutoGen.forEach(id => merged.add(id));
       return merged;
     });
+  }
+
+  // Copia 10 valores de pricing do produto fonte pra todos os outros.
+  // Substituiu autoGenerateFromFirst no botao "Propagar" — fluxo cross-produto
+  // agora; replicacao within-product (pesos/dim por variacao) ficou sem UI mas
+  // a funcao acima permanece pra uso futuro.
+  function propagatePricingToOthers(sourceIdx: number) {
+    if (products.length < 2) {
+      toast.warning("Adicione mais de um produto para propagar.");
+      return;
+    }
+    const src = pricingPerProduct[sourceIdx];
+    if (!src) return;
+    const fields: (keyof PricingGlobals)[] = [
+      "unitCost", "blSalePrice", "baseProductQty", "packagingCost", "shippingCost",
+      "transactionFee", "marginMultiplier", "defaultDiscount", "minMarginPct", "globalStock",
+    ];
+    let touched = 0;
+    setPricingPerProduct(prev => prev.map((pp, idx) => {
+      if (idx === sourceIdx) return pp;
+      const updates: Partial<PricingGlobals> = {};
+      for (const f of fields) updates[f] = src[f] ?? "";
+      touched++;
+      return { ...pp, ...updates };
+    }));
+    toast.success(`Valores copiados pra ${touched} produto(s).`);
   }
 
   function applyFourTimesRule() {
@@ -1810,10 +1883,10 @@ export function CombinedWizard({
                           />
                         </div>
                       )}
-                      {(optionDetailsMatrix[productIdx]?.length ?? 0) > 1 && (
-                        <button onClick={() => autoGenerateFromFirst(productIdx)}
+                      {products.length > 1 && (
+                        <button onClick={() => propagatePricingToOthers(productIdx)}
                           className="text-[11px] text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
-                          title="Replica peso/dim da 1a opcao pras demais deste produto">
+                          title="Copia custo, preco, multiplicador e outros valores deste produto pra todos os demais">
                           ⚡ Propagar
                         </button>
                       )}
