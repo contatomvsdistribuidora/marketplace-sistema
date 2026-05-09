@@ -446,6 +446,26 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         return baselinker.listCachedManufacturers(ctx.user.id, input.inventoryId);
       }),
+
+    // Cost info por produto via API BL (getInventoryProductsData). NÃO esta
+    // no cache local porque average_landed_cost so vem com chamada on-demand.
+    // Usado pelo wizard pra hidratar Custo (R$) na Etapa 2.
+    getProductsCostInfo: protectedProcedure
+      .input(z.object({
+        inventoryId: z.number(),
+        productIds: z.array(z.number()),
+      }))
+      .query(async ({ ctx, input }) => {
+        if (input.productIds.length === 0) return [];
+        const token = await db.getSetting(ctx.user.id, "baselinker_token");
+        if (!token) throw new Error("Token do BaseLinker não configurado");
+        const data = await baselinker.getInventoryProductsData(token, input.inventoryId, input.productIds);
+        return Object.entries(data ?? {}).map(([id, p]: [string, any]) => ({
+          productId: Number(id),
+          averageCost: typeof p?.average_cost === "number" ? p.average_cost : null,
+          averageLandedCost: typeof p?.average_landed_cost === "number" ? p.average_landed_cost : null,
+        }));
+      }),
   }),
 
   // ============ MARKETPLACES ============

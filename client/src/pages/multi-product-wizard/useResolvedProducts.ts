@@ -59,6 +59,7 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
           dimensionWidth: null,
           dimensionHeight: null,
           categoryId: null,
+          totalStock: typeof p.totalStock === "number" ? p.totalStock : null,
         });
       }
     }
@@ -78,6 +79,7 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
           dimensionWidth: p.dimensionWidth ?? null,
           dimensionHeight: p.dimensionHeight ?? null,
           categoryId: p.categoryId != null ? Number(p.categoryId) : null,
+          totalStock: typeof p.stock === "number" ? p.stock : null,
         });
       }
     }

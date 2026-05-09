@@ -147,7 +147,7 @@ export function CombinedWizard({
     batchCost: "",
     baseProductQty: "1",
     packagingCost: "",
-    shippingCost: "",
+    shippingCost: "20",
     transactionFee: "2",
     minMarginPct: "15",
     marginMultiplier: "2.5",
@@ -174,6 +174,57 @@ export function CombinedWizard({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products.length]);
+
+  // ── Hidratacao automatica do BL (Custo + Estoque) ─────────────────────────
+  // Custo (R$) vem de average_landed_cost da BL API on-demand. Estoque vem
+  // do totalStock ja resolvido em ResolvedProduct. So preenche se o campo
+  // estiver vazio — edicao manual nunca eh sobrescrita.
+  const { data: blInventoryData } = trpc.settings.getInventoryId.useQuery();
+  const blInventoryId = blInventoryData?.inventoryId;
+  const blProductIds = useMemo(
+    () => products
+      .filter(p => p.source === "baselinker")
+      .map(p => p.sourceId)
+      .filter(n => Number.isFinite(n) && n > 0),
+    [products],
+  );
+  const { data: costInfo } = trpc.baselinker.getProductsCostInfo.useQuery(
+    { inventoryId: blInventoryId!, productIds: blProductIds },
+    { enabled: !!blInventoryId && blProductIds.length > 0, staleTime: 5 * 60 * 1000 },
+  );
+  const costByProductId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const c of (costInfo ?? []) as Array<{ productId: number; averageLandedCost: number | null }>) {
+      if (typeof c.averageLandedCost === "number" && c.averageLandedCost > 0) {
+        map.set(c.productId, c.averageLandedCost);
+      }
+    }
+    return map;
+  }, [costInfo]);
+
+  // ── Importar precos do BL ─────────────────────────────────────────────────
+  // Aplica products[idx].price (mainPrice do BL) como override fixo em
+  // todas as celulas do produto. Nao toca celulas de produtos Shopee.
+  function importPricesFromBL() {
+    let updatedCells = 0;
+    let touchedProducts = 0;
+    setOptionDetailsMatrix(matrix => matrix.map((row, productIdx) => {
+      const product = products[productIdx];
+      if (!product || product.source !== "baselinker") return row;
+      const price = parseFloat(product.price);
+      if (!Number.isFinite(price) || price <= 0) return row;
+      touchedProducts++;
+      return row.map(opt => {
+        updatedCells++;
+        return { ...opt, price: price.toFixed(2) };
+      });
+    }));
+    if (updatedCells === 0) {
+      toast.warning("Nenhum produto BL com preco valido pra importar.");
+    } else {
+      toast.success(`${updatedCells} preco(s) importado(s) de ${touchedProducts} produto(s) BL.`);
+    }
+  }
 
   // Auto-save quando autoFixPending vira true (depois que React commita o setOptionDetailsMatrix)
   useEffect(() => {
@@ -262,6 +313,37 @@ export function CombinedWizard({
     setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wizardStateJson]);
+
+  // Hidratacao automatica do BL (Custo + Estoque). Roda apos hidratacao
+  // do wizardStateJson pra nao sobrescrever valores ja salvos.
+  useEffect(() => {
+    if (!hydrated) return;
+    if (pricingPerProduct.length !== products.length) return;
+    setPricingPerProduct(prev => {
+      let changed = false;
+      const next = prev.map((pp, idx) => {
+        const product = products[idx];
+        if (!product) return pp;
+        const updates: Partial<PricingGlobals> = {};
+        if (product.source === "baselinker" && (!pp.unitCost || pp.unitCost === "0")) {
+          const cost = costByProductId.get(product.sourceId);
+          if (cost && cost > 0) updates.unitCost = cost.toFixed(2);
+        }
+        if (!pp.globalStock || pp.globalStock === "0") {
+          if (product.totalStock != null && product.totalStock > 0) {
+            updates.globalStock = String(product.totalStock);
+          }
+        }
+        if (Object.keys(updates).length > 0) {
+          changed = true;
+          return { ...pp, ...updates };
+        }
+        return pp;
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, products, costByProductId]);
 
   // Auto-save quando brandValue muda (debounced 500ms). Gate em `hydrated`
   // pra nao salvar durante a hidratacao inicial — sem isso, abrir um listing
@@ -1611,6 +1693,24 @@ export function CombinedWizard({
                       );
                     })()}
                   </div>
+                </div>
+              )}
+
+              {/* Botao "Importar precos do BL": aplica products[i].price (mainPrice
+                  do BL) como override em todas as celulas dos produtos BL. So
+                  aparece quando ha pelo menos um produto BL no listing. */}
+              {blProductIds.length > 0 && (
+                <div className="flex items-center justify-between border border-amber-200 bg-amber-50 rounded-xl px-4 py-2.5 mb-3">
+                  <div className="text-xs text-amber-900">
+                    <strong>Importar preços do BaseLinker:</strong> usa o preço de venda do BL como preço fixo nas variações dos {blProductIds.length} produto(s) BL.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={importPricesFromBL}
+                    className="text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium whitespace-nowrap"
+                  >
+                    ⬇ Importar preços
+                  </button>
                 </div>
               )}
 

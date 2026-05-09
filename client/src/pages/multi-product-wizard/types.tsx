@@ -27,6 +27,7 @@ export type ResolvedProduct = {
   dimensionWidth: string | null;
   dimensionHeight: string | null;
   categoryId?: number | null;
+  totalStock: number | null;
 };
 
 export type ListingItem = {
