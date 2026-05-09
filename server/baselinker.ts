@@ -10,7 +10,7 @@
  * Background sync updates only new/changed products.
  */
 
-import { eq, and, sql, inArray, gte, lte, like, notLike, not } from "drizzle-orm";
+import { eq, and, or, sql, inArray, gte, lte, like, notLike, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { productCache, cacheSync } from "../drizzle/schema";
 
@@ -425,6 +425,9 @@ export type ProductFilters = {
   searchNameMode?: "contains" | "not_contains";
   searchEan?: string;
   searchSku?: string;
+  // OR-search: matcheia em name OU sku OU ean. Ideal pra UX de busca unica
+  // onde o usuario nao sabe se o termo eh nome, codigo interno ou EAN.
+  searchAny?: string;
   priceMin?: number;
   priceMax?: number;
   stockMin?: number;
@@ -769,6 +772,16 @@ export async function filterProductsFromCache(
     conditions.push(like(productCache.sku, `%${filters.searchSku}%`));
   }
 
+  // Any-field search (OR em name/sku/ean — agrupado pra nao quebrar AND dos demais filtros)
+  if (filters.searchAny) {
+    const term = `%${filters.searchAny}%`;
+    conditions.push(or(
+      like(productCache.name, term),
+      like(productCache.sku, term),
+      like(productCache.ean, term),
+    ));
+  }
+
   // Price range
   if (filters.priceMin !== undefined) {
     conditions.push(sql`CAST(${productCache.mainPrice} AS DECIMAL(10,2)) >= ${filters.priceMin}`);
@@ -877,6 +890,34 @@ export async function getProductsByIdsFromCache(
     videoLinkUrl: row.videoLinkUrl || null,
     cachedAt: row.cachedAt,
   }));
+}
+
+/**
+ * List manufacturers present in the local product_cache for a given user/inventory.
+ * Useful for populating filter dropdowns instantly (vs hitting the BL API).
+ * Returns DISTINCT non-null manufacturerIds with how many cached products each has.
+ */
+export async function listCachedManufacturers(
+  userId: number,
+  inventoryId: number,
+): Promise<Array<{ manufacturerId: number; productCount: number }>> {
+  const db = getDbInstance();
+  if (!db) return [];
+  const rows: any = await db
+    .select({
+      manufacturerId: productCache.manufacturerId,
+      productCount: sql<number>`COUNT(*)`,
+    })
+    .from(productCache)
+    .where(and(
+      eq(productCache.userId, userId),
+      eq(productCache.inventoryId, inventoryId),
+      sql`${productCache.manufacturerId} IS NOT NULL`,
+    ))
+    .groupBy(productCache.manufacturerId);
+  return (rows as any[])
+    .filter(r => r.manufacturerId != null)
+    .map(r => ({ manufacturerId: Number(r.manufacturerId), productCount: Number(r.productCount) }));
 }
 
 /** Get cache statistics from database */

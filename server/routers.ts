@@ -391,6 +391,7 @@ export const appRouter = router({
           searchNameMode: z.enum(["contains", "not_contains"]).optional(),
           searchEan: z.string().optional(),
           searchSku: z.string().optional(),
+          searchAny: z.string().optional(),
           priceMin: z.number().optional(),
           priceMax: z.number().optional(),
           stockMin: z.number().optional(),
@@ -435,6 +436,15 @@ export const appRouter = router({
         const token = await db.getSetting(ctx.user.id, "baselinker_token");
         if (!token) throw new Error("Token do BaseLinker não configurado");
         return baselinker.getInventoryManufacturers(token, input.inventoryId);
+      }),
+
+    // List manufacturers from local cache (instant) + product counts. Use when
+    // populating filter dropdowns where we only need IDs that actually have
+    // cached products. For the full BL list (incl. zero-product), use getManufacturers.
+    getCachedManufacturers: protectedProcedure
+      .input(z.object({ inventoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        return baselinker.listCachedManufacturers(ctx.user.id, input.inventoryId);
       }),
   }),
 

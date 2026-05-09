@@ -18,9 +18,19 @@ import { useState, useMemo, useEffect } from "react";
 import { useSearch, useLocation } from "wouter";
 import { toast } from "sonner";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+const ALL_MODE_PAGE_SIZE = 25; // por origem, quando sourceFilter === "all"
 const MAX_SELECTION = 50;
 const WARN_SELECTION = 40;
+
+// Heuristica: termo sem espacos provavelmente eh codigo (SKU, EAN, ref interna)
+// e nao um nome de produto. Nesse caso usamos OR-search no backend pra cobrir
+// name/sku/ean simultaneamente. Termos com espacos (ex: "Pendrive 16gb") ficam
+// na busca por nome — mais precisa.
+function looksLikeCode(s: string): boolean {
+  const trimmed = s.trim();
+  return trimmed.length >= 3 && !trimmed.includes(" ");
+}
 
 type SourceKind = "baselinker" | "shopee";
 
@@ -67,17 +77,17 @@ function ProductRow({
           disabled={disabled && !isSelected}
         />
       </TableCell>
-      <TableCell className="w-14">
+      <TableCell className="w-20">
         {item.imageUrl ? (
           <img
             src={item.imageUrl}
             alt={item.name}
-            className="h-10 w-10 rounded object-cover border"
+            className="h-16 w-16 rounded object-cover border"
             loading="lazy"
           />
         ) : (
-          <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
-            <Package className="h-4 w-4 text-muted-foreground" />
+          <div className="h-16 w-16 rounded bg-muted flex items-center justify-center">
+            <Package className="h-6 w-6 text-muted-foreground" />
           </div>
         )}
       </TableCell>
@@ -262,6 +272,8 @@ export default function MultiProductPage() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
+  const [manufacturerId, setManufacturerId] = useState<number | null>(null);
+  const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState(1);
 
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
@@ -317,17 +329,49 @@ export default function MultiProductPage() {
   // Reset página quando filtros mudam
   useEffect(() => {
     setPage(1);
-  }, [sourceFilter, search, shopeeAccountId]);
+  }, [sourceFilter, search, shopeeAccountId, manufacturerId, pageSize]);
 
-  // BL filters: o input "search" filtra nome/SKU/EAN simultaneamente.
-  // O endpoint BL não tem campo "any" — montamos filtros por nome quando há
-  // texto. Para EAN/SKU fazemos OR no client filtrando o resultado, ou só
-  // pelo nome (mais comum). Aqui optamos por: searchName=texto.
+  // Lista de manufacturers DISTINCT presentes no cache local (instantaneo).
+  const cachedManufacturersQuery = trpc.baselinker.getCachedManufacturers.useQuery(
+    { inventoryId: inventoryId! },
+    { enabled: blAvailable },
+  );
+  // Nomes oficiais via API BL (pra mapear ID -> nome humano).
+  const manufacturerNamesQuery = trpc.baselinker.getManufacturers.useQuery(
+    { inventoryId: inventoryId! },
+    { enabled: blAvailable, staleTime: 60 * 60 * 1000 },
+  );
+  const manufacturerOptions = useMemo(() => {
+    const cached = (cachedManufacturersQuery.data ?? []) as Array<{ manufacturerId: number; productCount: number }>;
+    const namesRaw = manufacturerNamesQuery.data as any;
+    const namesMap = new Map<number, string>();
+    if (namesRaw && typeof namesRaw === "object") {
+      for (const [k, v] of Object.entries(namesRaw)) {
+        const id = Number(k);
+        if (Number.isFinite(id)) namesMap.set(id, String((v as any)?.name ?? v));
+      }
+    }
+    return cached
+      .map(c => ({
+        id: c.manufacturerId,
+        label: namesMap.get(c.manufacturerId) ?? `Fabricante #${c.manufacturerId}`,
+        productCount: c.productCount,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [cachedManufacturersQuery.data, manufacturerNamesQuery.data]);
+
+  // BL filters: termos com espaco -> searchName (preciso). Sem espaco -> searchAny
+  // (OR em name/sku/ean). manufacturerId acumula AND quando definido.
   const blFilters = useMemo(() => {
     const f: any = {};
-    if (search.trim()) f.searchName = search.trim();
+    const trimmed = search.trim();
+    if (trimmed) {
+      if (looksLikeCode(trimmed)) f.searchAny = trimmed;
+      else f.searchName = trimmed;
+    }
+    if (manufacturerId !== null) f.manufacturerId = manufacturerId;
     return f;
-  }, [search]);
+  }, [search, manufacturerId]);
 
   const blQueryEnabled = blAvailable && (sourceFilter === "all" || sourceFilter === "baselinker");
   const { data: blData, isLoading: blLoading } = trpc.baselinker.filterProducts.useQuery(
@@ -335,7 +379,7 @@ export default function MultiProductPage() {
       inventoryId: inventoryId!,
       filters: blFilters,
       page: sourceFilter === "baselinker" ? page : 1,
-      pageSize: sourceFilter === "baselinker" ? PAGE_SIZE : 10,
+      pageSize: sourceFilter === "baselinker" ? pageSize : ALL_MODE_PAGE_SIZE,
     },
     { enabled: blQueryEnabled },
   );
@@ -344,8 +388,8 @@ export default function MultiProductPage() {
   const { data: shopeeData, isLoading: shopeeLoading } = trpc.shopee.getProducts.useQuery(
     {
       accountId: shopeeAccountId!,
-      offset: sourceFilter === "shopee" ? (page - 1) * PAGE_SIZE : 0,
-      limit: sourceFilter === "shopee" ? PAGE_SIZE : 10,
+      offset: sourceFilter === "shopee" ? (page - 1) * pageSize : 0,
+      limit: sourceFilter === "shopee" ? pageSize : ALL_MODE_PAGE_SIZE,
       search: search.trim() || undefined,
       hasVariation: false,
     },
@@ -400,7 +444,7 @@ export default function MultiProductPage() {
     return normalizedItems.length;
   }, [blData, shopeeData, sourceFilter, normalizedItems.length]);
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   // Seleção
   const isMaxed = selected.size >= remainingSlots;
@@ -627,11 +671,11 @@ export default function MultiProductPage() {
           {/* Filtros */}
           <Card>
             <CardContent className="pt-6 space-y-3">
-              <div className="grid gap-3 md:grid-cols-[1fr_180px]">
+              <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_120px]">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <Input
-                    placeholder="Buscar por nome ou SKU..."
+                    placeholder="Buscar por nome, SKU ou EAN..."
                     value={searchDraft}
                     onChange={(e) => setSearchDraft(e.target.value)}
                     onKeyDown={(e) => {
@@ -653,6 +697,36 @@ export default function MultiProductPage() {
                       BaseLinker {!blAvailable && "(não configurado)"}
                     </SelectItem>
                     <SelectItem value="shopee">Shopee</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={manufacturerId === null ? "__all__" : String(manufacturerId)}
+                  onValueChange={(v) => setManufacturerId(v === "__all__" ? null : Number(v))}
+                  disabled={!blAvailable || manufacturerOptions.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Fabricante" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos os fabricantes</SelectItem>
+                    {manufacturerOptions.map(m => (
+                      <SelectItem key={m.id} value={String(m.id)}>
+                        {m.label} ({m.productCount})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => setPageSize(Number(v))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map(n => (
+                      <SelectItem key={n} value={String(n)}>{n}/pag</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -685,7 +759,7 @@ export default function MultiProductPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10"></TableHead>
-                      <TableHead className="w-14"></TableHead>
+                      <TableHead className="w-20"></TableHead>
                       <TableHead>Produto</TableHead>
                       <TableHead className="w-32">Origem</TableHead>
                       <TableHead className="w-28">Preço</TableHead>
@@ -736,7 +810,7 @@ export default function MultiProductPage() {
               )}
               {sourceFilter === "all" && (
                 <p className="text-xs text-muted-foreground pt-3">
-                  Use um filtro de origem específico para paginar resultados completos.
+                  Modo combinado mostra ate {ALL_MODE_PAGE_SIZE} de cada origem. Filtre por uma fonte específica pra paginar.
                 </p>
               )}
             </CardContent>
