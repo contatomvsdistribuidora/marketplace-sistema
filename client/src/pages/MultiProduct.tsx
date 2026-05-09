@@ -51,6 +51,7 @@ type SelectedItem = {
   imageUrls?: string[];
   manufacturerId: number | null;  // BL only — Shopee products não tem manufacturer no cache
   totalStock: number | null;      // BL: product_cache.totalStock | Shopee: stock
+  averageCost: number | null;     // BL only — average_landed_cost com fallback pra average_cost; null em Shopee
 };
 
 type SourceFilter = "all" | "baselinker" | "shopee";
@@ -67,6 +68,11 @@ function StockCell({ value }: { value: number | null }) {
   if (value < 0) return <span className="text-red-600 font-semibold tabular-nums">{value}</span>;
   if (value === 0) return <span className="text-amber-600 font-semibold tabular-nums">0</span>;
   return <span className="text-gray-700 tabular-nums">{value.toLocaleString("pt-BR")}</span>;
+}
+
+function CostCell({ value }: { value: number | null }) {
+  if (value == null || value <= 0) return <span className="text-gray-300">—</span>;
+  return <span className="text-gray-700 tabular-nums">{value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>;
 }
 
 /**
@@ -133,6 +139,9 @@ function ProductRow({
       </TableCell>
       <TableCell className="text-xs max-w-[160px] truncate" title={brandName ?? undefined}>
         {brandName ?? "—"}
+      </TableCell>
+      <TableCell className="text-xs text-right">
+        <CostCell value={item.averageCost} />
       </TableCell>
       <TableCell className="text-xs text-right">
         <StockCell value={item.totalStock} />
@@ -585,6 +594,34 @@ export default function MultiProductPage() {
   const isLoading =
     (blQueryEnabled && blLoading) || (shopeeQueryEnabled && shopeeLoading);
 
+  // IDs BL da pagina atual — usado pra hidratar custo medio. Shopee fora.
+  const blIdsOnPage = useMemo(() => {
+    const ids: number[] = [];
+    for (const p of (blData?.products ?? []) as any[]) {
+      const id = Number(p.id);
+      if (Number.isFinite(id) && id > 0) ids.push(id);
+    }
+    return ids;
+  }, [blData]);
+
+  const { data: costInfoOnPage } = trpc.baselinker.getProductsCostInfo.useQuery(
+    { inventoryId: inventoryId!, productIds: blIdsOnPage },
+    { enabled: blAvailable && blIdsOnPage.length > 0, staleTime: 5 * 60 * 1000 },
+  );
+
+  // Custo: prefere average_landed_cost, cai em average_cost (mesma regra do
+  // CombinedWizard). Map por productId pra lookup O(1) na normalizacao.
+  const costByProductId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const c of (costInfoOnPage ?? []) as Array<{ productId: number; averageCost: number | null; averageLandedCost: number | null }>) {
+      const landed = typeof c.averageLandedCost === "number" ? c.averageLandedCost : 0;
+      const avg = typeof c.averageCost === "number" ? c.averageCost : 0;
+      const cost = landed > 0 ? landed : avg;
+      if (cost > 0) map.set(c.productId, cost);
+    }
+    return map;
+  }, [costInfoOnPage]);
+
   // Normalização para tipo interno comum
   const normalizedItems: SelectedItem[] = useMemo(() => {
     const out: SelectedItem[] = [];
@@ -607,6 +644,7 @@ export default function MultiProductPage() {
           imageUrl: p.imageUrl ?? null,
           manufacturerId: Number.isFinite(mid) && mid > 0 ? mid : null,
           totalStock: typeof p.totalStock === "number" ? p.totalStock : null,
+          averageCost: costByProductId.get(sourceId) ?? null,
         });
       }
     }
@@ -625,12 +663,13 @@ export default function MultiProductPage() {
           imageUrl: p.imageUrl ?? null,
           manufacturerId: null, // Shopee não expoe manufacturer no shopee_products
           totalStock: typeof p.stock === "number" ? p.stock : null,
+          averageCost: null,
         });
       }
     }
 
     return out;
-  }, [blData, shopeeData, sourceFilter]);
+  }, [blData, shopeeData, sourceFilter, costByProductId]);
 
   // Heuristica: quando a API nao retorna `total`, infere "tem mais paginas"
   // pelo fato de a pagina atual ter vindo cheia. Subestima paginas finais
@@ -1100,6 +1139,7 @@ export default function MultiProductPage() {
                       <TableHead>Produto</TableHead>
                       <TableHead className="w-40">SKU</TableHead>
                       <TableHead className="w-40">Marca</TableHead>
+                      <TableHead className="w-24 text-right">Custo</TableHead>
                       <TableHead className="w-20 text-right">Estoque</TableHead>
                       <TableHead className="w-32">Origem</TableHead>
                       <TableHead className="w-28">Preço</TableHead>
