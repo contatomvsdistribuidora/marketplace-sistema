@@ -6,9 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Star, Image as ImageIcon, Send, AlertTriangle, CheckCircle2, Loader2,
-  Eye, AlertCircle, X,
+  Eye, AlertCircle, X, Unlink,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   itemKey, SourceBadge,
@@ -54,6 +58,16 @@ export function StepD({
   );
 
   const autoFixMutation = trpc.multiProduct.autoFixPricesMultiProduct.useMutation();
+
+  const [clearOrphanOpen, setClearOrphanOpen] = useState(false);
+  const clearOrphanMutation = trpc.multiProduct.clearOrphanShopeeItemId.useMutation({
+    onSuccess: () => {
+      toast.success("Item Shopee desvinculado. Status resetado para rascunho.");
+      setClearOrphanOpen(false);
+      onChange();
+    },
+    onError: (e) => toast.error(e.message || "Falha ao desvincular item Shopee."),
+  });
 
   const refreshDiagnosisMutation = trpc.multiProduct.refreshDiagnosis.useMutation({
     onSuccess: () => {
@@ -334,8 +348,54 @@ export function StepD({
               Voltar para seleção
             </Button>
           )}
+
+          {/* Tools avancadas — desvincula item Shopee orfao (referencia stale
+              de uma listing publicada antes da regeneracao). Aparece somente
+              quando ha shopeeItemId pra limpar. */}
+          {listing.shopeeItemId && (
+            <div className="border-t pt-3 mt-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full text-muted-foreground hover:text-destructive"
+                onClick={() => setClearOrphanOpen(true)}
+                disabled={clearOrphanMutation.isPending}
+              >
+                <Unlink className="h-4 w-4 mr-2" />
+                Limpar item órfão
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={clearOrphanOpen} onOpenChange={setClearOrphanOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desvincular item Shopee?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso remove o vínculo com o Item ID <code className="bg-muted px-1 rounded">{String(listing.shopeeItemId)}</code> e reseta o status para rascunho.
+              Use quando o item da Shopee não existe mais (foi deletado/regenerado) e você quer publicar do zero.
+              <br /><br />
+              <strong>Não apaga</strong> o anúncio na Shopee — só a referência local.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearOrphanMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                clearOrphanMutation.mutate({ id: listing.id });
+              }}
+              disabled={clearOrphanMutation.isPending}
+            >
+              {clearOrphanMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Desvinculando...</>
+              ) : "Desvincular"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Modal Preview do Payload Shopee */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>

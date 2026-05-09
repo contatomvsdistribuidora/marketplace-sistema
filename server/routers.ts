@@ -4118,6 +4118,34 @@ export const appRouter = router({
         return { id, updated: true };
       }),
 
+    // Desvincula o item Shopee da listing — uso pra "item orfao" (publicou
+    // mas a listing foi resetada/regenerada e o itemId antigo nao bate mais).
+    // Reseta status pra "draft" se estava "published"/"error" pra permitir
+    // nova publicacao do zero. So o dono da listing pode chamar.
+    clearOrphanShopeeItemId: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const [existing] = await sharedDb
+          .select({ id: multiProductListings.id, status: multiProductListings.status })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!existing) throw new Error("Anúncio combinado não encontrado.");
+
+        const updateFields: Record<string, any> = { shopeeItemId: null };
+        if (existing.status === "published" || existing.status === "error") {
+          updateFields.status = "draft";
+        }
+        await sharedDb
+          .update(multiProductListings)
+          .set(updateFields)
+          .where(eq(multiProductListings.id, input.id));
+        return { id: input.id, cleared: true };
+      }),
+
     deleteMultiProductListing: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
