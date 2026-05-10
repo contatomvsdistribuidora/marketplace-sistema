@@ -31,6 +31,47 @@ type ComputedCell = {
 const SHOPEE_MAX_WEIGHT_KG = 30;
 const SHOPEE_MAX_DIMENSION_CM = 120;
 const SHOPEE_MAX_DIMENSION_SUM_CM = 200;
+
+const INTERNAL_MAX_DIM_CM = 90;
+const INTERNAL_MAX_PERIMETER_CM = 220;
+
+// Escala dim crescendo o LADO MAIOR primeiro até INTERNAL_MAX_DIM_CM (90).
+// Quando satura, vai pro próximo maior. Se todos saturam, escala proporcional final.
+function scaleDimsLargestFirst(baseL: number, baseW: number, baseH: number, qty: number) {
+  if (qty <= 1 || baseL <= 0 || baseW <= 0 || baseH <= 0) {
+    return { length: baseL, width: baseW, height: baseH, exceededPerimeter: false };
+  }
+  const dims = [
+    { key: "L", val: baseL },
+    { key: "W", val: baseW },
+    { key: "H", val: baseH },
+  ].sort((a, b) => b.val - a.val);
+  let factor = qty;
+  let d0 = dims[0].val * factor;
+  if (d0 <= INTERNAL_MAX_DIM_CM) {
+    dims[0].val = d0;
+  } else {
+    const remaining = (dims[0].val * factor) / INTERNAL_MAX_DIM_CM;
+    dims[0].val = INTERNAL_MAX_DIM_CM;
+    let d1 = dims[1].val * remaining;
+    if (d1 <= INTERNAL_MAX_DIM_CM) {
+      dims[1].val = d1;
+    } else {
+      const remaining2 = (dims[1].val * remaining) / INTERNAL_MAX_DIM_CM;
+      dims[1].val = INTERNAL_MAX_DIM_CM;
+      dims[2].val = Math.min(dims[2].val * remaining2, INTERNAL_MAX_DIM_CM);
+    }
+  }
+  const out = { length: baseL, width: baseW, height: baseH };
+  for (const d of dims) {
+    if (d.key === "L") out.length = parseFloat(d.val.toFixed(1));
+    if (d.key === "W") out.width = parseFloat(d.val.toFixed(1));
+    if (d.key === "H") out.height = parseFloat(d.val.toFixed(1));
+  }
+  const perimeter = out.length + out.width + out.height;
+  return { ...out, exceededPerimeter: perimeter > INTERNAL_MAX_PERIMETER_CM };
+}
+
 import {
   uid, emptyOption, isValidEan, suggestNewName, truncateVariationName,
 } from "../shopee-criador/helpers";
@@ -452,28 +493,29 @@ export function CombinedWizard({
       let changed = false;
       const next = matrix.map((row, productIdx) => {
         const product = products[productIdx];
-        if (!product || product.source !== "baselinker") return row;
-        const dims = dimsByProductId.get(product.sourceId);
-        if (!dims) return row;
+        if (!product) return row;
         if (!row.length) return row;
-
-        const baseWeight = dims.weight > 0 ? dims.weight : 0;
-        const baseLength = dims.length > 0 ? dims.length : 0;
-        const baseWidth  = dims.width  > 0 ? dims.width  : 0;
-        const baseHeight = dims.height > 0 ? dims.height : 0;
+        // Bootstrap rapido: prefere dims do BL (API), cai pro product.* (ja em memoria)
+        // pra nao deixar peso/dim vazio durante os 5-10s da query BL.
+        const dimsBL = dimsByProductId.get(product.sourceId);
+        const baseWeight = (dimsBL?.weight ?? 0) > 0 ? dimsBL!.weight : (parseFloat(product.weight ?? "") || 0);
+        const baseLength = (dimsBL?.length ?? 0) > 0 ? dimsBL!.length : (parseFloat(product.dimensionLength ?? "") || 0);
+        const baseWidth  = (dimsBL?.width  ?? 0) > 0 ? dimsBL!.width  : (parseFloat(product.dimensionWidth  ?? "") || 0);
+        const baseHeight = (dimsBL?.height ?? 0) > 0 ? dimsBL!.height : (parseFloat(product.dimensionHeight ?? "") || 0);
+        if (baseWeight <= 0 && baseLength <= 0) return row;
 
         let rowChanged = false;
         const newRow = row.map((opt) => {
           const qty = extractQty(opt.label) || 1;
           const updates: Partial<VariationOption> = {};
 
-          // Peso = base * qty (sem limite). So preenche se vazio.
+          // Peso = base * qty (linear). So preenche se vazio.
           const cw = parseFloat(opt.weight ?? "");
           if (baseWeight > 0 && (!Number.isFinite(cw) || cw <= 0)) {
             updates.weight = (baseWeight * qty).toFixed(2);
           }
 
-          // Dim: trata os 3 campos como bloco.
+          // Dim: trata os 3 campos como bloco. Escala lado-maior-primeiro.
           if (baseLength > 0 && baseWidth > 0 && baseHeight > 0) {
             const cl  = parseFloat(opt.length ?? "");
             const cwd = parseFloat(opt.width  ?? "");
@@ -483,41 +525,10 @@ export function CombinedWizard({
               (!Number.isFinite(cwd) || cwd <= 0) &&
               (!Number.isFinite(ch)  || ch  <= 0);
             if (allEmpty) {
-              const targetLength = baseLength * qty;
-              let l: number, w: number, h: number;
-              if (targetLength <= 80) {
-                l = targetLength;
-                w = baseWidth;
-                h = baseHeight;
-              } else {
-                l = 80;
-                const extraQty = (baseLength * qty) / 80;
-                if (baseHeight <= baseWidth) {
-                  // cresce altura primeiro
-                  const newH = baseHeight * extraQty;
-                  if (newH <= 80) {
-                    h = newH;
-                    w = baseWidth;
-                  } else {
-                    h = 80;
-                    w = baseWidth * (extraQty * baseHeight / 80);
-                  }
-                } else {
-                  // cresce largura primeiro (espelhada)
-                  const newW = baseWidth * extraQty;
-                  if (newW <= 80) {
-                    w = newW;
-                    h = baseHeight;
-                  } else {
-                    w = 80;
-                    h = baseHeight * (extraQty * baseWidth / 80);
-                  }
-                }
-              }
-              // Cap final defensivo (evita overflow numerico).
-              updates.length = Math.min(l, 80).toFixed(1);
-              updates.width  = Math.min(w, 80).toFixed(1);
-              updates.height = Math.min(h, 80).toFixed(1);
+              const scaled = scaleDimsLargestFirst(baseLength, baseWidth, baseHeight, qty);
+              updates.length = scaled.length.toFixed(1);
+              updates.width  = scaled.width.toFixed(1);
+              updates.height = scaled.height.toFixed(1);
             }
           }
 
@@ -814,9 +825,10 @@ export function CombinedWizard({
     let width  = opt.width  ? parseFloat(opt.width)  : 0;
     let height = opt.height ? parseFloat(opt.height) : 0;
     if (isQty && !opt.length && baseL && baseW && baseH) {
-      length = parseFloat((baseL * scaleF).toFixed(1));
-      width  = parseFloat((baseW * scaleF).toFixed(1));
-      height = parseFloat((baseH * scaleF).toFixed(1));
+      const scaled = scaleDimsLargestFirst(baseL, baseW, baseH, dimRatio);
+      length = scaled.length;
+      width  = scaled.width;
+      height = scaled.height;
     }
 
     return { qty, price, totalProductCost, platformCost, commissionRate, commissionFixed, marginContribution, profitPct, weight, length, width, height, factor, effectiveDisc, minMarginAdjusted };
@@ -2212,6 +2224,21 @@ export function CombinedWizard({
                       )}
                     </div>
                   </div>
+                  {(() => {
+                    const row = optionDetailsMatrix[productIdx] || [];
+                    const exceeds = row.some(opt => {
+                      const l = parseFloat(opt.length || "0");
+                      const w = parseFloat(opt.width  || "0");
+                      const h = parseFloat(opt.height || "0");
+                      return (l + w + h) > INTERNAL_MAX_PERIMETER_CM;
+                    });
+                    if (!exceeds) return null;
+                    return (
+                      <div className="mt-2 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800">
+                        ⚠️ Alguma variação ultrapassa {INTERNAL_MAX_PERIMETER_CM}cm de perímetro (limite interno). Verifique se a Shopee aceitará.
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
 
