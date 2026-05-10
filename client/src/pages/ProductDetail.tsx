@@ -376,7 +376,7 @@ export default function ProductDetail() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto p-4 lg:p-6 max-w-7xl">
+      <div className="container mx-auto p-4 lg:p-6 max-w-screen-2xl">
         <Skeleton className="h-6 w-64 mb-3" />
         <Skeleton className="h-12 w-full mb-6" />
         <div className="grid grid-cols-1 lg:grid-cols-[450px_1fr] gap-6">
@@ -419,7 +419,7 @@ export default function ProductDetail() {
   const descExtra2 = (fullProduct as any)?.description_extra2 || null;
 
   return (
-    <div className="container mx-auto p-4 lg:p-6 max-w-7xl">
+    <div className="container mx-auto p-4 lg:p-6 max-w-screen-2xl">
       {/* Header com breadcrumb + voltar */}
       <div className="sticky top-0 bg-background z-10 pb-3 -mx-4 lg:-mx-6 px-4 lg:px-6 border-b mb-4">
         <div className="flex items-center justify-between gap-3 mb-2">

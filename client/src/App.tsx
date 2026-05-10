@@ -30,6 +30,7 @@ import ShopeeSpreadsheet from "./pages/ShopeeSpreadsheet";
 import ShopeePublish from "./pages/ShopeePublish";
 import ShopeeOptimizer from "./pages/ShopeeOptimizer";
 import ShopeeCriador from "./pages/ShopeeCriador";
+import ShopeeFrete from "./pages/ShopeeFrete";
 import MultiProduct from "./pages/MultiProduct";
 import MultiProductWizard from "./pages/MultiProductWizard";
 import CombinedListingsDrafts from "./pages/CombinedListingsDrafts";
@@ -61,6 +62,7 @@ function DashboardRouter() {
         <Route path="/shopee-publish" component={ShopeePublish} />
         <Route path="/shopee-optimizer" component={ShopeeOptimizer} />
         <Route path="/shopee-criador" component={ShopeeCriador} />
+        <Route path="/shopee-frete" component={ShopeeFrete} />
         <Route path="/multi-product" component={MultiProduct} />
         <Route path="/multi-product-wizard" component={MultiProductWizard} />
         <Route path="/rascunhos-combinados" component={CombinedListingsDrafts} />

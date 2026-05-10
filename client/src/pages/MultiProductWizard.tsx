@@ -59,7 +59,7 @@ export default function MultiProductWizard() {
 
   if (listingId === null || listingQuery.isLoading) {
     return (
-      <div className="container mx-auto p-4 lg:p-6 max-w-5xl">
+      <div className="container mx-auto p-4 lg:p-6 max-w-screen-2xl">
         <Skeleton className="h-8 w-72 mb-4" />
         <Skeleton className="h-14 w-full mb-6" />
         <Skeleton className="h-96 w-full" />
@@ -105,7 +105,7 @@ function WizardInner({
   );
 
   return (
-    <div className="container mx-auto p-4 lg:p-6 max-w-5xl">
+    <div className="container mx-auto p-4 lg:p-6 max-w-screen-2xl">
       <div className="mb-4">
         <h1 className="text-2xl font-bold">Anúncio Combinado #{listing.id}</h1>
         <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">

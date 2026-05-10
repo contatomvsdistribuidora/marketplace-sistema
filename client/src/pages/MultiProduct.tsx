@@ -878,7 +878,7 @@ export default function MultiProductPage() {
   }
 
   return (
-    <div className="container mx-auto p-4 lg:p-6 max-w-7xl">
+    <div className="container mx-auto p-4 lg:p-6 max-w-screen-2xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold">
           {addToListingId !== null
