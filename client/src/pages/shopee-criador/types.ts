@@ -59,4 +59,12 @@ export interface ComputedPricing {
   factor: number;
   effectiveDisc: number;
   minMarginAdjusted: boolean;
+  // Frete usado no calculo (per-variation). shippingDynamic=true se veio da
+  // tabela peso+subsidio; false se foi override manual do user.
+  // Opcionais por compatibilidade com ShopeeCriador legado que nao calcula frete dinamico.
+  shipping?: number;
+  shippingDynamic?: boolean;
+  billableWeight?: number;
+  subsidyApplied?: number;
+  freightReal?: number;
 }

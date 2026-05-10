@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "../../lib/trpc";
+import { calculateSellerFreightCost } from "@shared/freight-calc";
 import { CategoryPicker } from "../../components/shopee/CategoryPicker";
 import { VariationsReadOnly } from "../../components/shopee/VariationsReadOnly";
 import { BrandPicker, type BrandValue } from "../../components/shopee/BrandPicker";
@@ -232,6 +233,9 @@ export function CombinedWizard({
   // tem o valor que tinham. So roda quando hidratado, evitando race com a
   // restauracao do JSON.
   const { data: defaultShippingData } = trpc.settings.getDefaultShippingCost.useQuery();
+  // Tabelas de frete pra calculo dinamico (peso cobravel + subsidio Shopee).
+  const { data: freightTable } = trpc.settings.getFreightTable.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
+  const { data: subsidyTable } = trpc.settings.getSubsidyTable.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
 
   // ── Hidratacao automatica do BL (Custo + Estoque) ─────────────────────────
   // Custo (R$) vem de average_landed_cost da BL API on-demand. Estoque vem
@@ -750,8 +754,49 @@ export function CombinedWizard({
     // Ex: Custo=R$0.50 + Qty base=1 -> unitCost = R$0.50
     const unitCost       = batchCostVal > 0 ? batchCostVal / batchQty : ((parseFloat(p.unitCost) || 0) / batchQty);
     const packaging      = parseFloat(p.packagingCost)  || 0;
-    const shipping       = maxShipping;
     const txFee          = parseFloat(p.transactionFee) || 0;
+
+    // ── Peso/Dim (calculados ANTES do shipping pra alimentar o calculo dinamico) ──
+    const product = products[productIdx];
+    const baseL         = parseFloat(baseLengthOverride || product?.dimensionLength || getBaseLength()) || 0;
+    const baseW         = parseFloat(baseWidthOverride  || product?.dimensionWidth  || getBaseWidth())  || 0;
+    const baseH         = parseFloat(baseHeightOverride || product?.dimensionHeight || getBaseHeight()) || 0;
+    const baseWeight    = parseFloat(baseWeightOverride || product?.weight          || getBaseWeight())          || 0;
+    const baseProductQty = Math.max(parseFloat(p.baseProductQty) || 1, 0.001);
+    const dimRatio      = isQty ? qty / baseProductQty : 1;
+    let weight = opt.weight ? parseFloat(opt.weight) : (isQty ? baseWeight * dimRatio : baseWeight);
+    let length = opt.length ? parseFloat(opt.length) : 0;
+    let width  = opt.width  ? parseFloat(opt.width)  : 0;
+    let height = opt.height ? parseFloat(opt.height) : 0;
+    if (isQty && !opt.length && baseL && baseW && baseH) {
+      const scaled = scaleDimsLargestFirst(baseL, baseW, baseH, dimRatio);
+      length = scaled.length;
+      width  = scaled.width;
+      height = scaled.height;
+    }
+
+    // ── Frete: dinamico (tabela peso+subsidio) ou manual (input do card) ──
+    const userShippingOverride = parseFloat(p.shippingCost) || 0;
+    let shipping: number;
+    let shippingDynamic = false;
+    let billableWeight = 0;
+    let subsidyApplied = 0;
+    let freightReal = 0;
+    if (userShippingOverride > 0) {
+      shipping = userShippingOverride;
+    } else if (freightTable && subsidyTable && weight > 0 && length > 0 && width > 0 && height > 0) {
+      // Quebra dependencia circular usando preco preliminar (opt.price digitado
+      // ou blSalePrice). Subsidio so muda se faixa de preco mudar — raro.
+      const preliminaryPrice = opt.price ? parseFloat(opt.price) : (parseFloat(p.blSalePrice) || 0);
+      const calc = calculateSellerFreightCost(weight, length, width, height, preliminaryPrice, freightTable, subsidyTable);
+      shipping = calc.sellerCost;
+      shippingDynamic = true;
+      billableWeight = calc.billableWeight;
+      subsidyApplied = calc.subsidy;
+      freightReal = calc.freightReal;
+    } else {
+      shipping = 0;
+    }
     const autoDiscount   = (idx + 1) * (parseFloat(p.defaultDiscount) || 0);
     const hasQtyFactor   = qtyFactors[idx] !== undefined && qtyFactors[idx] !== "";
     const effectiveDisc  = hasQtyFactor ? (parseFloat(qtyFactors[idx]) || 0) : autoDiscount;
@@ -811,27 +856,7 @@ export function CombinedWizard({
     const marginContribution = price - totalProductCost - platformCost;
     const profitPct       = price > 0 ? (marginContribution / price) * 100 : 0;
 
-    // Dimensions — per-row: prioriza products[productIdx] sobre getBase*() (fallback)
-    const product = products[productIdx];
-    const baseL         = parseFloat(baseLengthOverride || product?.dimensionLength || getBaseLength()) || 0;
-    const baseW         = parseFloat(baseWidthOverride  || product?.dimensionWidth  || getBaseWidth())  || 0;
-    const baseH         = parseFloat(baseHeightOverride || product?.dimensionHeight || getBaseHeight()) || 0;
-    const baseWeight    = parseFloat(baseWeightOverride || product?.weight          || getBaseWeight())          || 0;
-    const baseProductQty = Math.max(parseFloat(p.baseProductQty) || 1, 0.001);
-    const dimRatio      = isQty ? qty / baseProductQty : 1;
-    const scaleF        = Math.cbrt(dimRatio);
-    let weight = opt.weight ? parseFloat(opt.weight) : (isQty ? baseWeight * dimRatio : baseWeight);
-    let length = opt.length ? parseFloat(opt.length) : 0;
-    let width  = opt.width  ? parseFloat(opt.width)  : 0;
-    let height = opt.height ? parseFloat(opt.height) : 0;
-    if (isQty && !opt.length && baseL && baseW && baseH) {
-      const scaled = scaleDimsLargestFirst(baseL, baseW, baseH, dimRatio);
-      length = scaled.length;
-      width  = scaled.width;
-      height = scaled.height;
-    }
-
-    return { qty, price, totalProductCost, platformCost, commissionRate, commissionFixed, marginContribution, profitPct, weight, length, width, height, factor, effectiveDisc, minMarginAdjusted };
+    return { qty, price, totalProductCost, platformCost, commissionRate, commissionFixed, marginContribution, profitPct, weight, length, width, height, factor, effectiveDisc, minMarginAdjusted, shipping, shippingDynamic, billableWeight, subsidyApplied, freightReal };
   }
 
   const computedCells: ComputedCell[] = useMemo(() => {
@@ -2168,13 +2193,19 @@ export function CombinedWizard({
                       >
                         Frete (R$) <span className="text-amber-600">*</span>
                       </label>
-                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                      <input type="number" min="0" step="0.01" placeholder="auto"
                         value={pricingPerProduct[productIdx]?.shippingCost ?? ""}
                         onChange={e => updateProductPricing(productIdx, "shippingCost", e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                      <p className="text-[10px] text-amber-700 mt-0.5">
-                        * preço usa o maior frete (R$ {maxShipping.toFixed(2)})
-                      </p>
+                      {(parseFloat(pricingPerProduct[productIdx]?.shippingCost ?? "") || 0) > 0 ? (
+                        <p className="text-[10px] text-amber-600 mt-0.5">
+                          ✏️ Manual (sobrepõe a tabela)
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-blue-600 mt-0.5">
+                          📦 Calculado automático pela tabela
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-[11px] text-gray-500 mb-0.5" title="Taxa da processadora (geralmente 2%).">Taxa transação (%)</label>
@@ -2577,7 +2608,8 @@ export function CombinedWizard({
 
                 const txFee = parseFloat(pp.transactionFee) || 0;
                 const packaging = parseFloat(pp.packagingCost) || 0;
-                const shipping = maxShipping;
+                // Frete vem do computePricing (per-variation, dinamico ou manual).
+                const shipping = c.shipping ?? maxShipping;
                 const commissionValue = finalPrice * c.commissionRate + c.commissionFixed;
                 const taxValue = finalPrice * (txFee / 100);
                 const minMargin = parseFloat(pp.minMarginPct) || 0;
@@ -2606,7 +2638,11 @@ export function CombinedWizard({
                         <span className="text-gray-900">R$ {packaging.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-700">+ Frete (maior do anúncio):</span>
+                        <span className="text-gray-700">
+                          {c.shippingDynamic
+                            ? `+ Frete (peso ${(c.billableWeight ?? 0).toFixed(2)}kg, real R$ ${(c.freightReal ?? 0).toFixed(2)} − subsídio R$ ${(c.subsidyApplied ?? 0).toFixed(2)}):`
+                            : "+ Frete (manual):"}
+                        </span>
                         <span className="text-gray-900">R$ {shipping.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
