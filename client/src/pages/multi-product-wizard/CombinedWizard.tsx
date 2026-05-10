@@ -725,7 +725,7 @@ export function CombinedWizard({
 
   // ── Motor de precificação ──────────────────────────────────────────────────
 
-  function computePricing(opt: VariationOption, idx: number, productIdx: number = 0): ComputedPricing {
+  function computePricing(opt: VariationOption, idx: number, productIdx: number): ComputedPricing {
     const p = pricingPerProduct[productIdx] ?? pricing;
     const isQty          = selectedType === "quantidade";
     const qty            = isQty ? extractQty(opt.label) : 1;
@@ -1101,12 +1101,12 @@ export function CombinedWizard({
 
   // Bloqueia avanço se alguma variação tiver margem negativa
   const hasNegativeMargin = pricing.unitCost
-    ? optionDetails.some((o, i) => computePricing(o, i).marginContribution < 0)
+    ? optionDetails.some((o, i) => computePricing(o, i, 0).marginContribution < 0) // LEGACY: single-product fallback
     : false;
 
   function priceRangeAlert(): string | null {
     if (!pricing.unitCost || optionDetails.length < 2) return null;
-    const prices = optionDetails.map((o, i) => computePricing(o, i).price).filter(p => p > 0);
+    const prices = optionDetails.map((o, i) => computePricing(o, i, 0).price).filter(p => p > 0); // LEGACY: single-product fallback
     if (prices.length < 2) return null;
     const min = Math.min(...prices);
     const max = Math.max(...prices);
@@ -1266,7 +1266,7 @@ export function CombinedWizard({
         });
 
       const variations = optionDetails.map((opt, idx) => {
-        const c = computePricing(opt, idx);
+        const c = computePricing(opt, idx, 0); // LEGACY: single-product fallback
         return {
           label: opt.label,
           qty: c.qty,
@@ -1347,7 +1347,7 @@ export function CombinedWizard({
     setAdLoadingSection(section);
     try {
       const variations = optionDetails.map((opt, idx) => {
-        const c = computePricing(opt, idx);
+        const c = computePricing(opt, idx, 0); // LEGACY: single-product fallback
         return {
           label: opt.label,
           qty: c.qty,
@@ -1400,7 +1400,7 @@ export function CombinedWizard({
 
   function handleSave() {
     const opts = optionDetails.map((o, i) => {
-      const c = computePricing(o, i);
+      const c = computePricing(o, i, 0); // LEGACY: single-product fallback
       return {
         ...o,
         label:  inlineLabelEdits[o.id] ?? o.label,
@@ -1424,7 +1424,7 @@ export function CombinedWizard({
     const effectiveOverrideMode = overrideModeArg ?? overrideMode;
     const effectiveNewItemName = newItemNameArg ?? newItemName;
     const opts = optionDetails.map((o, i) => {
-      const c = computePricing(o, i);
+      const c = computePricing(o, i, 0); // LEGACY: single-product fallback
       const rawPrice = inlinePriceEdits[o.id] || o.price || (c.price > 0 ? c.price.toFixed(2) : "0");
       const rawWeight = o.weight || c.weight.toFixed(2);
       const rawLength = o.length || c.length.toFixed(1);
