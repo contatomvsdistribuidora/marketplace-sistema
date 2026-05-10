@@ -2076,7 +2076,7 @@ export function CombinedWizard({
 
               {/* ── CARDS DE CONFIGURACAO PER-PRODUCT (empilhados no topo) ── */}
               {products.map((product, productIdx) => (
-                <div key={`cfg-${product.source}:${product.sourceId}`} className="border border-gray-200 rounded-xl bg-white p-4 mb-3">
+                <div key={`cfg-${productIdx}-${product.source}:${product.sourceId}`} className="border border-gray-200 rounded-xl bg-white p-4 mb-3">
                   <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                     <h4 className="text-xs font-semibold text-gray-700 flex items-center gap-2 flex-1 min-w-0">
                       {product.imageUrl && (
