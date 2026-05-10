@@ -69,6 +69,14 @@ export function StepD({
     onError: (e) => toast.error(e.message || "Falha ao desvincular item Shopee."),
   });
 
+  const updateListingMutation = trpc.multiProduct.updateMultiProductListing.useMutation({
+    onSuccess: () => {
+      onChange();
+      toast.success("Produto principal atualizado.");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const refreshDiagnosisMutation = trpc.multiProduct.refreshDiagnosis.useMutation({
     onSuccess: () => {
       onChange();
@@ -125,21 +133,57 @@ export function StepD({
         </CardHeader>
         <CardContent>
           <ul className="space-y-1 text-sm">
-            {items.slice(0, 5).map((it) => {
-              const k = itemKey(it.source, Number(it.sourceId));
-              const resolved = productMap.get(k);
-              const isPrincipal = k === principalKey;
+            {(() => {
+              const visibleItems = items.length <= 5
+                ? items
+                : [...items.slice(0, 5), ...items.slice(5).filter(i => i.source === "shopee")];
+              const hiddenCount = items.length - visibleItems.length;
               return (
-                <li key={it.id} className="flex items-center gap-2">
-                  {isPrincipal && <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-500" />}
-                  <SourceBadge source={it.source} />
-                  <span className="line-clamp-1">{resolved?.name || `(produto ${it.sourceId})`}</span>
-                </li>
+                <>
+                  {visibleItems.map((it) => {
+                    const k = itemKey(it.source, Number(it.sourceId));
+                    const resolved = productMap.get(k);
+                    const isPrincipal = k === principalKey;
+                    const isShopee = it.source === "shopee";
+                    if (isShopee) {
+                      return (
+                        <li key={it.id}>
+                          <button
+                            type="button"
+                            disabled={updateListingMutation.isPending || isPrincipal}
+                            title="Clique pra tornar este o produto principal"
+                            onClick={() =>
+                              updateListingMutation.mutate({
+                                id: listing.id,
+                                mainProductSource: "shopee",
+                                mainProductSourceId: Number(it.sourceId),
+                              })
+                            }
+                            className="w-full flex items-center gap-2 rounded px-1.5 py-1 -mx-1.5 text-left hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent disabled:opacity-100"
+                          >
+                            {isPrincipal
+                              ? <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-500 shrink-0" />
+                              : <Star className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                            <SourceBadge source={it.source} />
+                            <span className="line-clamp-1">{resolved?.name || `(produto ${it.sourceId})`}</span>
+                          </button>
+                        </li>
+                      );
+                    }
+                    return (
+                      <li key={it.id} className="flex items-center gap-2">
+                        {isPrincipal && <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-500" />}
+                        <SourceBadge source={it.source} />
+                        <span className="line-clamp-1">{resolved?.name || `(produto ${it.sourceId})`}</span>
+                      </li>
+                    );
+                  })}
+                  {hiddenCount > 0 && (
+                    <li className="text-xs text-muted-foreground">+ {hiddenCount} outros</li>
+                  )}
+                </>
               );
-            })}
-            {items.length > 5 && (
-              <li className="text-xs text-muted-foreground">+ {items.length - 5} outros</li>
-            )}
+            })()}
           </ul>
         </CardContent>
       </Card>
