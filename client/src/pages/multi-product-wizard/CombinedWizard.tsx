@@ -1006,11 +1006,10 @@ export function CombinedWizard({
     }
     const src = pricingPerProduct[sourceIdx];
     if (!src) return;
+    // Propaga somente Margem min e Estoque global. Custo, Preco, Frete, Multi, etc sao mantidos por produto.
     const fields: (keyof PricingGlobals)[] = [
-      "unitCost", "blSalePrice", "baseProductQty", "packagingCost", "shippingCost",
-      "transactionFee", "globalStock",
+      "minMarginPct", "globalStock",
     ];
-    // Multiplicador, Desc. faixa, Margem min sao mantidas por produto (cada um pode ter o seu)
     let touched = 0;
     setPricingPerProduct(prev => prev.map((pp, idx) => {
       if (idx === sourceIdx) return pp;
@@ -2107,7 +2106,7 @@ export function CombinedWizard({
                       {products.length > 1 && (
                         <button onClick={() => propagatePricingToOthers(productIdx)}
                           className="text-[11px] text-blue-600 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 bg-white"
-                          title="Copia custo, preco, multiplicador e outros valores deste produto pra todos os demais">
+                          title="Copia Margem mínima e Estoque global deste produto pra todos os demais">
                           ⚡ Propagar
                         </button>
                       )}
