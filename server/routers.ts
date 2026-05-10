@@ -1,4 +1,5 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { DEFAULT_FREIGHT_TABLE, DEFAULT_SUBSIDY_TABLE, type FreightTier, type SubsidyTier } from "@shared/freight-calc";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -181,6 +182,65 @@ export const appRouter = router({
       .input(z.object({ value: z.string() }))
       .mutation(async ({ ctx, input }) => {
         await db.setSetting(ctx.user.id, "default_shipping_cost", input.value);
+        return { success: true };
+      }),
+
+    // ── Tabelas de frete e subsidio Shopee ──
+    // Guardadas como JSON na mesma tabela `settings`. Fallback pra defaults
+    // hardcoded em shared/freight-calc.ts se nao setado.
+    getFreightTable: protectedProcedure.query(async ({ ctx }) => {
+      const raw = await db.getSetting(ctx.user.id, "freight_table");
+      if (!raw) return DEFAULT_FREIGHT_TABLE;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((t: any) => typeof t.maxWeight === "number" && typeof t.cost === "number")) {
+          return parsed as FreightTier[];
+        }
+        return DEFAULT_FREIGHT_TABLE;
+      } catch {
+        return DEFAULT_FREIGHT_TABLE;
+      }
+    }),
+
+    setFreightTable: protectedProcedure
+      .input(z.object({
+        table: z.array(z.object({
+          maxWeight: z.number().positive(),
+          cost: z.number().min(0),
+        })).min(1).max(20),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await db.setSetting(ctx.user.id, "freight_table", JSON.stringify(input.table));
+        return { success: true };
+      }),
+
+    getSubsidyTable: protectedProcedure.query(async ({ ctx }) => {
+      const raw = await db.getSetting(ctx.user.id, "subsidy_table");
+      if (!raw) return DEFAULT_SUBSIDY_TABLE;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((t: any) => (typeof t.maxPrice === "number" || t.maxPrice === null) && typeof t.subsidy === "number")) {
+          // JSON serializa Infinity como null — restaura aqui.
+          return parsed.map((t: any) => ({
+            maxPrice: t.maxPrice === null ? Infinity : t.maxPrice,
+            subsidy: t.subsidy,
+          })) as SubsidyTier[];
+        }
+        return DEFAULT_SUBSIDY_TABLE;
+      } catch {
+        return DEFAULT_SUBSIDY_TABLE;
+      }
+    }),
+
+    setSubsidyTable: protectedProcedure
+      .input(z.object({
+        table: z.array(z.object({
+          maxPrice: z.number().positive().nullable(), // null = Infinity (ultima faixa "+")
+          subsidy: z.number().min(0),
+        })).min(1).max(10),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await db.setSetting(ctx.user.id, "subsidy_table", JSON.stringify(input.table));
         return { success: true };
       }),
 
