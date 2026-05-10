@@ -199,7 +199,7 @@ export function CombinedWizard({
     batchCost: "",
     baseProductQty: "1",
     packagingCost: "",
-    shippingCost: "20",
+    shippingCost: "",
     transactionFee: "2",
     minMarginPct: "15",
     marginMultiplier: "2.5",
@@ -232,7 +232,6 @@ export function CombinedWizard({
   // Aplicado apenas em wizards FRESCOS (sem wizardStateJson) — drafts salvos
   // tem o valor que tinham. So roda quando hidratado, evitando race com a
   // restauracao do JSON.
-  const { data: defaultShippingData } = trpc.settings.getDefaultShippingCost.useQuery();
   // Tabelas de frete pra calculo dinamico (peso cobravel + subsidio Shopee).
   const { data: freightTable } = trpc.settings.getFreightTable.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const { data: subsidyTable } = trpc.settings.getSubsidyTable.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
@@ -471,18 +470,6 @@ export function CombinedWizard({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, products, costByProductId, stockByProductId]);
-
-  // Aplica defaultShippingCost (Settings) em wizard fresco. Gate: wizardStateJson
-  // ausente (nao sobrescreve drafts) e shippingCost ainda no bootstrap "20".
-  useEffect(() => {
-    if (!hydrated) return;
-    if (wizardStateJson) return;
-    const v = defaultShippingData?.value;
-    if (!v || v === "20") return;
-    setPricing(p => p.shippingCost === "20" ? { ...p, shippingCost: v } : p);
-    setPricingPerProduct(prev => prev.map(pp => pp.shippingCost === "20" ? { ...pp, shippingCost: v } : pp));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, defaultShippingData?.value]);
 
   // Hidratacao automatica de peso/dimensoes do BL pra TODAS variacoes.
   // - Peso: linear * qty, sem cap.
