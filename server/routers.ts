@@ -27,7 +27,7 @@ import * as multiProductPublishPreview from "./multi-product-publish-preview";
 import { storagePut } from "./storage";
 import * as videoStorage from "./storage-video";
 import { randomUUID } from "node:crypto";
-import { eq, and, desc, asc, sql } from "drizzle-orm";
+import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
 import {
   multiProductListings,
   multiProductListingItems,
@@ -4551,6 +4551,66 @@ export const appRouter = router({
           .from(multiProductListingItems)
           .where(eq(multiProductListingItems.listingId, input.id));
 
+        // Pré-carrega cache de produtos BL (name + imageUrl + inventoryId)
+        const blIds = items
+          .filter((i) => i.source === "baselinker")
+          .map((i) => Number(i.sourceId));
+        const blCacheRows = blIds.length > 0
+          ? await sharedDb
+              .select({
+                productId: productCache.productId,
+                inventoryId: productCache.inventoryId,
+                name: productCache.name,
+                imageUrl: productCache.imageUrl,
+              })
+              .from(productCache)
+              .where(inArray(productCache.productId, blIds))
+          : [];
+        const blCacheById = new Map<number, typeof blCacheRows[number]>();
+        for (const r of blCacheRows) blCacheById.set(Number(r.productId), r);
+
+        // Busca galeria completa do BL via API. Agrupa por inventoryId pra fazer
+        // batch único por inventário. Falha não-fatal: cai pra cache.imageUrl.
+        const blGalleryById = new Map<number, string[]>();
+        if (blIds.length > 0) {
+          try {
+            const blToken = await db.getSetting(ctx.user.id, "baselinker_token");
+            if (blToken) {
+              const byInventory = new Map<number, number[]>();
+              for (const id of blIds) {
+                const row = blCacheById.get(id);
+                if (!row) continue;
+                const inv = Number(row.inventoryId);
+                if (!byInventory.has(inv)) byInventory.set(inv, []);
+                byInventory.get(inv)!.push(id);
+              }
+              for (const [inv, ids] of Array.from(byInventory.entries())) {
+                try {
+                  const data = await baselinker.getInventoryProductsData(blToken, inv, ids);
+                  for (const [pid, p] of Object.entries(data ?? {}) as [string, any][]) {
+                    const urls = (p?.images && typeof p.images === "object")
+                      ? (Object.values(p.images) as any[]).filter(
+                          (v) => typeof v === "string" && v.length > 0,
+                        )
+                      : [];
+                    if (urls.length > 0) blGalleryById.set(Number(pid), urls);
+                  }
+                } catch (err) {
+                  console.warn(
+                    `[getAvailableThumbImages] BL inventory ${inv} galeria falhou, fallback pra cache:`,
+                    (err as Error).message,
+                  );
+                }
+              }
+            }
+          } catch (err) {
+            console.warn(
+              "[getAvailableThumbImages] BL gallery fetch falhou completamente, usando só cache:",
+              (err as Error).message,
+            );
+          }
+        }
+
         const out: Array<{
           source: "baselinker" | "shopee";
           sourceId: number;
@@ -4565,19 +4625,19 @@ export const appRouter = router({
             Number(item.sourceId) === Number(listing.mainProductSourceId);
 
           if (item.source === "baselinker") {
-            const [p] = await sharedDb
-              .select({
-                imageUrl: productCache.imageUrl,
-                name: productCache.name,
-              })
-              .from(productCache)
-              .where(eq(productCache.productId, Number(item.sourceId)))
-              .limit(1);
-            const urls = p?.imageUrl ? [p.imageUrl] : [];
+            const sid = Number(item.sourceId);
+            const cache = blCacheById.get(sid);
+            const gallery = blGalleryById.get(sid);
+            let urls: string[] = [];
+            if (gallery && gallery.length > 0) {
+              urls = [...gallery];
+            } else if (cache?.imageUrl) {
+              urls = [cache.imageUrl];
+            }
             out.push({
               source: "baselinker",
-              sourceId: Number(item.sourceId),
-              name: p?.name ?? "",
+              sourceId: sid,
+              name: cache?.name ?? "",
               imageUrls: urls,
               isPrincipal,
             });
@@ -4619,6 +4679,18 @@ export const appRouter = router({
         extraPrompt: z.string().optional(),
         selectedImageUrls: z.array(z.string().url()).max(16).optional(),
         headerText: z.string().max(100).optional(),
+        style: z.enum([
+          "mercadao", "premium", "kit-familia", "profissional",
+          "atacado", "relampago", "eco", "sazonal",
+        ]).optional(),
+        badges: z.array(z.enum([
+          "oferta", "mais-vendido", "nf-emitida", "garantia",
+          "envio-24h", "atacado", "pronta-entrega", "frete-gratis",
+        ])).max(4).optional(),
+        color: z.enum([
+          "vermelho", "laranja", "amarelo", "verde",
+          "azul", "roxo", "preto", "branco",
+        ]).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const result = await multiProductAi.generateMultiProductThumb(
@@ -4627,6 +4699,9 @@ export const appRouter = router({
           input.extraPrompt,
           input.selectedImageUrls,
           input.headerText,
+          input.style,
+          input.badges,
+          input.color,
         );
         return result;
       }),

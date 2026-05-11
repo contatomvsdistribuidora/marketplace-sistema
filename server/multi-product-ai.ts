@@ -9,6 +9,12 @@ import {
   productCache,
   shopeeProducts,
 } from "../drizzle/schema";
+import {
+  buildStylePromptSection,
+  type ThumbStyle,
+  type ThumbBadge,
+  type ThumbColor,
+} from "../shared/thumb-styles";
 
 type ResolvedItem = {
   source: "baselinker" | "shopee";
@@ -358,6 +364,9 @@ export async function generateMultiProductThumb(
   extraPrompt?: string,
   selectedImageUrls?: string[],
   headerText?: string,
+  style?: ThumbStyle,
+  badges?: ThumbBadge[],
+  color?: ThumbColor,
 ): Promise<{ thumbUrl: string; promptUsed: string }> {
   const { resolved, principal, category } = await resolveListingContext(listingId, userId);
 
@@ -400,16 +409,16 @@ export async function generateMultiProductThumb(
     ? `\n\nINSTRUÇÕES EXTRAS DO USUÁRIO:\n${extraPrompt.trim()}`
     : "";
 
+  const styleSection = buildStylePromptSection(style, badges ?? [], color);
+
   const prompt = `Crie uma thumbnail para anúncio combinado no estilo Shopee/Mercado Livre.
 
 LAYOUT OBRIGATÓRIO:
 - Imagem quadrada 1:1 (1024×1024)
-- Header no topo: texto grande, negrito, fundo azul-marinho, cor branca, conteúdo "${headerLine}"
-- Sub-header laranja/amarelo logo abaixo: "Resistentes | Práticos | Versáteis" (adapte ao tipo de produto se fizer mais sentido)
-- Selo circular vermelho no canto superior direito: "MAIS RESISTÊNCIA PARA O DIA A DIA!" ou um benefício curto equivalente
-- Corpo central: os ${refsCount} produtos enfileirados horizontalmente em ordem, cada um com um círculo laranja numerado (1, 2, 3...) acima, e label curto abaixo (máx 3 palavras: ex. "PIA E BANHEIRO", "100 LITROS", "30 LITROS PRETO")
-- Footer com 3 ou 4 selos de benefício: "ALTA RESISTÊNCIA", "DIVERSOS TAMANHOS", "QUALIDADE", "EMBALAGENS ECONÔMICAS" (ou equivalentes adequados ao produto)
-- Paleta: laranja, vermelho, azul-marinho, branco. Fundo neutro claro.
+- Header no topo: texto grande, negrito, conteúdo "${headerLine}"
+- Sub-header logo abaixo com 2-3 benefícios curtos (adapte ao tipo de produto)
+- Corpo central: os ${refsCount} produtos enfileirados horizontalmente em ordem, cada um com um círculo numerado (1, 2, 3...) acima, e label curto abaixo (máx 3 palavras: ex. "PIA E BANHEIRO", "100 LITROS", "30 LITROS PRETO")
+- Footer com 3 ou 4 selos de benefício adequados ao produto
 
 USO DAS IMAGENS DE REFERÊNCIA (CRÍTICO):
 - Use as ${refsCount} imagens fornecidas como referência VISUAL FIEL dos produtos
@@ -417,11 +426,12 @@ USO DAS IMAGENS DE REFERÊNCIA (CRÍTICO):
 - NÃO invente produtos, NÃO substitua por genéricos
 - Mantenha a ORDEM das imagens de referência (1ª imagem = produto 1 na thumb, 2ª = produto 2, etc.)
 
-ESTILO:
-- Tipografia: sans-serif bold (Montserrat ou similar)
+REGRAS GERAIS DE ESTILO:
+- Tipografia: sans-serif bold (Montserrat ou similar), salvo override do estilo abaixo
 - Composição limpa, alto contraste
 - Sem texto pequeno ilegível, sem mockups 3D abstratos
 - Foto realística dos produtos (não cartoon, não ilustração)
+${styleSection}
 
 CONTEXTO:
 Produto Principal: ${principalName}${extraInstructions}`;

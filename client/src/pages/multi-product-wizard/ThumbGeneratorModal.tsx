@@ -14,6 +14,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ImageIcon, Loader2, Sparkles, ZoomIn } from "lucide-react";
+import {
+  THUMB_STYLES,
+  THUMB_BADGES,
+  THUMB_COLORS,
+  MAX_THUMB_BADGES,
+  type ThumbStyle,
+  type ThumbBadge,
+  type ThumbColor,
+} from "@shared/thumb-styles";
 
 type Props = {
   listingId: number;
@@ -24,6 +33,7 @@ type Props = {
 };
 
 const MAX_REFS = 16;
+const DEFAULT_STYLE: ThumbStyle = "mercadao";
 
 export function ThumbGeneratorModal({
   listingId,
@@ -35,6 +45,9 @@ export function ThumbGeneratorModal({
   const [selected, setSelected] = useState<string[]>([]);
   const [headerText, setHeaderText] = useState("");
   const [extraPrompt, setExtraPrompt] = useState("");
+  const [selectedStyle, setSelectedStyle] = useState<ThumbStyle>(DEFAULT_STYLE);
+  const [selectedBadges, setSelectedBadges] = useState<ThumbBadge[]>([]);
+  const [selectedColor, setSelectedColor] = useState<ThumbColor | undefined>(undefined);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
 
@@ -66,9 +79,23 @@ export function ThumbGeneratorModal({
     setSelected([]);
     setHeaderText("");
     setExtraPrompt("");
+    setSelectedStyle(DEFAULT_STYLE);
+    setSelectedBadges([]);
+    setSelectedColor(undefined);
     setGeneratedUrl(null);
     setZoomOpen(false);
   }, [isOpen]);
+
+  function toggleBadge(b: ThumbBadge) {
+    setSelectedBadges((prev) => {
+      if (prev.includes(b)) return prev.filter((x) => x !== b);
+      if (prev.length >= MAX_THUMB_BADGES) {
+        toast.error(`Máximo ${MAX_THUMB_BADGES} selos.`);
+        return prev;
+      }
+      return [...prev, b];
+    });
+  }
 
   function toggleImage(url: string) {
     setSelected((prev) => {
@@ -107,6 +134,9 @@ export function ThumbGeneratorModal({
       extraPrompt: extraPrompt.trim() || undefined,
       selectedImageUrls: selected,
       headerText: headerText.trim() || undefined,
+      style: selectedStyle,
+      badges: selectedBadges.length > 0 ? selectedBadges : undefined,
+      color: selectedColor,
     });
   }
 
@@ -120,7 +150,7 @@ export function ThumbGeneratorModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-screen-2xl w-[95vw] max-h-[95vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5" />
@@ -128,7 +158,7 @@ export function ThumbGeneratorModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* COLUNA ESQUERDA — Configurações */}
           <div className="space-y-4">
             <div>
@@ -218,6 +248,117 @@ export function ThumbGeneratorModal({
                 placeholder='Ex: "fundo amarelo brilhante", "destaque a palavra OFERTA"'
                 className="text-xs"
               />
+            </div>
+          </div>
+
+          {/* COLUNA CENTRAL — Estilo, selos e cor */}
+          <div className="space-y-4">
+            <div>
+              <Label>🎨 Estilo da thumb</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Define a "vibe" visual da imagem.
+              </p>
+              <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                {(Object.entries(THUMB_STYLES) as [ThumbStyle, typeof THUMB_STYLES[ThumbStyle]][]).map(
+                  ([key, meta]) => {
+                    const active = selectedStyle === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setSelectedStyle(key)}
+                        className={`text-left border-2 rounded p-2 transition ${
+                          active
+                            ? "border-orange-500 bg-orange-50"
+                            : "border-gray-200 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1 text-sm font-medium">
+                          <span>{meta.icon}</span>
+                          <span>{meta.label}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                          {meta.description}
+                        </p>
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+
+            <div>
+              <Label>
+                🏷️ Selos ({selectedBadges.length}/{MAX_THUMB_BADGES})
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Adiciona selos visuais na thumb.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {(Object.entries(THUMB_BADGES) as [ThumbBadge, typeof THUMB_BADGES[ThumbBadge]][]).map(
+                  ([key, meta]) => {
+                    const active = selectedBadges.includes(key);
+                    const disabled = !active && selectedBadges.length >= MAX_THUMB_BADGES;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => toggleBadge(key)}
+                        disabled={disabled}
+                        className={`text-[11px] px-2.5 py-1 rounded-full border-2 transition ${
+                          active
+                            ? "border-orange-500 bg-orange-100 text-orange-900 font-medium"
+                            : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                        } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                      >
+                        {meta.label}
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+
+            <div>
+              <Label>🌈 Cor dominante (opcional)</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Sobrescreve a paleta do estilo escolhido.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedColor(undefined)}
+                  className={`text-[11px] px-2.5 py-1 rounded border-2 transition ${
+                    selectedColor === undefined
+                      ? "border-orange-500 bg-orange-50 text-orange-900 font-medium"
+                      : "border-gray-200 text-gray-600 hover:border-gray-300"
+                  }`}
+                  title="Usa a paleta do estilo"
+                >
+                  Automática
+                </button>
+                {(Object.entries(THUMB_COLORS) as [ThumbColor, typeof THUMB_COLORS[ThumbColor]][]).map(
+                  ([key, meta]) => {
+                    const active = selectedColor === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setSelectedColor(key)}
+                        className={`w-9 h-9 rounded-full border-2 transition flex items-center justify-center ${
+                          active ? "border-orange-500 ring-2 ring-orange-200" : "border-gray-300"
+                        }`}
+                        style={{ backgroundColor: meta.hex }}
+                        title={meta.label}
+                      >
+                        {active && (
+                          <span className="text-white text-xs font-bold drop-shadow">✓</span>
+                        )}
+                      </button>
+                    );
+                  },
+                )}
+              </div>
             </div>
           </div>
 
