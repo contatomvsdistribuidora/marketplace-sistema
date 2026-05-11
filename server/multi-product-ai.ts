@@ -420,6 +420,37 @@ LAYOUT OBRIGATÓRIO:
 - Corpo central: os ${refsCount} produtos enfileirados horizontalmente em ordem, cada um com um círculo numerado (1, 2, 3...) acima, e label curto abaixo (máx 3 palavras: ex. "PIA E BANHEIRO", "100 LITROS", "30 LITROS PRETO")
 - Footer com 3 ou 4 selos de benefício adequados ao produto
 
+ORTOGRAFIA CRÍTICA — PORTUGUÊS DO BRASIL:
+
+Todo texto da imagem DEVE estar em português brasileiro CORRETO. Erros ortográficos arruínam a venda. ATENÇÃO ESPECIAL a estas palavras (use EXATAMENTE como escritas, com acentos):
+
+- RESISTÊNCIA (com Ê, com S antes de T, com Ê de novo) — não "RESISIERCIA" nem "RESISTENCIA"
+- PRÁTICAS (com Á acentuado) — não "PRATICAS"
+- VERSÁTEIS (com Á acentuado, S no fim) — não "VERSATEIS"
+- ECONÔMICAS (com Ô acentuado, com C, não com S) — não "SBONOMICAS" nem "ECONOMICAS"
+- TAMANHOS (com NH) — não "TAMATHOS"
+- QUALIDADE (Q-U-A-L-I-D-A-D-E)
+- EMBALAGENS (E-M-B-A-L-A-G-E-N-S)
+- DIVERSOS (D-I-V-E-R-S-O-S)
+- ALTA (A-L-T-A, simples)
+- ENTREGA (E-N-T-R-E-G-A)
+- GARANTIA (G-A-R-A-N-T-I-A)
+- PRODUTOS (P-R-O-D-U-T-O-S)
+- OFERTA (O-F-E-R-T-A)
+- TIPOS (T-I-P-O-S)
+- LITROS (L-I-T-R-O-S)
+- PARA (P-A-R-A) — não "PORA" nem "PRA"
+
+REGRAS:
+1. Se for desenhar uma palavra, faça letra por letra como listado acima
+2. Use APENAS palavras curtas (até 10 letras quando possível)
+3. Se uma palavra é difícil, prefira sinônimo simples ou abreviação
+4. NÃO invente palavras nem misture letras parecidas (T↔N, M↔N, S↔B, R↔F)
+5. Texto em CAIXA ALTA é mais fácil de acertar — prefira CAIXA ALTA
+
+VOCABULÁRIO PERMITIDO (use só desta lista):
+KIT • COMBO • OFERTA • NOVO • TIPOS • PRODUTOS • LITROS • UNIDADES • RESISTENTE • PRÁTICO • VERSÁTIL • ALTA RESISTÊNCIA • DIVERSOS TAMANHOS • QUALIDADE • EMBALAGENS • ECONÔMICAS • GARANTIA • PRONTA ENTREGA • MAIS VENDIDO • NF EMITIDA • FRETE GRÁTIS • ENVIO RÁPIDO
+
 USO DAS IMAGENS DE REFERÊNCIA (CRÍTICO):
 - Use as ${refsCount} imagens fornecidas como referência VISUAL FIEL dos produtos
 - Cada produto na thumb DEVE ser visualmente idêntico ao da referência (cor, formato, embalagem, logo)
