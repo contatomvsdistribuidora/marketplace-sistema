@@ -262,35 +262,82 @@ export async function generateMultiProductThumbPromptSuggestion(
     ? `\n\nVariação secundária (${variation2Type}): ${variation2Options.join(", ")}`
     : "";
 
-  const systemPrompt = `Você é especialista em criar thumbnails de alta conversão (CTR) para o marketplace Shopee Brasil. Conhece TUDO sobre:
-- Layout que funciona em mobile (Shopee é 90% mobile)
-- Cores oficiais Shopee: laranja #ee4d2d, vermelho, amarelo, branco
-- Vocabulário comercial PT-BR correto (zero typos, sempre com acentos)
-- Selos que vendem: OFERTA, MAIS VENDIDO, FRETE GRÁTIS, GARANTIA, PRONTA ENTREGA, NF EMITIDA
-- Tipografia bold sans-serif gigante (Inter Black, Bebas Neue, Anton)
-- Como destacar VARIAÇÕES de um anúncio (numeração, capacidades, kits)
-- Layout testado de top sellers brasileiros
+  const systemPrompt = `Você é especialista em criar thumbnails de alta conversão (CTR) para o marketplace Shopee Brasil. Seu trabalho é gerar PROMPTS DETALHADOS pra IA de geração de imagem (gpt-image-1) criar thumbs CAMPEÃS DE VENDAS.
 
-Sua tarefa: gerar um PROMPT EM PORTUGUÊS BRASILEIRO detalhado (300-500 palavras) pra IA de geração de imagem (gpt-image-1) criar uma thumb campeã de vendas Shopee.
+═══════════════════════════════════════
+EXEMPLO DE PROMPT PROFISSIONAL (siga ESSE estilo):
+═══════════════════════════════════════
 
-REGRAS DO PROMPT QUE VOCÊ VAI GERAR:
-1. Mencione EXPLICITAMENTE cada variação do anúncio (nome, capacidade, qty)
-2. Inclua a cor oficial Shopee #ee4d2d
-3. Especifique tipografia bold extra-pesada
-4. Liste selos visuais relevantes pra categoria do produto
-5. Destaque que é mobile-first (textos GRANDES)
-6. Vocabulário PT-BR correto (sem errar acentos: RESISTÊNCIA, ECONÔMICAS, PRÁTICAS, VERSÁTEIS, TAMANHOS, ENTREGA)
-7. Solicite alimentos/contexto de uso real se for produto de cozinha/armazenamento
-8. Inclua chamadas: "ESCOLHA SUA VARIAÇÃO", "MAIS VENDIDO", "TODOS OS TAMANHOS"
-9. Especifique layout numerado (1, 2, 3...) se houver múltiplas variações
-10. Fundo limpo branco/cinza claro
-11. Especifique preservação das embalagens reais (não desfocar logos/textos)
+Criar imagem publicitária profissional para e-commerce Shopee, estilo premium e alta conversão, fundo clean branco com detalhes em azul e verde transmitindo limpeza e conservação de alimentos.
 
-NÃO inclua explicações, blocos markdown, nem prefixo "Aqui está o prompt:". Retorne SÓ o prompt direto pra IA de imagem.`;
+Mostrar sacos plásticos transparentes para armazenamento de alimentos, embalagens freezer bags premium, com aparência realista, alta definição, iluminação de estúdio, sombras suaves.
 
-  const userPrompt = `Crie o prompt profissional pra IA de imagem gerar a thumb desse anúncio Shopee:
+Exibir claramente as variações do anúncio em destaque visual:
+KIT 1 UNIDADE
+KIT 2 UNIDADES
+KIT 3 UNIDADES
 
-TÍTULO DO ANÚNCIO: ${listing.title || "(sem título)"}
+Mostrar também as capacidades disponíveis:
+2 Litros
+3 Litros
+5 Litros
+
+CRÍTICO: Inserir alimentos REAIS dentro das embalagens como frutas, legumes, carnes e vegetais frescos para demonstrar uso REAL do produto (não mostrar só embalagens vazias).
+
+Adicionar selos visuais de venda:
+✓ Ideal para Freezer
+✓ Conserva por Mais Tempo
+✓ Reutilizável
+✓ Proteção Contra Odor
+✓ Organização da Cozinha
+
+Layout marketplace brasileiro, estilo Shopee, elementos grandes, leitura rápida no mobile, foco total em conversão, design moderno, composição equilibrada.
+
+Inserir destaque promocional em cores fortes:
+ESCOLHA SUA VARIAÇÃO
+2L • 3L • 5L
+KITS COM 1, 2 OU 3 UNIDADES
+
+Footer com aplicações ("PERFEITO PARA: CARNES, FRUTAS, LEGUMES, PEIXES, PÃES, FREEZER" — adaptar à categoria do produto)
+
+Fotografia de produto ultra realista, qualidade comercial, estilo anúncio campeão de vendas Shopee mobile.
+
+═══════════════════════════════════════
+REGRAS OBRIGATÓRIAS DO PROMPT QUE VOCÊ VAI GERAR:
+═══════════════════════════════════════
+
+1. SIGA O ESTILO DO EXEMPLO ACIMA — formato, estrutura, tom
+2. MOSTRE O PRODUTO SENDO USADO (com conteúdo real dentro, em contexto de aplicação)
+3. DESTAQUE AS VARIAÇÕES com kits visuais (KIT 1 UNIDADE / 2 UNIDADES / 3 UNIDADES — quantidades replicadas)
+4. DESTAQUE CAPACIDADES/TAMANHOS se houver (2L, 3L, 5L, 30L, etc)
+5. EMBALAGENS SÓ COMO MINI-THUMBS DECORATIVAS (NÃO devem dominar a imagem)
+6. FOOTER OBRIGATÓRIO com "PERFEITO PARA:" + 4-6 categorias de aplicação adaptadas ao produto
+7. SELOS DE BENEFÍCIO específicos por categoria:
+   - Produto alimentar/freezer: "IDEAL FREEZER", "CONSERVA POR MAIS TEMPO", "REUTILIZÁVEL", "PROTEÇÃO CONTRA ODOR"
+   - Saco de lixo: "ALTA RESISTÊNCIA", "ANTI-VAZAMENTO", "REFORÇADO", "DIVERSOS TAMANHOS"
+   - Cosmético: "DERMATOLOGICAMENTE TESTADO", "HIPOALERGÊNICO", "USO PROFISSIONAL"
+   - Limpeza: "ALTA PERFORMANCE", "MULTIUSO", "RENDIMENTO"
+   - Adapte conforme categoria identificada
+8. CHAMADA "ESCOLHA SUA VARIAÇÃO" ou "ESCOLHA SEU KIT" obrigatória
+9. Fundo limpo branco/cinza claro, paleta limpa
+10. Português brasileiro COM ACENTOS perfeitos (RESISTÊNCIA, ECONÔMICAS, PRÁTICAS, VERSÁTEIS, TAMANHOS)
+11. Mobile-first (textos grandes, leitura rápida)
+12. Cor Shopee laranja #ee4d2d em algum elemento de destaque
+
+FORMATO DA RESPOSTA:
+- Retorne SÓ o prompt direto pra IA de imagem
+- SEM markdown
+- SEM "Aqui está o prompt:"
+- SEM explicações
+- Apenas o prompt completo (300-500 palavras) seguindo o estilo do EXEMPLO`;
+
+  const userPrompt = `Crie um prompt profissional pra IA de imagem gerar a thumb desse anúncio Shopee específico:
+
+═══════════════════════════════════════
+DADOS DO ANÚNCIO:
+═══════════════════════════════════════
+
+TÍTULO: ${listing.title || "(sem título)"}
 
 PRODUTO PRINCIPAL: ${principal.name}
 CATEGORIA: ${category || "Geral"}
@@ -300,7 +347,9 @@ ${variacoesResumo}${variacao2Block}
 
 DESCRIÇÃO RESUMIDA: ${(listing.description || "").slice(0, 800)}
 
-Agora, gere o prompt detalhado pra IA de imagem criar a thumb Shopee de alta conversão.`;
+═══════════════════════════════════════
+
+TAREFA: gere o prompt COMPLETO seguindo EXATAMENTE o estilo do EXEMPLO no system message, adaptado pra ESSE produto específico. Mencione cada variação por nome, especifique as capacidades/quantidades, identifique aplicações reais (o que pode ser guardado/usado), e adapte os selos à categoria. Embalagens só decorativas — o foco visual é o produto SENDO USADO.`;
 
   const llmResponse = await invokeLLM({
     messages: [
