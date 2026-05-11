@@ -385,48 +385,40 @@ export async function generateMultiProductThumb(
     }
   }
 
-  const numVariations = resolved.length;
+  const productCount = resolved.length;
+  const refsCount = referenceImages.length;
+  const categoryHeader = (category ?? "PRODUTOS").toUpperCase();
   const principalName = principal.name;
-  const categoryHint = category ? `\nCategoria: ${category}` : "";
-  const extraInstructions = extraPrompt ? `\n\nINSTRUÇÕES EXTRAS DO USUÁRIO:\n${extraPrompt.trim()}` : "";
+  const extraInstructions = extraPrompt
+    ? `\n\nINSTRUÇÕES EXTRAS DO USUÁRIO:\n${extraPrompt.trim()}`
+    : "";
 
-  const prompt = `Você está criando uma imagem de capa (thumb) para um anúncio Shopee Brasil que combina múltiplos produtos como variações dentro de uma única listagem.
+  const prompt = `Crie uma thumbnail para anúncio combinado no estilo Shopee/Mercado Livre.
 
-OBJETIVO:
-Criar uma imagem quadrada (1:1, 800x800 ou 1000x1000 pixels) que mostre os produtos de referência de forma atraente e que aumente o CTR (taxa de cliques) em listagens Shopee Brasil.
+LAYOUT OBRIGATÓRIO:
+- Imagem quadrada 1:1 (1024×1024)
+- Header no topo: texto grande, negrito, fundo azul-marinho, cor branca, conteúdo "${productCount} TIPOS DE ${categoryHeader}"
+- Sub-header laranja/amarelo logo abaixo: "Resistentes | Práticos | Versáteis" (adapte ao tipo de produto se fizer mais sentido)
+- Selo circular vermelho no canto superior direito: "MAIS RESISTÊNCIA PARA O DIA A DIA!" ou um benefício curto equivalente
+- Corpo central: os ${productCount} produtos enfileirados horizontalmente em ordem, cada um com um círculo laranja numerado (1, 2, 3...) acima, e label curto abaixo (máx 3 palavras: ex. "PIA E BANHEIRO", "100 LITROS", "30 LITROS PRETO")
+- Footer com 3 ou 4 selos de benefício: "ALTA RESISTÊNCIA", "DIVERSOS TAMANHOS", "QUALIDADE", "EMBALAGENS ECONÔMICAS" (ou equivalentes adequados ao produto)
+- Paleta: laranja, vermelho, azul-marinho, branco. Fundo neutro claro.
 
-ESTILO VISUAL:
-- Formato 1:1 (quadrado), aspecto adequado para listagem Shopee
-- Estilo brilhante e vibrante padrão Shopee Brasil
-- Paleta de cores: branco predominante com destaques em vermelho, laranja, amarelo
-- Fundo limpo: branco, gradient suave, ou colorido vibrante
-- Produtos centralizados e bem visíveis (não cortar, não distorcer formas reais)
-- Iluminação clara e profissional (estilo e-commerce)
-- Composição organizada: dispor produtos em arranjo equilibrado (lado a lado, em grade, ou círculo)
+USO DAS IMAGENS DE REFERÊNCIA (CRÍTICO):
+- Use as ${refsCount} imagens fornecidas como referência VISUAL FIEL dos produtos
+- Cada produto na thumb DEVE ser visualmente idêntico ao da referência (cor, formato, embalagem, logo)
+- NÃO invente produtos, NÃO substitua por genéricos
+- Mantenha a ORDEM das imagens de referência (1ª imagem = produto 1 na thumb, 2ª = produto 2, etc.)
+- Se houver mais produtos no listing (${productCount}) do que imagens de referência (${refsCount}), mostre apenas os ${refsCount} que têm foto
 
-ELEMENTOS GRÁFICOS PERMITIDOS:
-- Texto curto em destaque ("KIT", "${numVariations} EM 1", "PRONTA ENTREGA", número de variações) — tipografia bold sans-serif
-- Selos circulares ou em fita ("OFERTA", "NOVO")
-- Linhas e formas geométricas simples para destacar produtos
-- Use texto com moderação — NUNCA mais que 2-3 palavras na imagem inteira
+ESTILO:
+- Tipografia: sans-serif bold (Montserrat ou similar)
+- Composição limpa, alto contraste
+- Sem texto pequeno ilegível, sem mockups 3D abstratos
+- Foto realística dos produtos (não cartoon, não ilustração)
 
-PROIBIDO:
-- NÃO inventar produtos diferentes dos fornecidos nas imagens de referência
-- NÃO usar texto longo, parágrafos ou descrições completas
-- NÃO usar logotipos de marcas (Shopee, Mercado Livre, etc) — apenas estilo visual genérico
-- NÃO usar elementos que pareçam falsos (selos premium fictícios, certificações inventadas)
-- NÃO adicionar pessoas, mãos, modelos humanos
-- NÃO criar fundos cheios de elementos decorativos que distraiam dos produtos
-
-USO DAS IMAGENS DE REFERÊNCIA:
-As imagens fornecidas são fotos REAIS dos produtos do anúncio. Use-as como referência visual fiel — produtos na thumb final devem corresponder aos da referência (mesma forma, cor, tipo). Você pode estilizar (ângulo, iluminação, fundo, posicionamento), mas não invente produtos novos.
-
-CONTEXTO DO ANÚNCIO:
-Produto Principal: ${principalName}
-Número de variações: ${numVariations}${categoryHint}${extraInstructions}
-
-SAÍDA:
-Uma imagem quadrada de alta qualidade pronta para uso como capa de anúncio Shopee.`;
+CONTEXTO:
+Produto Principal: ${principalName}${extraInstructions}`;
 
   const result = await generateImage({
     prompt,

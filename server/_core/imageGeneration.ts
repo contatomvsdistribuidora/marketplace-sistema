@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { ENV } from "./env";
 import { storagePut } from "../storage";
 
@@ -188,21 +188,70 @@ async function generateViaOpenAI(
   originalImages: GenerateImageOptions["originalImages"],
   cfg: Extract<ModelConfig, { provider: "openai" }>
 ): Promise<GenerateImageResponse> {
-  if (originalImages && originalImages.length > 0) {
-    console.warn(
-      "[imageGeneration] OpenAI provider ignora originalImages no images.generate. " +
-      "Reference images requerem images.edit (não implementado)."
-    );
+  const client = getOpenAIClient();
+
+  const refs = (originalImages ?? []).slice(0, MAX_REF_IMAGES);
+  const refBuffers: Buffer[] = [];
+  for (const ref of refs) {
+    try {
+      const buf = await buildRefBuffer(ref);
+      if (buf) refBuffers.push(buf);
+    } catch (err) {
+      console.warn("[imageGeneration] ref ignorada:", (err as Error).message);
+    }
   }
 
-  const client = getOpenAIClient();
-  const response = await client.images.generate({
-    model: cfg.slug,
-    prompt,
-    n: 1,
-    size: `${OUTPUT_W}x${OUTPUT_H}`,
-    quality: cfg.quality,
-  });
+  let response: OpenAI.Images.ImagesResponse;
+
+  if (refBuffers.length > 0) {
+    const uploadables = await Promise.all(
+      refBuffers.map((buf, i) =>
+        toFile(buf, `ref-${i + 1}.jpg`, { type: "image/jpeg" }),
+      ),
+    );
+    console.log(
+      `[imageGeneration] OpenAI images.edit com ${uploadables.length} ref(s), model=${cfg.slug}, quality=${cfg.quality}`,
+    );
+    try {
+      response = await client.images.edit({
+        model: cfg.slug,
+        image: uploadables,
+        prompt,
+        n: 1,
+        size: `${OUTPUT_W}x${OUTPUT_H}`,
+        quality: cfg.quality,
+        input_fidelity: "high",
+      });
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      if (/input_fidelity|unrecognized|unknown.*param|invalid_request/i.test(msg)) {
+        console.warn(
+          `[imageGeneration] input_fidelity rejeitado pelo modelo, retentando sem: ${msg}`,
+        );
+        response = await client.images.edit({
+          model: cfg.slug,
+          image: uploadables,
+          prompt,
+          n: 1,
+          size: `${OUTPUT_W}x${OUTPUT_H}`,
+          quality: cfg.quality,
+        });
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    console.log(
+      `[imageGeneration] OpenAI images.generate sem refs, model=${cfg.slug}, quality=${cfg.quality}`,
+    );
+    response = await client.images.generate({
+      model: cfg.slug,
+      prompt,
+      n: 1,
+      size: `${OUTPUT_W}x${OUTPUT_H}`,
+      quality: cfg.quality,
+    });
+  }
 
   const b64 = response.data?.[0]?.b64_json;
   if (!b64) {
