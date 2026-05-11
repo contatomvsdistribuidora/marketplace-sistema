@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { ThumbGeneratorModal } from "./ThumbGeneratorModal";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
   SelectTrigger, SelectValue,
@@ -110,7 +110,7 @@ function SortableImage({
 }
 
 export function StepC({ listing, onChange }: { listing: Listing; onChange: () => void }) {
-  const [extraPrompt, setExtraPrompt] = useState("");
+  const [thumbModalOpen, setThumbModalOpen] = useState(false);
   const [videoModalOpen, setVideoModalOpen] = useState(false);
   const [videoSearch, setVideoSearch] = useState("");
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
@@ -289,14 +289,6 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const confirmUploadMut = trpc.videoBank.confirmUpload.useMutation();
   const importFromUrlMut = trpc.videoBank.importFromUrl.useMutation();
   const utilsVideoBank = trpc.useUtils();
-
-  const generateThumbMutation = trpc.multiProduct.generateThumbWithAI.useMutation({
-    onSuccess: () => {
-      onChange();
-      toast.success("Thumb gerada com sucesso.");
-    },
-    onError: (e) => toast.error(e.message),
-  });
 
   function handleSelectVideo(value: string) {
     if (value === "none") {
@@ -603,45 +595,27 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={generateThumbMutation.isPending}
-                  onClick={() =>
-                    generateThumbMutation.mutate({
-                      id: listing.id,
-                      extraPrompt: extraPrompt.trim() || undefined,
-                    })
-                  }
+                  onClick={() => setThumbModalOpen(true)}
                 >
-                  {generateThumbMutation.isPending ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Gerando...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      {listing.thumbUrl ? "Regenerar thumb" : "Gerar thumb"}
-                    </>
-                  )}
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  {listing.thumbUrl ? "Regenerar com IA" : "Gerar com IA"}
                 </Button>
               </div>
             </div>
           </div>
-          <div className="mt-3 space-y-1">
-            <Label htmlFor="extra-prompt" className="text-xs text-muted-foreground">
-              Instruções extras (opcional)
-            </Label>
-            <Textarea
-              id="extra-prompt"
-              rows={2}
-              value={extraPrompt}
-              onChange={(e) => setExtraPrompt(e.target.value)}
-              placeholder='Ex: "use fundo amarelo", "destaque a palavra KIT"'
-              className="text-xs"
-              disabled={generateThumbMutation.isPending}
-            />
-          </div>
         </CardContent>
       </Card>
+
+      <ThumbGeneratorModal
+        listingId={listing.id}
+        isOpen={thumbModalOpen}
+        onClose={() => setThumbModalOpen(false)}
+        onSuccess={() => {
+          onChange();
+          toast.success("Thumb salva com sucesso!");
+        }}
+        currentThumbUrl={listing.thumbUrl}
+      />
 
       <Card>
         <CardHeader>

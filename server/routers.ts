@@ -4533,16 +4533,100 @@ export const appRouter = router({
         return { description };
       }),
 
+    getAvailableThumbImages: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "Anúncio combinado não encontrado." });
+
+        const items = await sharedDb
+          .select()
+          .from(multiProductListingItems)
+          .where(eq(multiProductListingItems.listingId, input.id));
+
+        const out: Array<{
+          source: "baselinker" | "shopee";
+          sourceId: number;
+          name: string;
+          imageUrls: string[];
+          isPrincipal: boolean;
+        }> = [];
+
+        for (const item of items) {
+          const isPrincipal =
+            item.source === listing.mainProductSource &&
+            Number(item.sourceId) === Number(listing.mainProductSourceId);
+
+          if (item.source === "baselinker") {
+            const [p] = await sharedDb
+              .select({
+                imageUrl: productCache.imageUrl,
+                name: productCache.name,
+              })
+              .from(productCache)
+              .where(eq(productCache.productId, Number(item.sourceId)))
+              .limit(1);
+            const urls = p?.imageUrl ? [p.imageUrl] : [];
+            out.push({
+              source: "baselinker",
+              sourceId: Number(item.sourceId),
+              name: p?.name ?? "",
+              imageUrls: urls,
+              isPrincipal,
+            });
+          } else {
+            const [p] = await sharedDb
+              .select({
+                imageUrl: shopeeProducts.imageUrl,
+                images: shopeeProducts.images,
+                name: shopeeProducts.itemName,
+              })
+              .from(shopeeProducts)
+              .where(eq(shopeeProducts.itemId, Number(item.sourceId)))
+              .limit(1);
+            const urls: string[] = [];
+            if (p?.imageUrl) urls.push(p.imageUrl);
+            if (Array.isArray(p?.images)) {
+              for (const u of p.images) {
+                if (typeof u === "string" && u && !urls.includes(u)) urls.push(u);
+              }
+            }
+            out.push({
+              source: "shopee",
+              sourceId: Number(item.sourceId),
+              name: p?.name ?? "",
+              imageUrls: urls,
+              isPrincipal,
+            });
+          }
+        }
+
+        // Principal primeiro, resto na ordem dos items
+        out.sort((a, b) => Number(b.isPrincipal) - Number(a.isPrincipal));
+        return out;
+      }),
+
     generateThumbWithAI: protectedProcedure
       .input(z.object({
         id: z.number(),
         extraPrompt: z.string().optional(),
+        selectedImageUrls: z.array(z.string().url()).max(16).optional(),
+        headerText: z.string().max(100).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const result = await multiProductAi.generateMultiProductThumb(
           input.id,
           ctx.user.id,
           input.extraPrompt,
+          input.selectedImageUrls,
+          input.headerText,
         );
         return result;
       }),

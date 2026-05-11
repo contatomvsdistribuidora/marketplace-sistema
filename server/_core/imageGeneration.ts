@@ -43,7 +43,7 @@ const MODEL_MAP: Record<string, ModelConfig> = {
 };
 
 const FALLBACK_KEY = "flux-klein-4b";
-const MAX_REF_IMAGES = 4;
+const MAX_REF_IMAGES = 16;
 const MAX_REF_BYTES = 5 * 1024 * 1024;
 const REF_MAX_DIM = 512;
 const OUTPUT_W = 1024;

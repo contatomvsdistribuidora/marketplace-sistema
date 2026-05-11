@@ -356,38 +356,45 @@ export async function generateMultiProductThumb(
   listingId: number,
   userId: number,
   extraPrompt?: string,
+  selectedImageUrls?: string[],
+  headerText?: string,
 ): Promise<{ thumbUrl: string; promptUsed: string }> {
   const { resolved, principal, category } = await resolveListingContext(listingId, userId);
 
-  // Coleta até 4 imagens de referência: principal primeiro + até 3 outros
-  const others = resolved
-    .filter((r) => !(r.source === principal.source && r.sourceId === principal.sourceId))
-    .slice(0, 3);
-  const refItems = [principal, ...others];
+  let referenceImages: Array<{ url: string }> = [];
 
-  // resolveListingContext não retorna imageUrl — busca caso a caso aqui.
-  const referenceImages: Array<{ url: string }> = [];
-  for (const item of refItems) {
-    if (item.source === "baselinker") {
-      const [p] = await sharedDb
-        .select({ imageUrl: productCache.imageUrl })
-        .from(productCache)
-        .where(eq(productCache.productId, item.sourceId))
-        .limit(1);
-      if (p?.imageUrl) referenceImages.push({ url: p.imageUrl });
-    } else {
-      const [p] = await sharedDb
-        .select({ imageUrl: shopeeProducts.imageUrl })
-        .from(shopeeProducts)
-        .where(eq(shopeeProducts.itemId, item.sourceId))
-        .limit(1);
-      if (p?.imageUrl) referenceImages.push({ url: p.imageUrl });
+  if (selectedImageUrls && selectedImageUrls.length > 0) {
+    // Modo manual: usa as URLs escolhidas pelo usuário no modal (até 16)
+    referenceImages = selectedImageUrls.slice(0, 16).map((url) => ({ url }));
+  } else {
+    // Modo auto (backward compat): principal primeiro + até 3 outros, foto principal de cada
+    const others = resolved
+      .filter((r) => !(r.source === principal.source && r.sourceId === principal.sourceId))
+      .slice(0, 3);
+    const refItems = [principal, ...others];
+    for (const item of refItems) {
+      if (item.source === "baselinker") {
+        const [p] = await sharedDb
+          .select({ imageUrl: productCache.imageUrl })
+          .from(productCache)
+          .where(eq(productCache.productId, item.sourceId))
+          .limit(1);
+        if (p?.imageUrl) referenceImages.push({ url: p.imageUrl });
+      } else {
+        const [p] = await sharedDb
+          .select({ imageUrl: shopeeProducts.imageUrl })
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.itemId, item.sourceId))
+          .limit(1);
+        if (p?.imageUrl) referenceImages.push({ url: p.imageUrl });
+      }
     }
   }
 
   const productCount = resolved.length;
   const refsCount = referenceImages.length;
-  const categoryHeader = (category ?? "PRODUTOS").toUpperCase();
+  const autoHeader = `${productCount} TIPOS DE ${(category ?? "PRODUTOS").toUpperCase()}`;
+  const headerLine = (headerText?.trim() ? headerText.trim() : autoHeader);
   const principalName = principal.name;
   const extraInstructions = extraPrompt
     ? `\n\nINSTRUÇÕES EXTRAS DO USUÁRIO:\n${extraPrompt.trim()}`
@@ -397,10 +404,10 @@ export async function generateMultiProductThumb(
 
 LAYOUT OBRIGATÓRIO:
 - Imagem quadrada 1:1 (1024×1024)
-- Header no topo: texto grande, negrito, fundo azul-marinho, cor branca, conteúdo "${productCount} TIPOS DE ${categoryHeader}"
+- Header no topo: texto grande, negrito, fundo azul-marinho, cor branca, conteúdo "${headerLine}"
 - Sub-header laranja/amarelo logo abaixo: "Resistentes | Práticos | Versáteis" (adapte ao tipo de produto se fizer mais sentido)
 - Selo circular vermelho no canto superior direito: "MAIS RESISTÊNCIA PARA O DIA A DIA!" ou um benefício curto equivalente
-- Corpo central: os ${productCount} produtos enfileirados horizontalmente em ordem, cada um com um círculo laranja numerado (1, 2, 3...) acima, e label curto abaixo (máx 3 palavras: ex. "PIA E BANHEIRO", "100 LITROS", "30 LITROS PRETO")
+- Corpo central: os ${refsCount} produtos enfileirados horizontalmente em ordem, cada um com um círculo laranja numerado (1, 2, 3...) acima, e label curto abaixo (máx 3 palavras: ex. "PIA E BANHEIRO", "100 LITROS", "30 LITROS PRETO")
 - Footer com 3 ou 4 selos de benefício: "ALTA RESISTÊNCIA", "DIVERSOS TAMANHOS", "QUALIDADE", "EMBALAGENS ECONÔMICAS" (ou equivalentes adequados ao produto)
 - Paleta: laranja, vermelho, azul-marinho, branco. Fundo neutro claro.
 
@@ -409,7 +416,6 @@ USO DAS IMAGENS DE REFERÊNCIA (CRÍTICO):
 - Cada produto na thumb DEVE ser visualmente idêntico ao da referência (cor, formato, embalagem, logo)
 - NÃO invente produtos, NÃO substitua por genéricos
 - Mantenha a ORDEM das imagens de referência (1ª imagem = produto 1 na thumb, 2ª = produto 2, etc.)
-- Se houver mais produtos no listing (${productCount}) do que imagens de referência (${refsCount}), mostre apenas os ${refsCount} que têm foto
 
 ESTILO:
 - Tipografia: sans-serif bold (Montserrat ou similar)
