@@ -23,6 +23,16 @@ import {
   type ThumbBadge,
   type ThumbColor,
 } from "@shared/thumb-styles";
+import {
+  THUMB_PROMPT_BASES,
+  THUMB_TOGGLES_COMPOSICAO,
+  THUMB_TOGGLES_CONTEXTO,
+  THUMB_TOGGLES_ENFASE,
+  type ThumbPromptBase,
+  type ThumbToggleComposicao,
+  type ThumbToggleContexto,
+  type ThumbToggleEnfase,
+} from "@shared/thumb-prompts";
 
 type Props = {
   listingId: number;
@@ -34,6 +44,7 @@ type Props = {
 
 const MAX_REFS = 16;
 const DEFAULT_STYLE: ThumbStyle = "mercadao";
+const DEFAULT_PROMPT_BASE: ThumbPromptBase = "top-vendedor";
 
 export function ThumbGeneratorModal({
   listingId,
@@ -48,6 +59,12 @@ export function ThumbGeneratorModal({
   const [selectedStyle, setSelectedStyle] = useState<ThumbStyle>(DEFAULT_STYLE);
   const [selectedBadges, setSelectedBadges] = useState<ThumbBadge[]>([]);
   const [selectedColor, setSelectedColor] = useState<ThumbColor | undefined>(undefined);
+  const [selectedPromptBase, setSelectedPromptBase] = useState<ThumbPromptBase>(DEFAULT_PROMPT_BASE);
+  const [selectedComposicao, setSelectedComposicao] = useState<ThumbToggleComposicao[]>([]);
+  const [selectedContexto, setSelectedContexto] = useState<ThumbToggleContexto[]>([]);
+  const [selectedEnfase, setSelectedEnfase] = useState<ThumbToggleEnfase[]>([]);
+  const [customPromptMode, setCustomPromptMode] = useState<boolean>(false);
+  const [customPromptText, setCustomPromptText] = useState<string>("");
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
 
@@ -82,9 +99,40 @@ export function ThumbGeneratorModal({
     setSelectedStyle(DEFAULT_STYLE);
     setSelectedBadges([]);
     setSelectedColor(undefined);
+    setSelectedPromptBase(DEFAULT_PROMPT_BASE);
+    setSelectedComposicao([]);
+    setSelectedContexto([]);
+    setSelectedEnfase([]);
+    setCustomPromptMode(false);
+    setCustomPromptText("");
     setGeneratedUrl(null);
     setZoomOpen(false);
   }, [isOpen]);
+
+  // Quando o prompt base muda, marca os toggles padrão dele
+  useEffect(() => {
+    if (!selectedPromptBase) return;
+    const base = THUMB_PROMPT_BASES[selectedPromptBase];
+    setSelectedComposicao(base.defaultToggles.composicao);
+    setSelectedContexto(base.defaultToggles.contexto);
+    setSelectedEnfase(base.defaultToggles.enfase);
+  }, [selectedPromptBase]);
+
+  function toggleComposicao(t: ThumbToggleComposicao) {
+    setSelectedComposicao((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  }
+  function toggleContexto(t: ThumbToggleContexto) {
+    setSelectedContexto((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  }
+  function toggleEnfase(t: ThumbToggleEnfase) {
+    setSelectedEnfase((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  }
 
   function toggleBadge(b: ThumbBadge) {
     setSelectedBadges((prev) => {
@@ -137,6 +185,11 @@ export function ThumbGeneratorModal({
       style: selectedStyle,
       badges: selectedBadges.length > 0 ? selectedBadges : undefined,
       color: selectedColor,
+      promptBase: customPromptMode ? undefined : selectedPromptBase,
+      composicao: customPromptMode || selectedComposicao.length === 0 ? undefined : selectedComposicao,
+      contexto: customPromptMode || selectedContexto.length === 0 ? undefined : selectedContexto,
+      enfase: customPromptMode || selectedEnfase.length === 0 ? undefined : selectedEnfase,
+      customPrompt: customPromptMode && customPromptText.trim() ? customPromptText.trim() : undefined,
     });
   }
 
@@ -360,6 +413,180 @@ export function ThumbGeneratorModal({
                   },
                 )}
               </div>
+            </div>
+
+            {/* SEÇÃO: PROMPT BASE (estratégia narrativa) */}
+            <div>
+              <Label>🎬 Estratégia narrativa</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Define como organizar e contar a história do produto.
+              </p>
+              <div className={`grid grid-cols-2 gap-2 ${customPromptMode ? "opacity-40 pointer-events-none" : ""}`}>
+                {(Object.entries(THUMB_PROMPT_BASES) as [ThumbPromptBase, typeof THUMB_PROMPT_BASES[ThumbPromptBase]][]).map(
+                  ([key, meta]) => {
+                    const active = selectedPromptBase === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setSelectedPromptBase(key)}
+                        className={`text-left border-2 rounded p-2 transition ${
+                          active
+                            ? "border-orange-500 bg-orange-50"
+                            : "border-gray-200 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1 text-sm font-medium">
+                          <span>{meta.icon}</span>
+                          <span>{meta.label}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                          {meta.description}
+                        </p>
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+
+            {/* SEÇÃO: TOGGLES NARRATIVOS (Composição / Contexto / Ênfase) */}
+            <div className={customPromptMode ? "opacity-40 pointer-events-none" : ""}>
+              <Label>🎭 Ajuste fino (toggles)</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Personalize a narrativa. Marque quantos quiser.
+              </p>
+
+              {/* Composição */}
+              <div className="mb-2">
+                <p className="text-xs font-medium text-gray-700 mb-1">Composição:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(Object.entries(THUMB_TOGGLES_COMPOSICAO) as [ThumbToggleComposicao, typeof THUMB_TOGGLES_COMPOSICAO[ThumbToggleComposicao]][]).map(
+                    ([key, meta]) => {
+                      const active = selectedComposicao.includes(key);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => toggleComposicao(key)}
+                          className={`text-xs px-2.5 py-1 rounded-full border-2 transition ${
+                            active
+                              ? "border-blue-500 bg-blue-100 text-blue-900 font-medium"
+                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                          }`}
+                        >
+                          {meta.label}
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              </div>
+
+              {/* Contexto */}
+              <div className="mb-2">
+                <p className="text-xs font-medium text-gray-700 mb-1">Contexto:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(Object.entries(THUMB_TOGGLES_CONTEXTO) as [ThumbToggleContexto, typeof THUMB_TOGGLES_CONTEXTO[ThumbToggleContexto]][]).map(
+                    ([key, meta]) => {
+                      const active = selectedContexto.includes(key);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => toggleContexto(key)}
+                          className={`text-xs px-2.5 py-1 rounded-full border-2 transition ${
+                            active
+                              ? "border-purple-500 bg-purple-100 text-purple-900 font-medium"
+                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                          }`}
+                        >
+                          {meta.label}
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              </div>
+
+              {/* Ênfase */}
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1">Ênfase:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(Object.entries(THUMB_TOGGLES_ENFASE) as [ThumbToggleEnfase, typeof THUMB_TOGGLES_ENFASE[ThumbToggleEnfase]][]).map(
+                    ([key, meta]) => {
+                      const active = selectedEnfase.includes(key);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => toggleEnfase(key)}
+                          className={`text-xs px-2.5 py-1 rounded-full border-2 transition ${
+                            active
+                              ? "border-green-500 bg-green-100 text-green-900 font-medium"
+                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                          }`}
+                        >
+                          {meta.label}
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO: MODO AVANÇADO — editar prompt manualmente */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label>✏️  Prompt manual (avançado)</Label>
+                <button
+                  type="button"
+                  onClick={() => setCustomPromptMode(!customPromptMode)}
+                  className={`text-xs px-3 py-1 rounded border transition ${
+                    customPromptMode
+                      ? "bg-orange-100 border-orange-500 text-orange-900 font-medium"
+                      : "bg-white border-gray-300 text-gray-600 hover:border-gray-400"
+                  }`}
+                >
+                  {customPromptMode ? "✓ Modo manual ativo" : "Ativar edição manual"}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mb-2">
+                {customPromptMode
+                  ? "⚠️  Modo manual: estratégia e toggles acima ficam desativados. O texto abaixo é enviado direto pra IA."
+                  : "Edite o prompt completo manualmente (substitui estratégia + toggles)."}
+              </p>
+              <Textarea
+                rows={6}
+                value={customPromptText}
+                onChange={(e) => setCustomPromptText(e.target.value)}
+                placeholder={
+                  customPromptMode
+                    ? "Escreva aqui o prompt completo que será enviado pra IA..."
+                    : "Ative o modo manual acima pra escrever um prompt customizado"
+                }
+                disabled={!customPromptMode}
+                className="text-xs font-mono"
+                maxLength={5000}
+              />
+              {customPromptMode && (
+                <div className="flex justify-between items-center mt-1">
+                  <p className="text-[10px] text-muted-foreground">
+                    {customPromptText.length}/5000 caracteres
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPromptMode(false);
+                      setCustomPromptText("");
+                    }}
+                    className="text-[11px] text-blue-600 hover:underline"
+                  >
+                    ↺ Restaurar automático
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

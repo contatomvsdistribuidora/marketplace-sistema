@@ -4691,6 +4691,21 @@ export const appRouter = router({
           "vermelho", "laranja", "amarelo", "verde",
           "azul", "roxo", "preto", "branco",
         ]).optional(),
+        promptBase: z.enum([
+          "top-vendedor", "premium", "atacado", "kit-familia",
+          "oferta-urgencia", "foco-beneficio", "eco", "sazonal",
+          "detalhe-tecnico", "comparativo",
+        ]).optional(),
+        composicao: z.array(z.enum([
+          "vitrine-ordenada", "grade-2x2", "central", "empilhamento", "numeracao",
+        ])).optional(),
+        contexto: z.array(z.enum([
+          "em-uso", "casa", "loja", "fundo-neutro", "lifestyle-premium",
+        ])).optional(),
+        enfase: z.array(z.enum([
+          "quantidade", "variedade", "qualidade-tecnica", "economia", "comparativo-visual",
+        ])).optional(),
+        customPrompt: z.string().max(5000).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const result = await multiProductAi.generateMultiProductThumb(
@@ -4702,6 +4717,11 @@ export const appRouter = router({
           input.style,
           input.badges,
           input.color,
+          input.promptBase,
+          input.composicao,
+          input.contexto,
+          input.enfase,
+          input.customPrompt,
         );
         return result;
       }),

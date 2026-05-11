@@ -15,6 +15,13 @@ import {
   type ThumbBadge,
   type ThumbColor,
 } from "../shared/thumb-styles";
+import {
+  buildNarrativePromptSection,
+  type ThumbPromptBase,
+  type ThumbToggleComposicao,
+  type ThumbToggleContexto,
+  type ThumbToggleEnfase,
+} from "../shared/thumb-prompts";
 
 type ResolvedItem = {
   source: "baselinker" | "shopee";
@@ -367,6 +374,11 @@ export async function generateMultiProductThumb(
   style?: ThumbStyle,
   badges?: ThumbBadge[],
   color?: ThumbColor,
+  promptBase?: ThumbPromptBase,
+  composicao?: ThumbToggleComposicao[],
+  contexto?: ThumbToggleContexto[],
+  enfase?: ThumbToggleEnfase[],
+  customPrompt?: string,
 ): Promise<{ thumbUrl: string; promptUsed: string }> {
   const { resolved, principal, category } = await resolveListingContext(listingId, userId);
 
@@ -410,8 +422,16 @@ export async function generateMultiProductThumb(
     : "";
 
   const styleSection = buildStylePromptSection(style, badges ?? [], color);
+  const narrativeSection = buildNarrativePromptSection(
+    promptBase,
+    composicao ?? [],
+    contexto ?? [],
+    enfase ?? [],
+  );
 
-  const prompt = `Crie uma thumbnail para anúncio combinado no estilo Shopee/Mercado Livre.
+  const prompt = customPrompt && customPrompt.trim().length > 0
+    ? customPrompt.trim()
+    : `Crie uma thumbnail para anúncio combinado no estilo Shopee/Mercado Livre.
 
 LAYOUT OBRIGATÓRIO:
 - Imagem quadrada 1:1 (1024×1024)
@@ -462,7 +482,7 @@ REGRAS GERAIS DE ESTILO:
 - Composição limpa, alto contraste
 - Sem texto pequeno ilegível, sem mockups 3D abstratos
 - Foto realística dos produtos (não cartoon, não ilustração)
-${styleSection}
+${styleSection}${narrativeSection}
 
 CONTEXTO:
 Produto Principal: ${principalName}${extraInstructions}`;
