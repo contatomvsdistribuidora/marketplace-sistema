@@ -547,15 +547,15 @@ export function ThumbGeneratorModal({
 
             {/* SEÇÃO: MODO AVANÇADO — editar prompt manualmente */}
             <div>
-              <div className="flex items-center justify-between mb-2 gap-2">
+              <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                 <Label className="shrink-0">✏️  Prompt manual (avançado)</Label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={() => generatePromptMutation.mutate({ id: listingId })}
                     disabled={generatePromptMutation.isPending}
-                    className="text-xs px-3 py-1 rounded border bg-gradient-to-r from-purple-100 to-pink-100 border-purple-400 text-purple-900 font-medium hover:from-purple-200 hover:to-pink-200 transition disabled:opacity-50"
-                    title="IA lê os dados do anúncio (variações, marca, descrição) e cria um prompt especialista Shopee otimizado pra alta conversão"
+                    className="text-xs px-3 py-1 rounded border bg-gradient-to-r from-purple-100 to-pink-100 border-purple-400 text-purple-900 font-medium hover:from-purple-200 hover:to-pink-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="IA lê os dados do anúncio (variações, preço, descrição) e cria um prompt especialista Shopee otimizado pra alta conversão"
                   >
                     {generatePromptMutation.isPending ? (
                       <><Loader2 className="h-3 w-3 mr-1 inline animate-spin" /> Gerando...</>
@@ -579,7 +579,7 @@ export function ThumbGeneratorModal({
               <p className="text-xs text-muted-foreground mb-2">
                 {customPromptMode
                   ? "⚠️  Modo manual ativo: estratégia e toggles acima ficam desativados. O texto abaixo é enviado direto pra IA de imagem."
-                  : "💡 Use o botão '🤖 Gerar prompt com IA' acima pra criar um prompt customizado baseado no anúncio, ou ative edição manual pra escrever do zero."}
+                  : "💡 Clique em '🤖 Gerar prompt com IA' acima pra criar um prompt customizado baseado nos dados do anúncio, ou em 'Ativar edição manual' pra escrever do zero."}
               </p>
               <Textarea
                 rows={6}
