@@ -186,19 +186,22 @@ export function ThumbGeneratorModal({
       toast.error("Selecione ao menos 1 foto.");
       return;
     }
+    const hasCustomPrompt = customPromptMode && customPromptText.trim().length > 0;
+
     generateMutation.mutate({
       id: listingId,
-      extraPrompt: extraPrompt.trim() || undefined,
       selectedImageUrls: selected,
-      headerText: headerText.trim() || undefined,
-      style: selectedStyle,
-      badges: selectedBadges.length > 0 ? selectedBadges : undefined,
-      color: selectedColor,
-      promptBase: customPromptMode ? undefined : selectedPromptBase,
-      composicao: customPromptMode || selectedComposicao.length === 0 ? undefined : selectedComposicao,
-      contexto: customPromptMode || selectedContexto.length === 0 ? undefined : selectedContexto,
-      enfase: customPromptMode || selectedEnfase.length === 0 ? undefined : selectedEnfase,
-      customPrompt: customPromptMode && customPromptText.trim() ? customPromptText.trim() : undefined,
+      customPrompt: hasCustomPrompt ? customPromptText.trim() : undefined,
+      // Quando tem custom prompt, IGNORA TODO o resto pra não misturar
+      extraPrompt: hasCustomPrompt ? undefined : (extraPrompt.trim() || undefined),
+      headerText: hasCustomPrompt ? undefined : (headerText.trim() || undefined),
+      style: hasCustomPrompt ? undefined : selectedStyle,
+      badges: hasCustomPrompt ? undefined : (selectedBadges.length > 0 ? selectedBadges : undefined),
+      color: hasCustomPrompt ? undefined : selectedColor,
+      promptBase: hasCustomPrompt ? undefined : selectedPromptBase,
+      composicao: hasCustomPrompt ? undefined : (selectedComposicao.length > 0 ? selectedComposicao : undefined),
+      contexto: hasCustomPrompt ? undefined : (selectedContexto.length > 0 ? selectedContexto : undefined),
+      enfase: hasCustomPrompt ? undefined : (selectedEnfase.length > 0 ? selectedEnfase : undefined),
     });
   }
 
@@ -678,6 +681,12 @@ export function ThumbGeneratorModal({
           </div>
         </div>
         </div>
+
+        {customPromptMode && customPromptText.trim().length > 0 && (
+          <div className="text-xs bg-yellow-50 border-t border-yellow-300 text-yellow-900 px-6 py-2 shrink-0">
+            🎯 <strong>Modo Apenas Prompt ativo:</strong> estilo, selos, cores e toggles serão IGNORADOS. Só o texto do prompt manual vai pra IA — isso evita conflito e gera resultado mais próximo do esperado.
+          </div>
+        )}
 
         <DialogFooter className="flex justify-between gap-2 px-6 py-4 border-t shrink-0 bg-white">
           <Button variant="outline" onClick={onClose}>

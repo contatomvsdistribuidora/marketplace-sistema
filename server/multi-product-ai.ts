@@ -558,8 +558,14 @@ export async function generateMultiProductThumb(
     enfase ?? [],
   );
 
-  const prompt = customPrompt && customPrompt.trim().length > 0
-    ? customPrompt.trim()
+  const hasCustomPrompt = customPrompt && customPrompt.trim().length > 0;
+  if (hasCustomPrompt) {
+    console.log(
+      `[generateThumb] Modo customPrompt — usando ${customPrompt!.trim().length} chars de prompt manual (ignorando style/badges/color/promptBase/toggles)`,
+    );
+  }
+  const prompt = hasCustomPrompt
+    ? customPrompt!.trim()
     : `Crie uma thumbnail para anúncio combinado no estilo Shopee/Mercado Livre.
 
 LAYOUT OBRIGATÓRIO:
