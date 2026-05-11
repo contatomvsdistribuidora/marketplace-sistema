@@ -150,15 +150,16 @@ export function ThumbGeneratorModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-screen-2xl w-[95vw] max-h-[95vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" />
+      <DialogContent className="!max-w-none !w-screen !h-screen !max-h-screen !rounded-none p-0 flex flex-col overflow-hidden">
+        <DialogHeader className="px-6 py-4 border-b shrink-0 bg-white shadow-sm">
+          <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
+            <Sparkles className="h-6 w-6" />
             Gerar Thumb com IA
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full max-w-[1800px] mx-auto">
           {/* COLUNA ESQUERDA — Configurações */}
           <div className="space-y-4">
             <div>
@@ -171,7 +172,7 @@ export function ThumbGeneratorModal({
               {imagesQuery.isLoading ? (
                 <Skeleton className="h-48 w-full" />
               ) : imagesQuery.data && imagesQuery.data.length > 0 ? (
-                <div className="grid grid-cols-3 gap-2 max-h-80 overflow-y-auto p-2 border rounded">
+                <div className="grid grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto p-2 border rounded">
                   {imagesQuery.data.flatMap((item) =>
                     item.imageUrls.map((url, urlIdx) => {
                       const isSelected = selected.includes(url);
@@ -200,7 +201,7 @@ export function ThumbGeneratorModal({
                             </div>
                           )}
                           {isSelected && (
-                            <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
+                            <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
                               ✓
                             </div>
                           )}
@@ -258,7 +259,7 @@ export function ThumbGeneratorModal({
               <p className="text-xs text-muted-foreground mb-2">
                 Define a "vibe" visual da imagem.
               </p>
-              <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+              <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1">
                 {(Object.entries(THUMB_STYLES) as [ThumbStyle, typeof THUMB_STYLES[ThumbStyle]][]).map(
                   ([key, meta]) => {
                     const active = selectedStyle === key;
@@ -267,13 +268,13 @@ export function ThumbGeneratorModal({
                         key={key}
                         type="button"
                         onClick={() => setSelectedStyle(key)}
-                        className={`text-left border-2 rounded p-2 transition ${
+                        className={`text-left border-2 rounded p-3 transition ${
                           active
                             ? "border-orange-500 bg-orange-50"
                             : "border-gray-200 hover:border-gray-300"
                         }`}
                       >
-                        <div className="flex items-center gap-1 text-sm font-medium">
+                        <div className="flex items-center gap-1 text-base font-medium">
                           <span>{meta.icon}</span>
                           <span>{meta.label}</span>
                         </div>
@@ -305,7 +306,7 @@ export function ThumbGeneratorModal({
                         type="button"
                         onClick={() => toggleBadge(key)}
                         disabled={disabled}
-                        className={`text-[11px] px-2.5 py-1 rounded-full border-2 transition ${
+                        className={`text-xs px-3 py-1.5 rounded-full border-2 transition ${
                           active
                             ? "border-orange-500 bg-orange-100 text-orange-900 font-medium"
                             : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
@@ -345,7 +346,7 @@ export function ThumbGeneratorModal({
                         key={key}
                         type="button"
                         onClick={() => setSelectedColor(key)}
-                        className={`w-9 h-9 rounded-full border-2 transition flex items-center justify-center ${
+                        className={`w-10 h-10 rounded-full border-2 transition flex items-center justify-center ${
                           active ? "border-orange-500 ring-2 ring-orange-200" : "border-gray-300"
                         }`}
                         style={{ backgroundColor: meta.hex }}
@@ -365,41 +366,69 @@ export function ThumbGeneratorModal({
           {/* COLUNA DIREITA — Preview */}
           <div className="space-y-3">
             <Label>🖼️ Preview</Label>
-            {previewSrc ? (
-              <div className="relative group">
-                <img
-                  src={previewSrc}
-                  alt="Thumb"
-                  className="w-full aspect-square object-contain border rounded bg-gray-50 cursor-zoom-in"
-                  onClick={() => setZoomOpen(true)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setZoomOpen(true)}
-                  className="absolute top-2 right-2 bg-white/90 rounded-full p-2 shadow opacity-0 group-hover:opacity-100 transition"
-                  title="Ampliar"
-                >
-                  <ZoomIn className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="aspect-square border-2 border-dashed rounded flex items-center justify-center text-muted-foreground bg-gray-50">
-                <div className="text-center">
-                  <ImageIcon className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Nenhuma thumb gerada ainda</p>
-                  <p className="text-xs">Selecione fotos e clique em "Gerar"</p>
+            <div className="max-w-2xl mx-auto w-full">
+              {previewSrc ? (
+                <div className="relative group">
+                  <img
+                    src={previewSrc}
+                    alt="Thumb"
+                    className="w-full aspect-square object-contain border rounded bg-gray-50 cursor-zoom-in"
+                    onClick={() => setZoomOpen(true)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setZoomOpen(true)}
+                    className="absolute top-2 right-2 bg-white/90 rounded-full p-2 shadow opacity-0 group-hover:opacity-100 transition"
+                    title="Ampliar"
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </button>
                 </div>
+              ) : (
+                <div className="aspect-square border-2 border-dashed rounded flex items-center justify-center text-muted-foreground bg-gray-50">
+                  <div className="text-center">
+                    <ImageIcon className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">Nenhuma thumb gerada ainda</p>
+                    <p className="text-xs">Selecione fotos e clique em "Gerar"</p>
+                  </div>
+                </div>
+              )}
+              {generatedUrl && (
+                <p className="text-xs text-green-600 text-center mt-2">
+                  ✨ Thumb gerada! Clique pra ampliar ou em "Regerar" pra tentar de novo.
+                </p>
+              )}
+              <div className="mt-3 border rounded p-3 bg-gray-50 text-xs text-gray-700 space-y-1">
+                <p className="font-medium text-sm text-gray-900">Configuração usada</p>
+                <p>
+                  <span className="text-muted-foreground">Estilo:</span>{" "}
+                  {THUMB_STYLES[selectedStyle].icon} {THUMB_STYLES[selectedStyle].label}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Fotos:</span> {selected.length}/{MAX_REFS}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Selos:</span>{" "}
+                  {selectedBadges.length > 0
+                    ? selectedBadges.map((b) => THUMB_BADGES[b].label).join(", ")
+                    : "nenhum"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Cor:</span>{" "}
+                  {selectedColor ? THUMB_COLORS[selectedColor].label : "automática"}
+                </p>
+                {headerText.trim() && (
+                  <p className="truncate">
+                    <span className="text-muted-foreground">Header:</span> {headerText.trim()}
+                  </p>
+                )}
               </div>
-            )}
-            {generatedUrl && (
-              <p className="text-xs text-green-600 text-center">
-                ✨ Thumb gerada! Clique pra ampliar ou em "Regerar" pra tentar de novo.
-              </p>
-            )}
+            </div>
           </div>
         </div>
+        </div>
 
-        <DialogFooter className="flex justify-between gap-2 pt-4 border-t">
+        <DialogFooter className="flex justify-between gap-2 px-6 py-4 border-t shrink-0 bg-white">
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
