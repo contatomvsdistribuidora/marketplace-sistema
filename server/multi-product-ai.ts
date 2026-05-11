@@ -239,6 +239,86 @@ ${variationsText}${v2Text}`;
   return title;
 }
 
+export async function generateMultiProductThumbPromptSuggestion(
+  listingId: number,
+  userId: number,
+): Promise<{ prompt: string }> {
+  await loadAiProviderFromDb();
+  const ctx = await resolveListingContext(listingId, userId);
+  const { listing, principal, category, resolved, variation2Type, variation2Options } = ctx;
+
+  const variacoesResumo = resolved
+    .slice(0, 8)
+    .map((r, i) => {
+      const partes = [r.name];
+      if (r.price) partes.push(`(R$ ${r.price})`);
+      if (r.weight) partes.push(`peso ${r.weight}kg`);
+      if (r.dimensions) partes.push(`dim ${r.dimensions}cm`);
+      return `${i + 1}. ${partes.join(" ")}`;
+    })
+    .join("\n");
+
+  const variacao2Block = variation2Type && variation2Options && variation2Options.length > 0
+    ? `\n\nVariação secundária (${variation2Type}): ${variation2Options.join(", ")}`
+    : "";
+
+  const systemPrompt = `Você é especialista em criar thumbnails de alta conversão (CTR) para o marketplace Shopee Brasil. Conhece TUDO sobre:
+- Layout que funciona em mobile (Shopee é 90% mobile)
+- Cores oficiais Shopee: laranja #ee4d2d, vermelho, amarelo, branco
+- Vocabulário comercial PT-BR correto (zero typos, sempre com acentos)
+- Selos que vendem: OFERTA, MAIS VENDIDO, FRETE GRÁTIS, GARANTIA, PRONTA ENTREGA, NF EMITIDA
+- Tipografia bold sans-serif gigante (Inter Black, Bebas Neue, Anton)
+- Como destacar VARIAÇÕES de um anúncio (numeração, capacidades, kits)
+- Layout testado de top sellers brasileiros
+
+Sua tarefa: gerar um PROMPT EM PORTUGUÊS BRASILEIRO detalhado (300-500 palavras) pra IA de geração de imagem (gpt-image-1) criar uma thumb campeã de vendas Shopee.
+
+REGRAS DO PROMPT QUE VOCÊ VAI GERAR:
+1. Mencione EXPLICITAMENTE cada variação do anúncio (nome, capacidade, qty)
+2. Inclua a cor oficial Shopee #ee4d2d
+3. Especifique tipografia bold extra-pesada
+4. Liste selos visuais relevantes pra categoria do produto
+5. Destaque que é mobile-first (textos GRANDES)
+6. Vocabulário PT-BR correto (sem errar acentos: RESISTÊNCIA, ECONÔMICAS, PRÁTICAS, VERSÁTEIS, TAMANHOS, ENTREGA)
+7. Solicite alimentos/contexto de uso real se for produto de cozinha/armazenamento
+8. Inclua chamadas: "ESCOLHA SUA VARIAÇÃO", "MAIS VENDIDO", "TODOS OS TAMANHOS"
+9. Especifique layout numerado (1, 2, 3...) se houver múltiplas variações
+10. Fundo limpo branco/cinza claro
+11. Especifique preservação das embalagens reais (não desfocar logos/textos)
+
+NÃO inclua explicações, blocos markdown, nem prefixo "Aqui está o prompt:". Retorne SÓ o prompt direto pra IA de imagem.`;
+
+  const userPrompt = `Crie o prompt profissional pra IA de imagem gerar a thumb desse anúncio Shopee:
+
+TÍTULO DO ANÚNCIO: ${listing.title || "(sem título)"}
+
+PRODUTO PRINCIPAL: ${principal.name}
+CATEGORIA: ${category || "Geral"}
+
+VARIAÇÕES (${resolved.length} total):
+${variacoesResumo}${variacao2Block}
+
+DESCRIÇÃO RESUMIDA: ${(listing.description || "").slice(0, 800)}
+
+Agora, gere o prompt detalhado pra IA de imagem criar a thumb Shopee de alta conversão.`;
+
+  const llmResponse = await invokeLLM({
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens: 1500,
+  });
+
+  const text = extractTextFromResponse(llmResponse);
+
+  if (!text || text.trim().length < 50) {
+    throw new Error("Falha ao gerar prompt — resposta vazia ou muito curta da IA");
+  }
+
+  return { prompt: text.trim() };
+}
+
 export async function generateMultiProductDescription(
   listingId: number,
   userId: number,
@@ -476,6 +556,14 @@ USO DAS IMAGENS DE REFERÊNCIA (CRÍTICO):
 - Cada produto na thumb DEVE ser visualmente idêntico ao da referência (cor, formato, embalagem, logo)
 - NÃO invente produtos, NÃO substitua por genéricos
 - Mantenha a ORDEM das imagens de referência (1ª imagem = produto 1 na thumb, 2ª = produto 2, etc.)
+
+PRESERVAÇÃO DAS EMBALAGENS (CRÍTICO):
+- As imagens de referência mostram embalagens com TEXTO e LOGOS reais (marca, nome do produto)
+- NÃO re-desenhe esse texto da embalagem — copie como adesivo/sticker EXATO da foto
+- Se a embalagem tem "Emba Lixo" escrito, mantenha "Emba Lixo" idêntico (mesma fonte, cor, espaçamento)
+- NUNCA renderize a embalagem desfocada — mantenha NÍTIDA como na foto original
+- Se não conseguir renderizar nítido, deixe APENAS o produto/objeto sem texto da embalagem
+- Texto da embalagem deve ficar LEGÍVEL e idêntico à foto, nada de "blur" ou "smudge"
 
 REGRAS GERAIS DE ESTILO:
 - Tipografia: sans-serif bold (Montserrat ou similar), salvo override do estilo abaixo

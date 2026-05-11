@@ -4692,6 +4692,7 @@ export const appRouter = router({
           "azul", "roxo", "preto", "branco",
         ]).optional(),
         promptBase: z.enum([
+          "especialista-shopee",
           "top-vendedor", "premium", "atacado", "kit-familia",
           "oferta-urgencia", "foco-beneficio", "eco", "sazonal",
           "detalhe-tecnico", "comparativo",
@@ -4722,6 +4723,16 @@ export const appRouter = router({
           input.contexto,
           input.enfase,
           input.customPrompt,
+        );
+        return result;
+      }),
+
+    generateThumbPromptWithAI: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await multiProductAi.generateMultiProductThumbPromptSuggestion(
+          input.id,
+          ctx.user.id,
         );
         return result;
       }),

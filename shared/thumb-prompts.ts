@@ -1,4 +1,5 @@
 export type ThumbPromptBase =
+  | "especialista-shopee"
   | "top-vendedor" | "premium" | "atacado" | "kit-familia"
   | "oferta-urgencia" | "foco-beneficio" | "eco" | "sazonal"
   | "detalhe-tecnico" | "comparativo";
@@ -23,6 +24,17 @@ export const THUMB_PROMPT_BASES: Record<ThumbPromptBase, {
     enfase: ThumbToggleEnfase[];
   };
 }> = {
+  "especialista-shopee": {
+    label: "Especialista Shopee 🏆",
+    icon: "🏆",
+    description: "Master vendedor Shopee BR: layout testado, cores oficiais, máximo CTR",
+    basePrompt: "Thumb estilo ESPECIALISTA SHOPEE BRASIL (top vendedor): use a cor laranja oficial Shopee #ee4d2d em destaque, layout testado de top sellers Shopee (header gigante no topo + numeração circular laranja 1-N centralizada + selos no rodapé com fundo laranja/amarelo), tipografia bold sans-serif extra-pesada (estilo Inter Black, Bebas Neue, Anton), alta saturação de cores quentes (laranja+vermelho+amarelo+branco), composição agressiva mas legível em tela de celular (Shopee é mobile-first). PRIORIZE legibilidade absoluta sobre estética: textos grandes, contraste máximo, sem detalhes pequenos. Inclua selos visuais nativos Shopee (símbolo de frete grátis, mais vendido)",
+    defaultToggles: {
+      composicao: ["vitrine-ordenada", "numeracao"],
+      contexto: ["fundo-neutro"],
+      enfase: ["variedade", "quantidade"],
+    },
+  },
   "top-vendedor": {
     label: "Top Vendedor Shopee",
     icon: "🛒",

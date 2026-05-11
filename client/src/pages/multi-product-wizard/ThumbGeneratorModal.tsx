@@ -172,6 +172,15 @@ export function ThumbGeneratorModal({
     onError: (e) => toast.error(e.message),
   });
 
+  const generatePromptMutation = trpc.multiProduct.generateThumbPromptWithAI.useMutation({
+    onSuccess: (data) => {
+      setCustomPromptText(data.prompt);
+      setCustomPromptMode(true);
+      toast.success("Prompt gerado pela IA! Edite se quiser antes de gerar a imagem.");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   function handleGenerate() {
     if (selected.length === 0) {
       toast.error("Selecione ao menos 1 foto.");
@@ -538,24 +547,39 @@ export function ThumbGeneratorModal({
 
             {/* SEÇÃO: MODO AVANÇADO — editar prompt manualmente */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <Label>✏️  Prompt manual (avançado)</Label>
-                <button
-                  type="button"
-                  onClick={() => setCustomPromptMode(!customPromptMode)}
-                  className={`text-xs px-3 py-1 rounded border transition ${
-                    customPromptMode
-                      ? "bg-orange-100 border-orange-500 text-orange-900 font-medium"
-                      : "bg-white border-gray-300 text-gray-600 hover:border-gray-400"
-                  }`}
-                >
-                  {customPromptMode ? "✓ Modo manual ativo" : "Ativar edição manual"}
-                </button>
+              <div className="flex items-center justify-between mb-2 gap-2">
+                <Label className="shrink-0">✏️  Prompt manual (avançado)</Label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => generatePromptMutation.mutate({ id: listingId })}
+                    disabled={generatePromptMutation.isPending}
+                    className="text-xs px-3 py-1 rounded border bg-gradient-to-r from-purple-100 to-pink-100 border-purple-400 text-purple-900 font-medium hover:from-purple-200 hover:to-pink-200 transition disabled:opacity-50"
+                    title="IA lê os dados do anúncio (variações, marca, descrição) e cria um prompt especialista Shopee otimizado pra alta conversão"
+                  >
+                    {generatePromptMutation.isPending ? (
+                      <><Loader2 className="h-3 w-3 mr-1 inline animate-spin" /> Gerando...</>
+                    ) : (
+                      <>🤖 Gerar prompt com IA</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomPromptMode(!customPromptMode)}
+                    className={`text-xs px-3 py-1 rounded border transition ${
+                      customPromptMode
+                        ? "bg-orange-100 border-orange-500 text-orange-900 font-medium"
+                        : "bg-white border-gray-300 text-gray-600 hover:border-gray-400"
+                    }`}
+                  >
+                    {customPromptMode ? "✓ Modo manual ativo" : "Ativar edição manual"}
+                  </button>
+                </div>
               </div>
               <p className="text-xs text-muted-foreground mb-2">
                 {customPromptMode
-                  ? "⚠️  Modo manual: estratégia e toggles acima ficam desativados. O texto abaixo é enviado direto pra IA."
-                  : "Edite o prompt completo manualmente (substitui estratégia + toggles)."}
+                  ? "⚠️  Modo manual ativo: estratégia e toggles acima ficam desativados. O texto abaixo é enviado direto pra IA de imagem."
+                  : "💡 Use o botão '🤖 Gerar prompt com IA' acima pra criar um prompt customizado baseado no anúncio, ou ative edição manual pra escrever do zero."}
               </p>
               <Textarea
                 rows={6}
