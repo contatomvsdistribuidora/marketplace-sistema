@@ -4707,6 +4707,7 @@ export const appRouter = router({
           "quantidade", "variedade", "qualidade-tecnica", "economia", "comparativo-visual",
         ])).optional(),
         customPrompt: z.string().max(5000).optional(),
+        creativeMode: z.boolean().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const result = await multiProductAi.generateMultiProductThumb(
@@ -4723,16 +4724,79 @@ export const appRouter = router({
           input.contexto,
           input.enfase,
           input.customPrompt,
+          input.creativeMode,
+        );
+        return result;
+      }),
+
+    generateThumbBatchWithAI: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        count: z.number().min(1).max(4).default(1),
+        selectedImageUrls: z.array(z.string()).optional(),
+        extraPrompt: z.string().max(2000).optional(),
+        headerText: z.string().max(200).optional(),
+        style: z.enum([
+          "mercadao", "premium", "kit-familia", "profissional",
+          "atacado", "relampago", "eco", "sazonal",
+        ]).optional(),
+        badges: z.array(z.enum([
+          "oferta", "mais-vendido", "nf-emitida", "garantia",
+          "envio-24h", "atacado", "pronta-entrega", "frete-gratis",
+        ])).optional(),
+        color: z.enum([
+          "vermelho", "laranja", "amarelo", "verde",
+          "azul", "roxo", "preto", "branco",
+        ]).optional(),
+        promptBase: z.enum([
+          "especialista-shopee",
+          "top-vendedor", "premium", "atacado", "kit-familia",
+          "oferta-urgencia", "foco-beneficio", "eco", "sazonal",
+          "detalhe-tecnico", "comparativo",
+        ]).optional(),
+        composicao: z.array(z.enum([
+          "vitrine-ordenada", "grade-2x2", "central", "empilhamento", "numeracao",
+        ])).optional(),
+        contexto: z.array(z.enum([
+          "em-uso", "casa", "loja", "fundo-neutro", "lifestyle-premium",
+        ])).optional(),
+        enfase: z.array(z.enum([
+          "quantidade", "variedade", "qualidade-tecnica", "economia", "comparativo-visual",
+        ])).optional(),
+        customPrompt: z.string().max(5000).optional(),
+        creativeMode: z.boolean().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await multiProductAi.generateMultiProductThumbBatch(
+          input.count,
+          input.id,
+          ctx.user.id,
+          input.selectedImageUrls,
+          input.extraPrompt,
+          input.headerText,
+          input.style,
+          input.badges,
+          input.color,
+          input.promptBase,
+          input.composicao,
+          input.contexto,
+          input.enfase,
+          input.customPrompt,
+          input.creativeMode,
         );
         return result;
       }),
 
     generateThumbPromptWithAI: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({
+        id: z.number(),
+        photoUrls: z.array(z.string()).optional(),
+      }))
       .mutation(async ({ ctx, input }) => {
         const result = await multiProductAi.generateMultiProductThumbPromptSuggestion(
           input.id,
           ctx.user.id,
+          input.photoUrls,
         );
         return result;
       }),

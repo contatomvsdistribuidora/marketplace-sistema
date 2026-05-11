@@ -1,734 +1,547 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
-import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ImageIcon, Loader2, Sparkles, ZoomIn } from "lucide-react";
-import {
-  THUMB_STYLES,
-  THUMB_BADGES,
-  THUMB_COLORS,
-  MAX_THUMB_BADGES,
-  type ThumbStyle,
-  type ThumbBadge,
-  type ThumbColor,
-} from "@shared/thumb-styles";
-import {
-  THUMB_PROMPT_BASES,
-  THUMB_TOGGLES_COMPOSICAO,
-  THUMB_TOGGLES_CONTEXTO,
-  THUMB_TOGGLES_ENFASE,
-  type ThumbPromptBase,
-  type ThumbToggleComposicao,
-  type ThumbToggleContexto,
-  type ThumbToggleEnfase,
-} from "@shared/thumb-prompts";
+import { toast } from "sonner";
+import { Loader2, Sparkles, ZoomIn, ImageIcon, Check } from "lucide-react";
 
 type Props = {
-  listingId: number;
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
-  currentThumbUrl?: string | null;
+  listingId: number;
+  initialThumbUrl?: string | null;
+  onThumbGenerated?: (url: string) => void;
 };
 
-const MAX_REFS = 16;
-const DEFAULT_STYLE: ThumbStyle = "mercadao";
-const DEFAULT_PROMPT_BASE: ThumbPromptBase = "top-vendedor";
-
-export function ThumbGeneratorModal({
-  listingId,
+export default function ThumbGeneratorModal({
   isOpen,
   onClose,
-  onSuccess,
-  currentThumbUrl,
+  listingId,
+  initialThumbUrl,
+  onThumbGenerated,
 }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
-  const [headerText, setHeaderText] = useState("");
-  const [extraPrompt, setExtraPrompt] = useState("");
-  const [selectedStyle, setSelectedStyle] = useState<ThumbStyle>(DEFAULT_STYLE);
-  const [selectedBadges, setSelectedBadges] = useState<ThumbBadge[]>([]);
-  const [selectedColor, setSelectedColor] = useState<ThumbColor | undefined>(undefined);
-  const [selectedPromptBase, setSelectedPromptBase] = useState<ThumbPromptBase>(DEFAULT_PROMPT_BASE);
-  const [selectedComposicao, setSelectedComposicao] = useState<ThumbToggleComposicao[]>([]);
-  const [selectedContexto, setSelectedContexto] = useState<ThumbToggleContexto[]>([]);
-  const [selectedEnfase, setSelectedEnfase] = useState<ThumbToggleEnfase[]>([]);
-  const [customPromptMode, setCustomPromptMode] = useState<boolean>(false);
   const [customPromptText, setCustomPromptText] = useState<string>("");
+  const [creativeMode, setCreativeMode] = useState<boolean>(true);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
-  const [zoomOpen, setZoomOpen] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState<string | null>(null);
+  const [variationCount, setVariationCount] = useState<number>(2);
+  const [generatedUrls, setGeneratedUrls] = useState<string[]>([]);
+  const [selectedGeneratedIdx, setSelectedGeneratedIdx] = useState<number | null>(null);
 
+  // Reset states quando modal abre
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelected([]);
+    setCustomPromptText("");
+    setCreativeMode(true);
+    setGeneratedUrl(initialThumbUrl || null);
+    setZoomOpen(null);
+    setVariationCount(2);
+    setGeneratedUrls([]);
+    setSelectedGeneratedIdx(null);
+  }, [isOpen, initialThumbUrl]);
+
+  // Busca fotos agrupadas por produto
   const imagesQuery = trpc.multiProduct.getAvailableThumbImages.useQuery(
     { id: listingId },
     { enabled: isOpen },
   );
 
-  const allUrls = useMemo(() => {
-    const urls: string[] = [];
-    for (const item of imagesQuery.data ?? []) {
-      for (const u of item.imageUrls) {
-        if (!urls.includes(u)) urls.push(u);
-      }
-    }
-    return urls;
-  }, [imagesQuery.data]);
-
-  // Marca todas por padrão ao carregar (limita a MAX_REFS)
-  useEffect(() => {
-    if (!isOpen) return;
-    if (allUrls.length === 0) return;
-    setSelected((prev) => (prev.length === 0 ? allUrls.slice(0, MAX_REFS) : prev));
-  }, [isOpen, allUrls]);
-
-  // Reset state quando fecha
-  useEffect(() => {
-    if (isOpen) return;
-    setSelected([]);
-    setHeaderText("");
-    setExtraPrompt("");
-    setSelectedStyle(DEFAULT_STYLE);
-    setSelectedBadges([]);
-    setSelectedColor(undefined);
-    setSelectedPromptBase(DEFAULT_PROMPT_BASE);
-    setSelectedComposicao([]);
-    setSelectedContexto([]);
-    setSelectedEnfase([]);
-    setCustomPromptMode(false);
-    setCustomPromptText("");
-    setGeneratedUrl(null);
-    setZoomOpen(false);
-  }, [isOpen]);
-
-  // Quando o prompt base muda, marca os toggles padrão dele
-  useEffect(() => {
-    if (!selectedPromptBase) return;
-    const base = THUMB_PROMPT_BASES[selectedPromptBase];
-    setSelectedComposicao(base.defaultToggles.composicao);
-    setSelectedContexto(base.defaultToggles.contexto);
-    setSelectedEnfase(base.defaultToggles.enfase);
-  }, [selectedPromptBase]);
-
-  function toggleComposicao(t: ThumbToggleComposicao) {
-    setSelectedComposicao((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
-    );
-  }
-  function toggleContexto(t: ThumbToggleContexto) {
-    setSelectedContexto((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
-    );
-  }
-  function toggleEnfase(t: ThumbToggleEnfase) {
-    setSelectedEnfase((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
-    );
-  }
-
-  function toggleBadge(b: ThumbBadge) {
-    setSelectedBadges((prev) => {
-      if (prev.includes(b)) return prev.filter((x) => x !== b);
-      if (prev.length >= MAX_THUMB_BADGES) {
-        toast.error(`Máximo ${MAX_THUMB_BADGES} selos.`);
-        return prev;
-      }
-      return [...prev, b];
+  // Mutation: gerar prompt com IA
+  const generatePromptMutation =
+    trpc.multiProduct.generateThumbPromptWithAI.useMutation({
+      onSuccess: (data) => {
+        setCustomPromptText(data.prompt);
+        toast.success("Prompt gerado! Edite se quiser antes de gerar a imagem.");
+      },
+      onError: (e) => toast.error(e.message),
     });
-  }
+
+  // Mutation: gerar thumb final
+  const generateMutation =
+    trpc.multiProduct.generateThumbWithAI.useMutation({
+      onSuccess: (data) => {
+        setGeneratedUrl(data.thumbUrl);
+        toast.success("Thumb gerada!");
+        if (onThumbGenerated) onThumbGenerated(data.thumbUrl);
+      },
+      onError: (e) => toast.error(e.message),
+    });
+
+  // Mutation: gerar batch de 1-4 variações em paralelo
+  const generateBatchMutation =
+    trpc.multiProduct.generateThumbBatchWithAI.useMutation({
+      onSuccess: (data) => {
+        const urls = data.results.map((r) => r.thumbUrl);
+        setGeneratedUrls(urls);
+        setSelectedGeneratedIdx(0);
+        if (urls.length > 0) setGeneratedUrl(urls[0]);
+
+        if (data.errors.length > 0) {
+          toast.warning(`${urls.length} thumbs geradas. ${data.errors.length} falharam.`);
+        } else {
+          toast.success(`${urls.length} thumb(s) gerada(s)!`);
+        }
+      },
+      onError: (e) => toast.error(e.message),
+    });
 
   function toggleImage(url: string) {
+    setSelected((prev) =>
+      prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url],
+    );
+  }
+
+  function selectAllOf(urls: string[]) {
     setSelected((prev) => {
-      if (prev.includes(url)) return prev.filter((u) => u !== url);
-      if (prev.length >= MAX_REFS) {
-        toast.error(`Máximo ${MAX_REFS} fotos.`);
-        return prev;
-      }
-      return [...prev, url];
+      const set = new Set(prev);
+      urls.forEach((u) => set.add(u));
+      return Array.from(set);
     });
   }
 
-  function selectAll() {
-    setSelected(allUrls.slice(0, MAX_REFS));
+  function unselectAllOf(urls: string[]) {
+    setSelected((prev) => prev.filter((u) => !urls.includes(u)));
   }
 
-  function clearAll() {
-    setSelected([]);
-  }
-
-  const generateMutation = trpc.multiProduct.generateThumbWithAI.useMutation({
-    onSuccess: (resp) => {
-      setGeneratedUrl(resp.thumbUrl);
-      toast.success("Thumb gerada! Confira o preview.");
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const generatePromptMutation = trpc.multiProduct.generateThumbPromptWithAI.useMutation({
-    onSuccess: (data) => {
-      setCustomPromptText(data.prompt);
-      setCustomPromptMode(true);
-      toast.success("Prompt gerado pela IA! Edite se quiser antes de gerar a imagem.");
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  function handleGenerate() {
-    if (selected.length === 0) {
-      toast.error("Selecione ao menos 1 foto.");
+  function handleGeneratePrompt() {
+    if (selected.length === 0 && !creativeMode) {
+      toast.error("Selecione ao menos 1 foto ou ative o modo criativo total.");
       return;
     }
-    const hasCustomPrompt = customPromptMode && customPromptText.trim().length > 0;
-
-    generateMutation.mutate({
+    generatePromptMutation.mutate({
       id: listingId,
-      selectedImageUrls: selected,
-      customPrompt: hasCustomPrompt ? customPromptText.trim() : undefined,
-      // Quando tem custom prompt, IGNORA TODO o resto pra não misturar
-      extraPrompt: hasCustomPrompt ? undefined : (extraPrompt.trim() || undefined),
-      headerText: hasCustomPrompt ? undefined : (headerText.trim() || undefined),
-      style: hasCustomPrompt ? undefined : selectedStyle,
-      badges: hasCustomPrompt ? undefined : (selectedBadges.length > 0 ? selectedBadges : undefined),
-      color: hasCustomPrompt ? undefined : selectedColor,
-      promptBase: hasCustomPrompt ? undefined : selectedPromptBase,
-      composicao: hasCustomPrompt ? undefined : (selectedComposicao.length > 0 ? selectedComposicao : undefined),
-      contexto: hasCustomPrompt ? undefined : (selectedContexto.length > 0 ? selectedContexto : undefined),
-      enfase: hasCustomPrompt ? undefined : (selectedEnfase.length > 0 ? selectedEnfase : undefined),
+      photoUrls: selected.length > 0 ? selected : undefined,
     });
   }
 
-  function handleSaveAndClose() {
-    onSuccess();
-    onClose();
+  function handleGenerate() {
+    if (!customPromptText.trim()) {
+      toast.error("Gere ou escreva um prompt antes de gerar a thumb.");
+      return;
+    }
+    if (selected.length === 0 && !creativeMode) {
+      toast.error(
+        "Selecione ao menos 1 foto OU ative o modo criativo total.",
+      );
+      return;
+    }
+
+    setGeneratedUrls([]);
+    setSelectedGeneratedIdx(null);
+
+    generateBatchMutation.mutate({
+      id: listingId,
+      count: variationCount,
+      selectedImageUrls: creativeMode ? [] : selected,
+      customPrompt: customPromptText.trim(),
+      creativeMode,
+    });
   }
 
-  const previewSrc = generatedUrl || currentThumbUrl || null;
-  const isGenerating = generateMutation.isPending;
+  const products = imagesQuery.data || [];
+  const allUrls = products.flatMap((p) => p.imageUrls);
+  const isGenerating = generateMutation.isPending || generateBatchMutation.isPending;
+  const isGeneratingPrompt = generatePromptMutation.isPending;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="!max-w-none !w-screen !h-screen !max-h-screen !rounded-none p-0 flex flex-col overflow-hidden">
-        <DialogHeader className="px-6 py-4 border-b shrink-0 bg-white shadow-sm">
-          <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
-            <Sparkles className="h-6 w-6" />
-            Gerar Thumb com IA
-          </DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="!max-w-none !w-screen !h-screen !max-h-screen !rounded-none p-0 flex flex-col overflow-hidden">
+          <DialogHeader className="px-6 py-4 border-b shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-600" />
+              Gerar Thumb com IA
+            </DialogTitle>
+          </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full max-w-[1800px] mx-auto">
-          {/* COLUNA ESQUERDA — Configurações */}
-          <div className="space-y-4">
-            <div>
-              <Label>
-                📸 Fotos de referência ({selected.length}/{MAX_REFS})
-              </Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Selecione até {MAX_REFS} fotos. Marcadas = IA usa como base visual.
-              </p>
-              {imagesQuery.isLoading ? (
-                <Skeleton className="h-48 w-full" />
-              ) : imagesQuery.data && imagesQuery.data.length > 0 ? (
-                <div className="grid grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto p-2 border rounded">
-                  {imagesQuery.data.flatMap((item) =>
-                    item.imageUrls.map((url, urlIdx) => {
-                      const isSelected = selected.includes(url);
-                      const reachedLimit = !isSelected && selected.length >= MAX_REFS;
-                      return (
-                        <button
-                          key={`${item.source}-${item.sourceId}-${urlIdx}`}
-                          type="button"
-                          onClick={() => toggleImage(url)}
-                          disabled={reachedLimit}
-                          className={`relative aspect-square rounded border-2 overflow-hidden transition ${
-                            isSelected
-                              ? "border-orange-500 ring-2 ring-orange-200"
-                              : "border-gray-200 opacity-70 hover:opacity-100"
-                          } ${reachedLimit ? "cursor-not-allowed" : "cursor-pointer"}`}
-                          title={item.name}
-                        >
-                          <img
-                            src={url}
-                            alt={item.name}
-                            className="w-full h-full object-cover"
-                          />
-                          {item.isPrincipal && (
-                            <div className="absolute top-0 left-0 bg-yellow-400 text-[9px] px-1 font-bold">
-                              ⭐
-                            </div>
-                          )}
-                          {isSelected && (
-                            <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
-                              ✓
-                            </div>
-                          )}
-                        </button>
-                      );
-                    }),
-                  )}
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground border rounded p-3">
-                  Nenhuma foto disponível nos produtos do anúncio.
-                </div>
-              )}
-              <div className="flex gap-2 mt-2">
-                <Button variant="outline" size="sm" onClick={selectAll} disabled={allUrls.length === 0}>
-                  Marcar todas
-                </Button>
-                <Button variant="outline" size="sm" onClick={clearAll} disabled={selected.length === 0}>
-                  Desmarcar todas
-                </Button>
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="headerText">📝 Texto do Header (opcional)</Label>
-              <p className="text-xs text-muted-foreground mb-1">
-                Substitui o "N TIPOS DE..." automático.
-              </p>
-              <Input
-                id="headerText"
-                value={headerText}
-                onChange={(e) => setHeaderText(e.target.value)}
-                placeholder="Ex: KIT 5 EM 1, COMBO MEGA SACOS"
-                maxLength={100}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="extraPrompt">💬 Instruções extras (opcional)</Label>
-              <Textarea
-                id="extraPrompt"
-                rows={3}
-                value={extraPrompt}
-                onChange={(e) => setExtraPrompt(e.target.value)}
-                placeholder='Ex: "fundo amarelo brilhante", "destaque a palavra OFERTA"'
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          {/* COLUNA CENTRAL — Estilo, selos e cor */}
-          <div className="space-y-4">
-            <div>
-              <Label>🎨 Estilo da thumb</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Define a "vibe" visual da imagem.
-              </p>
-              <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1">
-                {(Object.entries(THUMB_STYLES) as [ThumbStyle, typeof THUMB_STYLES[ThumbStyle]][]).map(
-                  ([key, meta]) => {
-                    const active = selectedStyle === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setSelectedStyle(key)}
-                        className={`text-left border-2 rounded p-3 transition ${
-                          active
-                            ? "border-orange-500 bg-orange-50"
-                            : "border-gray-200 hover:border-gray-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-1 text-base font-medium">
-                          <span>{meta.icon}</span>
-                          <span>{meta.label}</span>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-                          {meta.description}
-                        </p>
-                      </button>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-
-            <div>
-              <Label>
-                🏷️ Selos ({selectedBadges.length}/{MAX_THUMB_BADGES})
-              </Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Adiciona selos visuais na thumb.
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {(Object.entries(THUMB_BADGES) as [ThumbBadge, typeof THUMB_BADGES[ThumbBadge]][]).map(
-                  ([key, meta]) => {
-                    const active = selectedBadges.includes(key);
-                    const disabled = !active && selectedBadges.length >= MAX_THUMB_BADGES;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => toggleBadge(key)}
-                        disabled={disabled}
-                        className={`text-xs px-3 py-1.5 rounded-full border-2 transition ${
-                          active
-                            ? "border-orange-500 bg-orange-100 text-orange-900 font-medium"
-                            : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                        } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
-                      >
-                        {meta.label}
-                      </button>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-
-            <div>
-              <Label>🌈 Cor dominante (opcional)</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Sobrescreve a paleta do estilo escolhido.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedColor(undefined)}
-                  className={`text-[11px] px-2.5 py-1 rounded border-2 transition ${
-                    selectedColor === undefined
-                      ? "border-orange-500 bg-orange-50 text-orange-900 font-medium"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
-                  title="Usa a paleta do estilo"
-                >
-                  Automática
-                </button>
-                {(Object.entries(THUMB_COLORS) as [ThumbColor, typeof THUMB_COLORS[ThumbColor]][]).map(
-                  ([key, meta]) => {
-                    const active = selectedColor === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setSelectedColor(key)}
-                        className={`w-10 h-10 rounded-full border-2 transition flex items-center justify-center ${
-                          active ? "border-orange-500 ring-2 ring-orange-200" : "border-gray-300"
-                        }`}
-                        style={{ backgroundColor: meta.hex }}
-                        title={meta.label}
-                      >
-                        {active && (
-                          <span className="text-white text-xs font-bold drop-shadow">✓</span>
-                        )}
-                      </button>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-
-            {/* SEÇÃO: PROMPT BASE (estratégia narrativa) */}
-            <div>
-              <Label>🎬 Estratégia narrativa</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Define como organizar e contar a história do produto.
-              </p>
-              <div className={`grid grid-cols-2 gap-2 ${customPromptMode ? "opacity-40 pointer-events-none" : ""}`}>
-                {(Object.entries(THUMB_PROMPT_BASES) as [ThumbPromptBase, typeof THUMB_PROMPT_BASES[ThumbPromptBase]][]).map(
-                  ([key, meta]) => {
-                    const active = selectedPromptBase === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setSelectedPromptBase(key)}
-                        className={`text-left border-2 rounded p-2 transition ${
-                          active
-                            ? "border-orange-500 bg-orange-50"
-                            : "border-gray-200 hover:border-gray-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-1 text-sm font-medium">
-                          <span>{meta.icon}</span>
-                          <span>{meta.label}</span>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-                          {meta.description}
-                        </p>
-                      </button>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-
-            {/* SEÇÃO: TOGGLES NARRATIVOS (Composição / Contexto / Ênfase) */}
-            <div className={customPromptMode ? "opacity-40 pointer-events-none" : ""}>
-              <Label>🎭 Ajuste fino (toggles)</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Personalize a narrativa. Marque quantos quiser.
-              </p>
-
-              {/* Composição */}
-              <div className="mb-2">
-                <p className="text-xs font-medium text-gray-700 mb-1">Composição:</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {(Object.entries(THUMB_TOGGLES_COMPOSICAO) as [ThumbToggleComposicao, typeof THUMB_TOGGLES_COMPOSICAO[ThumbToggleComposicao]][]).map(
-                    ([key, meta]) => {
-                      const active = selectedComposicao.includes(key);
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => toggleComposicao(key)}
-                          className={`text-xs px-2.5 py-1 rounded-full border-2 transition ${
-                            active
-                              ? "border-blue-500 bg-blue-100 text-blue-900 font-medium"
-                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                          }`}
-                        >
-                          {meta.label}
-                        </button>
-                      );
-                    },
-                  )}
-                </div>
-              </div>
-
-              {/* Contexto */}
-              <div className="mb-2">
-                <p className="text-xs font-medium text-gray-700 mb-1">Contexto:</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {(Object.entries(THUMB_TOGGLES_CONTEXTO) as [ThumbToggleContexto, typeof THUMB_TOGGLES_CONTEXTO[ThumbToggleContexto]][]).map(
-                    ([key, meta]) => {
-                      const active = selectedContexto.includes(key);
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => toggleContexto(key)}
-                          className={`text-xs px-2.5 py-1 rounded-full border-2 transition ${
-                            active
-                              ? "border-purple-500 bg-purple-100 text-purple-900 font-medium"
-                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                          }`}
-                        >
-                          {meta.label}
-                        </button>
-                      );
-                    },
-                  )}
-                </div>
-              </div>
-
-              {/* Ênfase */}
-              <div>
-                <p className="text-xs font-medium text-gray-700 mb-1">Ênfase:</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {(Object.entries(THUMB_TOGGLES_ENFASE) as [ThumbToggleEnfase, typeof THUMB_TOGGLES_ENFASE[ThumbToggleEnfase]][]).map(
-                    ([key, meta]) => {
-                      const active = selectedEnfase.includes(key);
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => toggleEnfase(key)}
-                          className={`text-xs px-2.5 py-1 rounded-full border-2 transition ${
-                            active
-                              ? "border-green-500 bg-green-100 text-green-900 font-medium"
-                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                          }`}
-                        >
-                          {meta.label}
-                        </button>
-                      );
-                    },
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* SEÇÃO: MODO AVANÇADO — editar prompt manualmente */}
-            <div>
-              <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                <Label className="shrink-0">✏️  Prompt manual (avançado)</Label>
-                <div className="flex gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => generatePromptMutation.mutate({ id: listingId })}
-                    disabled={generatePromptMutation.isPending}
-                    className="text-xs px-3 py-1 rounded border bg-gradient-to-r from-purple-100 to-pink-100 border-purple-400 text-purple-900 font-medium hover:from-purple-200 hover:to-pink-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="IA lê os dados do anúncio (variações, preço, descrição) e cria um prompt especialista Shopee otimizado pra alta conversão"
-                  >
-                    {generatePromptMutation.isPending ? (
-                      <><Loader2 className="h-3 w-3 mr-1 inline animate-spin" /> Gerando...</>
-                    ) : (
-                      <>🤖 Gerar prompt com IA</>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCustomPromptMode(!customPromptMode)}
-                    className={`text-xs px-3 py-1 rounded border transition ${
-                      customPromptMode
-                        ? "bg-orange-100 border-orange-500 text-orange-900 font-medium"
-                        : "bg-white border-gray-300 text-gray-600 hover:border-gray-400"
-                    }`}
-                  >
-                    {customPromptMode ? "✓ Modo manual ativo" : "Ativar edição manual"}
-                  </button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mb-2">
-                {customPromptMode
-                  ? "⚠️  Modo manual ativo: estratégia e toggles acima ficam desativados. O texto abaixo é enviado direto pra IA de imagem."
-                  : "💡 Clique em '🤖 Gerar prompt com IA' acima pra criar um prompt customizado baseado nos dados do anúncio, ou em 'Ativar edição manual' pra escrever do zero."}
-              </p>
-              <Textarea
-                rows={6}
-                value={customPromptText}
-                onChange={(e) => setCustomPromptText(e.target.value)}
-                placeholder={
-                  customPromptMode
-                    ? "Escreva aqui o prompt completo que será enviado pra IA..."
-                    : "Ative o modo manual acima pra escrever um prompt customizado"
-                }
-                disabled={!customPromptMode}
-                className="text-xs font-mono"
-                maxLength={5000}
-              />
-              {customPromptMode && (
-                <div className="flex justify-between items-center mt-1">
-                  <p className="text-[10px] text-muted-foreground">
-                    {customPromptText.length}/5000 caracteres
+          {/* Conteúdo: 3 colunas */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_1fr] gap-6 max-w-[1800px] mx-auto">
+              {/* COLUNA 1 — FOTOS AGRUPADAS POR PRODUTO */}
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-base font-semibold">
+                    📸 Fotos do anúncio ({selected.length} selecionadas)
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {creativeMode
+                      ? "🎨 Modo Criativo: fotos são analisadas pela IA mas NÃO copiadas — IA cria do zero."
+                      : "Marque fotos pra IA usar como referência visual."}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomPromptMode(false);
-                      setCustomPromptText("");
-                    }}
-                    className="text-[11px] text-blue-600 hover:underline"
-                  >
-                    ↺ Restaurar automático
-                  </button>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* COLUNA DIREITA — Preview */}
-          <div className="space-y-3">
-            <Label>🖼️ Preview</Label>
-            <div className="max-w-2xl mx-auto w-full">
-              {previewSrc ? (
-                <div className="relative group">
-                  <img
-                    src={previewSrc}
-                    alt="Thumb"
-                    className="w-full aspect-square object-contain border rounded bg-gray-50 cursor-zoom-in"
-                    onClick={() => setZoomOpen(true)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setZoomOpen(true)}
-                    className="absolute top-2 right-2 bg-white/90 rounded-full p-2 shadow opacity-0 group-hover:opacity-100 transition"
-                    title="Ampliar"
-                  >
-                    <ZoomIn className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="aspect-square border-2 border-dashed rounded flex items-center justify-center text-muted-foreground bg-gray-50">
-                  <div className="text-center">
-                    <ImageIcon className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                    <p className="text-sm">Nenhuma thumb gerada ainda</p>
-                    <p className="text-xs">Selecione fotos e clique em "Gerar"</p>
+                {imagesQuery.isLoading && (
+                  <div className="flex items-center justify-center p-8 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                    Carregando fotos...
+                  </div>
+                )}
+
+                {!imagesQuery.isLoading && products.length === 0 && (
+                  <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
+                    <ImageIcon className="h-10 w-10 mb-2 opacity-40" />
+                    <p className="text-sm">Nenhuma foto disponível.</p>
+                  </div>
+                )}
+
+                {products.length > 0 && (
+                  <div className="flex gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => selectAllOf(allUrls)}
+                      className="underline text-blue-600 hover:text-blue-800"
+                    >
+                      Marcar todas
+                    </button>
+                    <span className="text-gray-400">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelected([])}
+                      className="underline text-blue-600 hover:text-blue-800"
+                    >
+                      Desmarcar todas
+                    </button>
+                  </div>
+                )}
+
+                {products.map((produto) => {
+                  const allSelected = produto.imageUrls.every((u) =>
+                    selected.includes(u),
+                  );
+                  return (
+                    <div
+                      key={`${produto.source}-${produto.sourceId}`}
+                      className="border rounded-lg p-3 bg-gray-50"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {produto.isPrincipal && (
+                            <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-medium">
+                              ⭐ Principal
+                            </span>
+                          )}
+                          <h4 className="text-sm font-medium line-clamp-1">
+                            {produto.name}
+                          </h4>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            allSelected
+                              ? unselectAllOf(produto.imageUrls)
+                              : selectAllOf(produto.imageUrls)
+                          }
+                          className="text-[10px] underline text-blue-600 shrink-0 ml-2"
+                        >
+                          {allSelected ? "Desmarcar" : "Marcar"} todas
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {produto.imageUrls.map((url) => {
+                          const isSelected = selected.includes(url);
+                          return (
+                            <div
+                              key={url}
+                              className={`relative rounded overflow-hidden border-2 transition cursor-pointer aspect-square bg-white ${
+                                isSelected
+                                  ? "border-orange-500 ring-2 ring-orange-200"
+                                  : "border-gray-200 hover:border-gray-300"
+                              }`}
+                              onClick={() => toggleImage(url)}
+                            >
+                              <img
+                                src={url}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                              {isSelected && (
+                                <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow">
+                                  <Check className="h-4 w-4" />
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setZoomOpen(url);
+                                }}
+                                className="absolute bottom-1 right-1 bg-black/60 text-white rounded-full p-1 hover:bg-black/80"
+                                title="Ampliar"
+                              >
+                                <ZoomIn className="h-3 w-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* COLUNA 2 — PROMPT + BOTÕES */}
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-base font-semibold">
+                    🎨 Modo de geração
+                  </Label>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCreativeMode(true)}
+                      className={`flex-1 text-sm px-4 py-3 rounded border-2 transition ${
+                        creativeMode
+                          ? "bg-purple-100 border-purple-500 text-purple-900 font-medium"
+                          : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      🎨 Criativo Total
+                      <br />
+                      <span className="text-[10px] opacity-70">
+                        IA cria do zero (recomendado)
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCreativeMode(false)}
+                      className={`flex-1 text-sm px-4 py-3 rounded border-2 transition ${
+                        !creativeMode
+                          ? "bg-orange-100 border-orange-500 text-orange-900 font-medium"
+                          : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      📷 Com Referências
+                      <br />
+                      <span className="text-[10px] opacity-70">
+                        IA reproduz as fotos
+                      </span>
+                    </button>
                   </div>
                 </div>
-              )}
-              {generatedUrl && (
-                <p className="text-xs text-green-600 text-center mt-2">
-                  ✨ Thumb gerada! Clique pra ampliar ou em "Regerar" pra tentar de novo.
-                </p>
-              )}
-              <div className="mt-3 border rounded p-3 bg-gray-50 text-xs text-gray-700 space-y-1">
-                <p className="font-medium text-sm text-gray-900">Configuração usada</p>
-                <p>
-                  <span className="text-muted-foreground">Estilo:</span>{" "}
-                  {THUMB_STYLES[selectedStyle].icon} {THUMB_STYLES[selectedStyle].label}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Fotos:</span> {selected.length}/{MAX_REFS}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Selos:</span>{" "}
-                  {selectedBadges.length > 0
-                    ? selectedBadges.map((b) => THUMB_BADGES[b].label).join(", ")
-                    : "nenhum"}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Cor:</span>{" "}
-                  {selectedColor ? THUMB_COLORS[selectedColor].label : "automática"}
-                </p>
-                {headerText.trim() && (
-                  <p className="truncate">
-                    <span className="text-muted-foreground">Header:</span> {headerText.trim()}
+
+                <div>
+                  <Label className="text-base font-semibold">
+                    🔢 Quantas variações gerar?
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1 mb-2">
+                    Mais variações = mais opções pra escolher, mas custo proporcional.
                   </p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1, 2, 3, 4].map((n) => {
+                      const active = variationCount === n;
+                      const cost = (n * 0.17).toFixed(2);
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setVariationCount(n)}
+                          className={`text-sm px-3 py-3 rounded border-2 transition flex flex-col items-center ${
+                            active
+                              ? "bg-orange-100 border-orange-500 text-orange-900 font-bold"
+                              : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
+                          }`}
+                        >
+                          <span className="text-lg">{n}</span>
+                          <span className="text-[10px] opacity-70">~US$ {cost}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label>✏️ Prompt da imagem</Label>
+                    <button
+                      type="button"
+                      onClick={handleGeneratePrompt}
+                      disabled={isGeneratingPrompt}
+                      className="text-xs px-3 py-1 rounded border bg-gradient-to-r from-purple-100 to-pink-100 border-purple-400 text-purple-900 font-medium hover:from-purple-200 hover:to-pink-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="IA lê os dados do anúncio + as fotos selecionadas e cria um prompt profissional"
+                    >
+                      {isGeneratingPrompt ? (
+                        <>
+                          <Loader2 className="h-3 w-3 mr-1 inline animate-spin" />
+                          Gerando...
+                        </>
+                      ) : (
+                        <>🤖 Gerar prompt com IA</>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Clique no botão pra IA criar um prompt baseado no anúncio
+                    e fotos. Você pode editar antes de gerar a thumb.
+                  </p>
+                  <Textarea
+                    rows={16}
+                    value={customPromptText}
+                    onChange={(e) => setCustomPromptText(e.target.value)}
+                    placeholder="O prompt aparecerá aqui após clicar em 'Gerar prompt com IA' acima. Você pode editar ou escrever do zero."
+                    className="text-xs font-mono"
+                    maxLength={5000}
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {customPromptText.length}/5000 caracteres
+                  </p>
+                </div>
+              </div>
+
+              {/* COLUNA 3 — PREVIEW */}
+              <div className="space-y-4">
+                <Label className="text-base font-semibold">
+                  🖼️ Preview da thumb
+                </Label>
+                {isGenerating && (
+                  <div className="flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg min-h-[400px]">
+                    <Loader2 className="h-10 w-10 animate-spin text-purple-600 mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      Gerando {variationCount} variação{variationCount > 1 ? "ões" : ""} com IA... (~{variationCount * 30}s)
+                    </p>
+                  </div>
+                )}
+                {!isGenerating && generatedUrls.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      {generatedUrls.length === 1
+                        ? "✨ Thumb gerada!"
+                        : `✨ ${generatedUrls.length} variações geradas! Clique na que quiser usar:`}
+                    </p>
+                    <div className={`grid gap-3 ${generatedUrls.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+                      {generatedUrls.map((url, idx) => {
+                        const isSelected = selectedGeneratedIdx === idx;
+                        return (
+                          <div
+                            key={url}
+                            className={`relative rounded-lg overflow-hidden border-4 transition cursor-pointer ${
+                              isSelected
+                                ? "border-orange-500 ring-2 ring-orange-200 shadow-lg"
+                                : "border-gray-200 hover:border-gray-300"
+                            }`}
+                            onClick={() => {
+                              setSelectedGeneratedIdx(idx);
+                              setGeneratedUrl(url);
+                            }}
+                          >
+                            <img src={url} alt={`Variação ${idx + 1}`} className="w-full" />
+                            <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                              {String.fromCharCode(65 + idx)}
+                            </div>
+                            {isSelected && (
+                              <div className="absolute top-2 right-2 bg-orange-500 text-white rounded-full p-1.5 shadow">
+                                <Check className="h-4 w-4" />
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setZoomOpen(url);
+                              }}
+                              className="absolute bottom-2 right-2 bg-black/60 text-white rounded-full p-1.5 hover:bg-black/80"
+                              title="Ampliar"
+                            >
+                              <ZoomIn className="h-3 w-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center">
+                      Variação selecionada: {selectedGeneratedIdx !== null ? String.fromCharCode(65 + selectedGeneratedIdx) : "—"}
+                    </p>
+                  </div>
+                )}
+                {!isGenerating && generatedUrls.length === 0 && generatedUrl && (
+                  <div className="space-y-2">
+                    <img
+                      src={generatedUrl}
+                      alt="Thumb atual"
+                      className="w-full rounded-lg border-2 border-orange-300 shadow"
+                    />
+                    <p className="text-xs text-muted-foreground text-center">
+                      Thumb atual do anúncio. Clique em "Gerar Thumb" pra criar variações novas.
+                    </p>
+                  </div>
+                )}
+                {!isGenerating && generatedUrls.length === 0 && !generatedUrl && (
+                  <div className="flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg min-h-[400px] text-muted-foreground">
+                    <ImageIcon className="h-12 w-12 mb-3 opacity-40" />
+                    <p className="text-sm text-center">
+                      A thumb aparecerá aqui após clicar em "Gerar Thumb".
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
           </div>
-        </div>
-        </div>
 
-        {customPromptMode && customPromptText.trim().length > 0 && (
-          <div className="text-xs bg-yellow-50 border-t border-yellow-300 text-yellow-900 px-6 py-2 shrink-0">
-            🎯 <strong>Modo Apenas Prompt ativo:</strong> estilo, selos, cores e toggles serão IGNORADOS. Só o texto do prompt manual vai pra IA — isso evita conflito e gera resultado mais próximo do esperado.
-          </div>
-        )}
-
-        <DialogFooter className="flex justify-between gap-2 px-6 py-4 border-t shrink-0 bg-white">
-          <Button variant="outline" onClick={onClose}>
-            Cancelar
-          </Button>
-          <div className="flex gap-2 ml-auto">
-            <Button
-              onClick={handleGenerate}
-              disabled={isGenerating || selected.length === 0}
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Gerando...
-                </>
-              ) : generatedUrl ? (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" /> Regerar
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" /> Gerar Thumb
-                </>
-              )}
+          {/* Footer */}
+          <DialogFooter className="flex justify-between gap-2 px-6 py-4 border-t shrink-0 bg-white">
+            <Button variant="outline" onClick={onClose}>
+              Cancelar
             </Button>
-            {generatedUrl && (
-              <Button onClick={handleSaveAndClose} className="bg-green-600 hover:bg-green-700">
-                ✓ Usar esta thumb
+            <div className="flex gap-2">
+              <Button
+                onClick={handleGenerate}
+                disabled={isGenerating || !customPromptText.trim()}
+                variant={generatedUrl ? "outline" : "default"}
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Gerando...
+                  </>
+                ) : generatedUrl ? (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Regerar
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Gerar Thumb
+                  </>
+                )}
               </Button>
-            )}
-          </div>
-        </DialogFooter>
-      </DialogContent>
-
-      <Dialog open={zoomOpen} onOpenChange={setZoomOpen}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Thumb ampliada</DialogTitle>
-          </DialogHeader>
-          {previewSrc && <img src={previewSrc} alt="Thumb ampliada" className="w-full" />}
+              {generatedUrl && (
+                <Button
+                  onClick={() => {
+                    if (onThumbGenerated) onThumbGenerated(generatedUrl);
+                    onClose();
+                  }}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  ✓ Usar esta thumb
+                </Button>
+              )}
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Dialog>
+
+      {/* Modal de zoom */}
+      {zoomOpen && (
+        <Dialog open={!!zoomOpen} onOpenChange={() => setZoomOpen(null)}>
+          <DialogContent className="max-w-4xl">
+            <img
+              src={zoomOpen}
+              alt="Zoom"
+              className="w-full h-auto rounded"
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

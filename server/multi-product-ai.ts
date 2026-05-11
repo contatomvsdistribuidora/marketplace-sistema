@@ -1,6 +1,8 @@
+import OpenAI from "openai";
 import { invokeLLM, type InvokeResult } from "./_core/llm";
 import { loadAiProviderFromDb } from "./lib/ai-provider";
 import { generateImage } from "./_core/imageGeneration";
+import { ENV } from "./_core/env";
 import { db as sharedDb } from "./db";
 import { and, eq } from "drizzle-orm";
 import {
@@ -239,13 +241,132 @@ ${variationsText}${v2Text}`;
   return title;
 }
 
+async function analyzePhotosWithVision(
+  photoUrls: string[],
+): Promise<string> {
+  if (!photoUrls || photoUrls.length === 0) {
+    return "";
+  }
+
+  const photosToAnalyze = photoUrls.slice(0, 4);
+
+  try {
+    if (!ENV.openaiApiKey) {
+      console.warn("[analyzePhotosWithVision] OPENAI_API_KEY não configurada — pulando análise");
+      return "";
+    }
+    const client = new OpenAI({ apiKey: ENV.openaiApiKey });
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Descreva em até 150 palavras o que você vê nas imagens deste produto: tipo, cor, formato, material, embalagem, contexto de uso típico. Foque em características VISUAIS que ajudem a recriar uma imagem similar. Não invente nada que não esteja claramente visível. Responda em português brasileiro.",
+            },
+            ...photosToAnalyze.map((url) => ({
+              type: "image_url" as const,
+              image_url: { url },
+            })),
+          ],
+        },
+      ],
+    });
+
+    const text = response.choices[0]?.message?.content ?? "";
+    if (!text || text.trim().length < 20) {
+      console.warn("[analyzePhotosWithVision] Resposta vazia ou muito curta");
+      return "";
+    }
+
+    return text.trim();
+  } catch (e: any) {
+    console.error("[analyzePhotosWithVision] Erro:", e?.message);
+    return "";
+  }
+}
+
+async function translatePromptToEnglish(
+  promptPtBr: string,
+): Promise<string> {
+  if (!promptPtBr || promptPtBr.trim().length < 10) {
+    return promptPtBr;
+  }
+
+  try {
+    if (!ENV.openaiApiKey) {
+      console.warn("[translatePrompt] OPENAI_API_KEY não configurada — usando PT-BR original");
+      return promptPtBr;
+    }
+    const client = new OpenAI({ apiKey: ENV.openaiApiKey });
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 1500,
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert at converting Portuguese product image prompts into ENGLISH prompts optimized for gpt-image-1 (image generation AI).
+
+YOUR JOB: take the Portuguese prompt and rewrite it as a professional ENGLISH image generation prompt focused on COMMERCIAL e-commerce thumbnails for Brazilian marketplaces (Shopee).
+
+OUTPUT REQUIREMENTS:
+1. Output ONLY the English prompt — no preamble, no explanation, no "Here's the prompt:"
+2. Keep ALL product specifications (sizes, quantities, kits, variations) EXACTLY as in the original
+3. Keep brand names and product names UNCHANGED (don't translate "Embafreezer" or specific brands)
+4. PRESERVE Portuguese text that should appear ON the image (e.g., "OFERTA", "MAIS VENDIDO", "FRETE GRÁTIS", "KIT 1 UNIDADE", "ESCOLHA SUA VARIAÇÃO") — quote them in the prompt so gpt-image-1 renders them in Portuguese
+5. Use professional commercial photography vocabulary in English (hero shot, studio lighting, mobile-first composition, high contrast, etc)
+6. Be specific about Shopee brand colors when mentioned (orange #ee4d2d)
+7. Mention "Brazilian Portuguese text" so the AI knows to render text accents correctly
+8. Length: 300-600 words
+
+EXAMPLE:
+Portuguese input: "Crie thumb profissional Shopee mostrando 3 variações de sacos plásticos para alimentos com kits de 1, 2 e 3 unidades"
+
+English output: "Create a professional Shopee e-commerce thumbnail in Brazilian marketplace style, mobile-first 1024x1024 square composition. Hero shot displaying 3 product variations of transparent plastic food storage bags arranged horizontally. Each variation labeled with Brazilian Portuguese text 'KIT 1 UNIDADE', 'KIT 2 UNIDADES', 'KIT 3 UNIDADES' in bold sans-serif typography. Shopee orange #ee4d2d as accent color for badges and call-to-action elements. Clean white background, studio lighting, ultra-realistic product photography, high contrast for mobile readability. Include promotional badges with text 'OFERTA', 'MAIS VENDIDO', 'ESCOLHA SUA VARIAÇÃO'. Premium typography, sharp packaging details, commercial campaign quality. All Portuguese text must render with correct accents and spelling."`,
+        },
+        {
+          role: "user",
+          content: `Translate this Portuguese prompt into an optimized English image generation prompt:\n\n${promptPtBr}`,
+        },
+      ],
+    });
+
+    const translated = response.choices[0]?.message?.content?.trim() ?? "";
+
+    if (!translated || translated.length < 50) {
+      console.warn("[translatePrompt] Tradução vazia — usando PT-BR original");
+      return promptPtBr;
+    }
+
+    console.log(`[translatePrompt] PT-BR (${promptPtBr.length} chars) → EN (${translated.length} chars)`);
+    return translated;
+  } catch (e: any) {
+    console.error("[translatePrompt] Erro:", e?.message);
+    return promptPtBr;
+  }
+}
+
 export async function generateMultiProductThumbPromptSuggestion(
   listingId: number,
   userId: number,
+  photoUrls?: string[],
 ): Promise<{ prompt: string }> {
   await loadAiProviderFromDb();
   const ctx = await resolveListingContext(listingId, userId);
   const { listing, principal, category, resolved, variation2Type, variation2Options } = ctx;
+
+  const visualAnalysis = photoUrls && photoUrls.length > 0
+    ? await analyzePhotosWithVision(photoUrls)
+    : "";
+
+  console.log(
+    `[generateThumbPrompt] visualAnalysis: ${visualAnalysis ? visualAnalysis.slice(0, 80) + "..." : "(sem fotos)"}`,
+  );
 
   const variacoesResumo = resolved
     .slice(0, 8)
@@ -346,10 +467,10 @@ VARIAÇÕES (${resolved.length} total):
 ${variacoesResumo}${variacao2Block}
 
 DESCRIÇÃO RESUMIDA: ${(listing.description || "").slice(0, 800)}
-
+${visualAnalysis ? `\n═══════════════════════════════════════\nANÁLISE VISUAL DAS FOTOS DO PRODUTO (IA Vision):\n═══════════════════════════════════════\n${visualAnalysis}\n` : ""}
 ═══════════════════════════════════════
 
-TAREFA: gere o prompt COMPLETO seguindo EXATAMENTE o estilo do EXEMPLO no system message, adaptado pra ESSE produto específico. Mencione cada variação por nome, especifique as capacidades/quantidades, identifique aplicações reais (o que pode ser guardado/usado), e adapte os selos à categoria. Embalagens só decorativas — o foco visual é o produto SENDO USADO.`;
+TAREFA: gere o prompt COMPLETO seguindo EXATAMENTE o estilo do EXEMPLO no system message, adaptado pra ESSE produto específico. ${visualAnalysis ? "Use a análise visual acima pra descrever o produto com precisão (cor real, formato real, material real)." : ""} Mencione cada variação por nome, especifique as capacidades/quantidades, identifique aplicações reais (o que pode ser guardado/usado), e adapte os selos à categoria. Embalagens fictícias são OK — não precisa replicar a real (foco visual é o produto SENDO USADO com alimentos/aplicações reais dentro).`;
 
   const llmResponse = await invokeLLM({
     messages: [
@@ -508,7 +629,8 @@ export async function generateMultiProductThumb(
   contexto?: ThumbToggleContexto[],
   enfase?: ThumbToggleEnfase[],
   customPrompt?: string,
-): Promise<{ thumbUrl: string; promptUsed: string }> {
+  creativeMode?: boolean,
+): Promise<{ thumbUrl: string; promptUsed: string; promptEnUsed: string }> {
   const { resolved, principal, category } = await resolveListingContext(listingId, userId);
 
   let referenceImages: Array<{ url: string }> = [];
@@ -630,9 +752,16 @@ ${styleSection}${narrativeSection}
 CONTEXTO:
 Produto Principal: ${principalName}${extraInstructions}`;
 
+  if (creativeMode) {
+    console.log("[generateThumb] CREATIVE MODE — usando images.generate() (sem fotos de referência)");
+  }
+
+  console.log("[generateThumb] Traduzindo prompt PT-BR → EN...");
+  const promptEn = await translatePromptToEnglish(prompt);
+
   const result = await generateImage({
-    prompt,
-    originalImages: referenceImages,
+    prompt: promptEn,
+    originalImages: creativeMode ? [] : referenceImages,
   });
 
   if (!result.url) {
@@ -647,5 +776,92 @@ Produto Principal: ${principalName}${extraInstructions}`;
       eq(multiProductListings.userId, userId),
     ));
 
-  return { thumbUrl: result.url, promptUsed: prompt };
+  return { thumbUrl: result.url, promptUsed: prompt, promptEnUsed: promptEn };
+}
+
+export async function generateMultiProductThumbBatch(
+  count: number,
+  listingId: number,
+  userId: number,
+  selectedImageUrls?: string[],
+  extraPrompt?: string,
+  headerText?: string,
+  style?: ThumbStyle,
+  badges?: ThumbBadge[],
+  color?: ThumbColor,
+  promptBase?: ThumbPromptBase,
+  composicao?: ThumbToggleComposicao[],
+  contexto?: ThumbToggleContexto[],
+  enfase?: ThumbToggleEnfase[],
+  customPrompt?: string,
+  creativeMode?: boolean,
+): Promise<{
+  results: Array<{ thumbUrl: string; promptUsed: string; promptEnUsed: string; variantIndex: number }>;
+  errors: Array<{ variantIndex: number; error: string }>;
+}> {
+  const safeCount = Math.max(1, Math.min(4, Math.floor(count || 1)));
+
+  console.log(`[generateThumbBatch] Gerando ${safeCount} variações em paralelo...`);
+
+  const variationTwists = [
+    "",
+    "\n\nVARIATION B: emphasize promotional badges and discount tags more prominently. Use vibrant warm colors (orange #ee4d2d, red, yellow).",
+    "\n\nVARIATION C: emphasize lifestyle context — show the product being USED in real-world settings (kitchen, freezer, home). Soft natural lighting.",
+    "\n\nVARIATION D: emphasize brand authority and premium quality. Cleaner minimalist composition, more whitespace, premium typography, sophisticated palette.",
+  ];
+
+  const variantPrompts = Array.from({ length: safeCount }, (_, i) => {
+    const baseCustom = customPrompt || "";
+    return baseCustom + (variationTwists[i] || "");
+  });
+
+  const promises = variantPrompts.map((variantPrompt, idx) =>
+    generateMultiProductThumb(
+      listingId,
+      userId,
+      extraPrompt,
+      selectedImageUrls,
+      headerText,
+      style,
+      badges,
+      color,
+      promptBase,
+      composicao,
+      contexto,
+      enfase,
+      variantPrompt || customPrompt,
+      creativeMode,
+    ).then((result) => ({ ...result, variantIndex: idx }))
+      .catch((err) => {
+        console.error(`[generateThumbBatch] Erro variante ${idx}:`, err?.message);
+        throw { variantIndex: idx, error: err?.message ?? String(err) };
+      })
+  );
+
+  const settled = await Promise.allSettled(promises);
+
+  const results: Array<{ thumbUrl: string; promptUsed: string; promptEnUsed: string; variantIndex: number }> = [];
+  const errors: Array<{ variantIndex: number; error: string }> = [];
+
+  for (const r of settled) {
+    if (r.status === "fulfilled") {
+      results.push(r.value);
+    } else {
+      const reason = r.reason as any;
+      errors.push({
+        variantIndex: reason?.variantIndex ?? -1,
+        error: reason?.error ?? reason?.message ?? "Erro desconhecido",
+      });
+    }
+  }
+
+  console.log(`[generateThumbBatch] Concluído: ${results.length} sucesso, ${errors.length} falhas`);
+
+  if (results.length === 0) {
+    throw new Error(
+      `Todas as ${safeCount} gerações falharam. Primeiro erro: ${errors[0]?.error ?? "desconhecido"}`,
+    );
+  }
+
+  return { results, errors };
 }

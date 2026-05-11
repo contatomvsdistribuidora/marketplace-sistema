@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { ThumbGeneratorModal } from "./ThumbGeneratorModal";
+import ThumbGeneratorModal from "./ThumbGeneratorModal";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
   SelectTrigger, SelectValue,
@@ -610,11 +610,11 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
         listingId={listing.id}
         isOpen={thumbModalOpen}
         onClose={() => setThumbModalOpen(false)}
-        onSuccess={() => {
+        onThumbGenerated={() => {
           onChange();
           toast.success("Thumb salva com sucesso!");
         }}
-        currentThumbUrl={listing.thumbUrl}
+        initialThumbUrl={listing.thumbUrl}
       />
 
       <Card>

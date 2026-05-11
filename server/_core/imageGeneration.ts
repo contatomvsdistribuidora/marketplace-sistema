@@ -43,9 +43,9 @@ const MODEL_MAP: Record<string, ModelConfig> = {
 };
 
 const FALLBACK_KEY = "flux-klein-4b";
-const MAX_REF_IMAGES = 16;
+const MAX_REF_IMAGES = 3;
 const MAX_REF_BYTES = 5 * 1024 * 1024;
-const REF_MAX_DIM = 512;
+const REF_MAX_DIM = 1536;
 const OUTPUT_W = 1024;
 const OUTPUT_H = 1024;
 
@@ -92,7 +92,7 @@ async function resizeToRefLimit(buf: Buffer): Promise<Buffer> {
       fit: "inside",
       withoutEnlargement: true,
     })
-    .jpeg({ quality: 85 })
+    .jpeg({ quality: 95, mozjpeg: true })
     .toBuffer();
 }
 
@@ -219,8 +219,10 @@ async function generateViaOpenAI(
         prompt,
         n: 1,
         size: `${OUTPUT_W}x${OUTPUT_H}`,
-        quality: cfg.quality,
-        input_fidelity: "high",
+        quality: "high",
+        input_fidelity: "low",
+        background: "auto",
+        output_format: "png",
       });
     } catch (err: any) {
       const msg = String(err?.message ?? err);
@@ -249,7 +251,10 @@ async function generateViaOpenAI(
       prompt,
       n: 1,
       size: `${OUTPUT_W}x${OUTPUT_H}`,
-      quality: cfg.quality,
+      quality: "high",
+      background: "auto",
+      output_format: "png",
+      moderation: "low",
     });
   }
 
