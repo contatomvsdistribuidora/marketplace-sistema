@@ -42,6 +42,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function ShopeeAccounts() {
   const search = useSearch();
@@ -80,11 +81,19 @@ export default function ShopeeAccounts() {
     byStatus: Record<string, number>;
   } | null>(null);
   const [resumeModalLoading, setResumeModalLoading] = useState(false);
+  const [selectedPartnerId, setSelectedPartnerId] = useState<number | null>(null);
 
   const { data: accounts, isLoading, refetch } = trpc.shopee.getAccounts.useQuery();
-  const { data: authUrlData } = trpc.shopee.getAuthUrl.useQuery({
-    redirectUrl: `${window.location.origin}/api/shopee/callback`,
-  });
+  const { data: partners } = trpc.shopee.listPartners.useQuery();
+  const { data: authUrlData } = trpc.shopee.getAuthUrl.useQuery(
+    {
+      partnerId: selectedPartnerId!,
+      redirectUrl: `${window.location.origin}/api/shopee/callback`,
+    },
+    {
+      enabled: !!selectedPartnerId,
+    }
+  );
   const deactivateMutation = trpc.shopee.deactivateAccount.useMutation();
   const countItemsMutation = trpc.shopee.countItems.useMutation();
   const getResumableSyncJobMutation = trpc.shopee.getResumableSyncJob.useMutation();
@@ -95,6 +104,13 @@ export default function ShopeeAccounts() {
     { jobId: syncJobId! },
     { enabled: !!syncJobId, refetchInterval: syncJobId ? 2000 : false }
   );
+
+  // Auto-select se só houver 1 partner ativo
+  useEffect(() => {
+    if (partners && partners.length === 1 && !selectedPartnerId) {
+      setSelectedPartnerId(partners[0].partnerId);
+    }
+  }, [partners, selectedPartnerId]);
 
   useEffect(() => {
     if (!jobStatus) return;
@@ -272,12 +288,27 @@ export default function ShopeeAccounts() {
             Conecte suas lojas Shopee para gerenciar produtos, otimizar anúncios e criar campanhas.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
-          <Button onClick={handleConnect}>
+          <Select
+            value={selectedPartnerId?.toString() || ""}
+            onValueChange={(v) => setSelectedPartnerId(parseInt(v, 10))}
+          >
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Selecione um app Shopee" />
+            </SelectTrigger>
+            <SelectContent>
+              {partners?.map((p) => (
+                <SelectItem key={p.id} value={p.partnerId.toString()}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={handleConnect} disabled={!selectedPartnerId || !authUrlData}>
             <Plus className="h-4 w-4 mr-2" />
             Conectar Loja
           </Button>
@@ -317,7 +348,7 @@ export default function ShopeeAccounts() {
               Conecte sua primeira loja Shopee para começar a gerenciar produtos, otimizar anúncios
               com IA, criar variações/kits e monitorar concorrentes.
             </p>
-            <Button onClick={handleConnect}>
+            <Button onClick={handleConnect} disabled={!selectedPartnerId || !authUrlData}>
               <Plus className="h-4 w-4 mr-2" />
               Conectar Primeira Loja
             </Button>
