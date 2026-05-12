@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, Search, X, Film, Upload, Store, Star } from "lucide-react";
+import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, X, Film, Upload, Store, Star, Search } from "lucide-react";
 import { toast } from "sonner";
 import { type Listing } from "./types";
 import {
@@ -112,7 +112,6 @@ function SortableImage({
 export function StepC({ listing, onChange }: { listing: Listing; onChange: () => void }) {
   const [thumbModalOpen, setThumbModalOpen] = useState(false);
   const [videoModalOpen, setVideoModalOpen] = useState(false);
-  const [videoSearch, setVideoSearch] = useState("");
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -120,7 +119,6 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const [importUrl, setImportUrl] = useState("");
   const [importTitle, setImportTitle] = useState("");
   const [importingUrl, setImportingUrl] = useState(false);
-  const videoFileInputRef = useRef<HTMLInputElement>(null);
   const thumbFileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingThumb, setUploadingThumb] = useState(false);
 
@@ -433,7 +431,6 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     } finally {
       setUploadingVideo(false);
       setUploadProgress(0);
-      if (videoFileInputRef.current) videoFileInputRef.current.value = "";
     }
   }
 
@@ -518,9 +515,6 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     currentValue = "none";
   }
 
-  const filteredVideos = videoSearch.trim()
-    ? allVideos.filter(v => v.title.toLowerCase().includes(videoSearch.toLowerCase()))
-    : allVideos;
   const selectedVideoMeta = allVideos.find(v => v.value === currentValue);
 
   const isLoading = blVideosLoading || videosLoading;
@@ -802,126 +796,20 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
             </div>
           )}
 
-          {/* Modal Galeria de Videos */}
-          <Dialog open={videoModalOpen} onOpenChange={setVideoModalOpen}>
-            <DialogContent className="!max-w-[98vw] w-[98vw] !h-[95vh] flex flex-col p-4 sm:p-6">
-              <DialogHeader>
-                <DialogTitle>Selecione um video</DialogTitle>
-              </DialogHeader>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar por nome..."
-                    value={videoSearch}
-                    onChange={(e) => setVideoSearch(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-                <Badge variant="outline">{filteredVideos.length} video(s)</Badge>
-              </div>
-              <div className="overflow-y-auto flex-1 -mx-2 px-2">
-                {filteredVideos.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                    <Film className="h-12 w-12 mb-3 opacity-30" />
-                    <p className="text-sm">Nenhum video encontrado</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-                    {filteredVideos.map((v) => {
-                      const isSelected = v.value === currentValue;
-                      return (
-                        <div
-                          key={v.key}
-                          className={`relative rounded-lg border-2 overflow-hidden transition cursor-pointer ${
-                            isSelected ? "border-primary ring-2 ring-primary/20" : "border-transparent hover:border-muted-foreground/30"
-                          }`}
-                          onClick={() => {
-                            handleSelectVideo(v.value);
-                            setVideoModalOpen(false);
-                          }}
-                        >
-                          <div className="relative aspect-video bg-black">
-                            <video
-                              src={v.url}
-                              className="h-full w-full object-cover"
-                              preload="metadata"
-                              muted
-                            />
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setVideoPreviewUrl(v.url);
-                              }}
-                              className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/50 transition opacity-0 hover:opacity-100"
-                            >
-                              <Play className="h-10 w-10 text-white fill-white" />
-                            </button>
-                            {isSelected && (
-                              <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
-                                <Film className="h-3 w-3" />
-                              </div>
-                            )}
-                          </div>
-                          <div className="p-3 bg-card space-y-1">
-                            <div className="text-sm font-semibold line-clamp-2">{v.title}</div>
-                            {v.productName && (
-                              <div className="text-xs text-muted-foreground line-clamp-1">
-                                📦 {v.productName}
-                              </div>
-                            )}
-                            <Badge variant="secondary" className="text-[10px]">
-                              {v.subtitle}
-                            </Badge>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Rodape com botoes de adicionar */}
-              <div className="border-t pt-3 mt-3 flex flex-wrap items-center gap-2">
-                <input
-                  ref={videoFileInputRef}
-                  type="file"
-                  accept="video/mp4,video/quicktime,video/webm"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleUploadVideoFromPC(f);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="default"
-                  onClick={() => videoFileInputRef.current?.click()}
-                  disabled={uploadingVideo}
-                  className="gap-2"
-                >
-                  {uploadingVideo ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Enviando {uploadProgress}%</>
-                  ) : (
-                    <><ImageIcon className="h-4 w-4" /> Enviar do PC</>
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setImportUrlOpen(true)}
-                  disabled={uploadingVideo}
-                  className="gap-2"
-                >
-                  <Search className="h-4 w-4" /> Importar de URL
-                </Button>
-                <span className="text-xs text-muted-foreground ml-auto">
-                  Max 30MB · MP4/MOV/WEBM · fica salvo pra reusar
-                </span>
-              </div>
-            </DialogContent>
-          </Dialog>
+          {/* Modal Galeria de Videos — modo listing (template global) */}
+          <VideoPickerDialog
+            isOpen={videoModalOpen}
+            onClose={() => setVideoModalOpen(false)}
+            mode="listing"
+            currentValue={currentValue}
+            allVideos={allVideos}
+            onSelect={(v) => { handleSelectVideo(v); setVideoModalOpen(false); }}
+            onPreview={setVideoPreviewUrl}
+            onUploadFile={handleUploadVideoFromPC}
+            onImportFromUrl={() => setImportUrlOpen(true)}
+            uploadingVideo={uploadingVideo}
+            uploadProgress={uploadProgress}
+          />
 
           {/* Modal Importar URL */}
           <Dialog open={importUrlOpen} onOpenChange={(o) => { if (!importingUrl) setImportUrlOpen(o); }}>
@@ -1106,6 +994,7 @@ function MediaSection({
   onSaved: () => void;
 }) {
   const [voice, setVoice] = useState("");
+  const [videoPickerOpen, setVideoPickerOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const effectiveThumbUrl = publication.customThumbUrl ?? listing.thumbUrl;
@@ -1264,23 +1153,36 @@ function MediaSection({
       {/* VÍDEO */}
       <div>
         <Label className="text-[11px] text-muted-foreground">Vídeo</Label>
-        <Select value={currentVideoValue} onValueChange={changeVideo} disabled={busy}>
-          <SelectTrigger className="h-8 text-sm mt-0.5">
-            <SelectValue placeholder="herda do anúncio" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">
-              {listing.videoBankId || listing.videoUrl ? "Herda do anúncio" : "Sem vídeo"}
-            </SelectItem>
-            {allVideos
-              .filter((v) => v.source === "bank")
-              .map((v) => (
-                <SelectItem key={v.key} value={v.value}>
-                  {v.title}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 mt-0.5">
+          <Select value={currentVideoValue} onValueChange={changeVideo} disabled={busy}>
+            <SelectTrigger className="h-8 text-sm flex-1">
+              <SelectValue placeholder="herda do anúncio" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">
+                {listing.videoBankId || listing.videoUrl ? "Herda do anúncio" : "Sem vídeo"}
+              </SelectItem>
+              {allVideos
+                .filter((v) => v.source === "bank")
+                .map((v) => (
+                  <SelectItem key={v.key} value={v.value}>
+                    {v.title}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setVideoPickerOpen(true)}
+            disabled={busy}
+            className="h-8 text-xs gap-1 flex-shrink-0"
+            title="Abre painel completo com preview, busca e cards"
+          >
+            <Film className="h-3.5 w-3.5" />
+            Painel completo
+          </Button>
+        </div>
         {listingHasBlVideo && publication.customVideoId == null && (
           <p className="text-[10px] text-orange-700 italic mt-1">
             Anúncio usa vídeo BaseLinker — pra variar por conta, suba ao banco no template acima.
@@ -1290,6 +1192,180 @@ function MediaSection({
           <p className="text-[10px] text-muted-foreground mt-1">Selecionado: {currentVideoMeta.title}</p>
         )}
       </div>
+
+      <VideoPickerDialog
+        isOpen={videoPickerOpen}
+        onClose={() => setVideoPickerOpen(false)}
+        mode="publication"
+        currentValue={currentVideoValue}
+        allVideos={allVideos}
+        onSelect={(v) => { changeVideo(v); setVideoPickerOpen(false); }}
+      />
     </div>
+  );
+}
+
+/**
+ * Dialog reutilizado pra seleção de vídeo. Suporta 2 modos:
+ *  - "listing" (default): mostra TODOS os vídeos (bank + BL) + footer com
+ *    botões Upload PC / Importar URL. Usado pelo Step 4 template global.
+ *  - "publication": mostra APENAS bank videos, sem footer de upload —
+ *    publication só seleciona, não cria. Quem quer subir novo usa o template.
+ */
+function VideoPickerDialog({
+  isOpen,
+  onClose,
+  mode = "listing",
+  currentValue,
+  allVideos,
+  onSelect,
+  onPreview,
+  onUploadFile,
+  onImportFromUrl,
+  uploadingVideo,
+  uploadProgress,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  mode?: "listing" | "publication";
+  currentValue: string;
+  allVideos: AllVideosList;
+  onSelect: (value: string) => void;
+  onPreview?: (url: string) => void;
+  onUploadFile?: (file: File) => void;
+  onImportFromUrl?: () => void;
+  uploadingVideo?: boolean;
+  uploadProgress?: number;
+}) {
+  const [search, setSearch] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const visibleVideos = mode === "publication"
+    ? allVideos.filter((v) => v.source === "bank")
+    : allVideos;
+  const filtered = search.trim()
+    ? visibleVideos.filter((v) => v.title.toLowerCase().includes(search.toLowerCase()))
+    : visibleVideos;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="!max-w-[98vw] w-[98vw] !h-[95vh] flex flex-col p-4 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>
+            {mode === "publication" ? "Selecione um vídeo para esta conta" : "Selecione um vídeo"}
+          </DialogTitle>
+        </DialogHeader>
+
+        {mode === "publication" && (
+          <div className="text-xs text-muted-foreground italic mb-2">
+            Apenas vídeos do banco. Pra subir novo, use o template global do Step 4.
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nome..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Badge variant="outline">{filtered.length} vídeo(s)</Badge>
+        </div>
+
+        <div className="overflow-y-auto flex-1 -mx-2 px-2">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Film className="h-12 w-12 mb-3 opacity-30" />
+              <p className="text-sm">Nenhum vídeo encontrado</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+              {filtered.map((v) => {
+                const isSelected = v.value === currentValue;
+                return (
+                  <div
+                    key={v.key}
+                    className={`relative rounded-lg border-2 overflow-hidden transition cursor-pointer ${
+                      isSelected ? "border-primary ring-2 ring-primary/20" : "border-transparent hover:border-muted-foreground/30"
+                    }`}
+                    onClick={() => onSelect(v.value)}
+                  >
+                    <div className="relative aspect-video bg-black">
+                      <video src={v.url} className="h-full w-full object-cover" preload="metadata" muted />
+                      {onPreview && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onPreview(v.url); }}
+                          className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/50 transition opacity-0 hover:opacity-100"
+                        >
+                          <Play className="h-10 w-10 text-white fill-white" />
+                        </button>
+                      )}
+                      {isSelected && (
+                        <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
+                          <Film className="h-3 w-3" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-3 bg-card space-y-1">
+                      <div className="text-sm font-semibold line-clamp-2">{v.title}</div>
+                      {v.productName && (
+                        <div className="text-xs text-muted-foreground line-clamp-1">📦 {v.productName}</div>
+                      )}
+                      <Badge variant="secondary" className="text-[10px]">{v.subtitle}</Badge>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer com upload + import só no modo listing */}
+        {mode === "listing" && (
+          <div className="border-t pt-3 mt-3 flex flex-wrap items-center gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="video/mp4,video/quicktime,video/webm"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f && onUploadFile) onUploadFile(f);
+                if (fileRef.current) fileRef.current.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="default"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploadingVideo}
+              className="gap-2"
+            >
+              {uploadingVideo ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Enviando {uploadProgress ?? 0}%</>
+              ) : (
+                <><ImageIcon className="h-4 w-4" /> Enviar do PC</>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onImportFromUrl}
+              disabled={uploadingVideo}
+              className="gap-2"
+            >
+              <Search className="h-4 w-4" /> Importar de URL
+            </Button>
+            <span className="text-xs text-muted-foreground ml-auto">
+              Max 30MB · MP4/MOV/WEBM · fica salvo pra reusar
+            </span>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
