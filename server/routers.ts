@@ -4666,6 +4666,143 @@ export const appRouter = router({
         return { description };
       }),
 
+    // Override de mídia (thumb + vídeo) por publicação (Fase 5).
+    // Null em cada campo = remove override = herda do listing-pai.
+    updatePublicationMedia: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        customThumbUrl: z.string().max(500).nullable(),
+        customVideoId: z.number().int().positive().nullable(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [own] = await sharedDb
+          .select({ pubId: shopeeListingPublications.id })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({
+            customThumbUrl: input.customThumbUrl,
+            customVideoId: input.customVideoId,
+          })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        const [updated] = await sharedDb
+          .select()
+          .from(shopeeListingPublications)
+          .where(eq(shopeeListingPublications.id, input.publicationId))
+          .limit(1);
+        return updated;
+      }),
+
+    // Gera thumb por conta usando o mesmo gerador do Step 4, mas com voice
+    // hint opcional injetado no extraPrompt + skipListingUpdate=true (não
+    // sobrescreve thumbUrl do listing-pai). Resultado grava em custom_thumb_url.
+    generateThumbForPublication: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        voice: z.string().max(80).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [own] = await sharedDb
+          .select({
+            pubId: shopeeListingPublications.id,
+            listingId: shopeeListingPublications.listingId,
+          })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        // Voice hint vai como extraPrompt. Sem voice = gerador roda com
+        // params default do listing (sem hint extra).
+        const extraPrompt = input.voice && input.voice.trim()
+          ? `Diferencie esta versão de outras versões do mesmo produto: ${input.voice.trim()}`
+          : undefined;
+
+        const result = await multiProductAi.generateMultiProductThumb(
+          own.listingId,
+          ctx.user.id,
+          extraPrompt,
+          undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, undefined,
+          true, // skipListingUpdate: não toca multi_product_listings.thumbUrl
+        );
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({ customThumbUrl: result.thumbUrl.slice(0, 500) })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        return { thumbUrl: result.thumbUrl };
+      }),
+
+    // Upload manual de thumb pra publication. Mesma trilha de uploadThumbFile
+    // (base64 → R2 → URL pública), mas grava em custom_thumb_url.
+    uploadThumbForPublication: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+        base64Data: z.string().min(100),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const sizeBytes = (input.base64Data.length * 3) / 4;
+        if (sizeBytes > 5 * 1024 * 1024) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Imagem maior que 5MB. Reduza antes de enviar.",
+          });
+        }
+
+        const [own] = await sharedDb
+          .select({
+            pubId: shopeeListingPublications.id,
+            listingId: shopeeListingPublications.listingId,
+          })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        const buf = Buffer.from(input.base64Data, "base64");
+        const ext = input.contentType === "image/jpeg" ? "jpg"
+                  : input.contentType === "image/png" ? "png"
+                  : "webp";
+        const key = `multi-product-thumbs/${ctx.user.id}/${own.listingId}-pub${input.publicationId}-${Date.now()}.${ext}`;
+        const stored = await storagePut(key, buf, input.contentType);
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({ customThumbUrl: stored.url.slice(0, 500) })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        return { thumbUrl: stored.url };
+      }),
+
     // Desvincula o item Shopee da listing — uso pra "item orfao" (publicou
     // mas a listing foi resetada/regenerada e o itemId antigo nao bate mais).
     // Reseta status pra "draft" se estava "published"/"error" pra permitir

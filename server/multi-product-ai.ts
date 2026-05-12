@@ -648,6 +648,10 @@ export async function generateMultiProductThumb(
   enfase?: ThumbToggleEnfase[],
   customPrompt?: string,
   creativeMode?: boolean,
+  // skipListingUpdate: chamadores multi-store (Fase 5) querem só a thumbUrl
+  // gerada — gravam em shopee_listing_publications.custom_thumb_url depois.
+  // Sem isso, esta função sobrescreve multi_product_listings.thumbUrl.
+  skipListingUpdate?: boolean,
 ): Promise<{ thumbUrl: string; promptUsed: string; promptEnUsed: string }> {
   const { resolved, principal, category } = await resolveListingContext(listingId, userId);
 
@@ -788,13 +792,15 @@ Produto Principal: ${principalName}${extraInstructions}`;
     throw new Error("Geração de thumb falhou — IA não retornou URL.");
   }
 
-  await sharedDb
-    .update(multiProductListings)
-    .set({ thumbUrl: result.url, thumbStatus: "generated" })
-    .where(and(
-      eq(multiProductListings.id, listingId),
-      eq(multiProductListings.userId, userId),
-    ));
+  if (!skipListingUpdate) {
+    await sharedDb
+      .update(multiProductListings)
+      .set({ thumbUrl: result.url, thumbStatus: "generated" })
+      .where(and(
+        eq(multiProductListings.id, listingId),
+        eq(multiProductListings.userId, userId),
+      ));
+  }
 
   return { thumbUrl: result.url, promptUsed: prompt, promptEnUsed: promptEn };
 }

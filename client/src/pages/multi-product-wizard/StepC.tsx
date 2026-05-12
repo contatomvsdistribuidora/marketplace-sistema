@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, Search, X, Film, Upload } from "lucide-react";
+import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, Search, X, Film, Upload, Store, Star } from "lucide-react";
 import { toast } from "sonner";
 import { type Listing } from "./types";
 import {
@@ -984,6 +984,312 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
           </Dialog>
         </CardContent>
       </Card>
+
+      <PerAccountMediaCard listing={listing} allVideos={allVideos} />
+    </div>
+  );
+}
+
+type AllVideosList = Array<{
+  key: string;
+  value: string;
+  title: string;
+  url: string;
+  source: "bl" | "bank";
+  subtitle?: string;
+  thumbHint?: string;
+  productName?: string;
+}>;
+
+/**
+ * Multi-store (Fase 5): permite thumb + vídeo por conta Shopee.
+ *
+ * Thumb: upload manual, geração IA com voice hint (reusa params do listing-pai
+ * via skipListingUpdate), ou herda do listing (NULL).
+ * Vídeo: dropdown unificado (videoBank + BL videos) ou herda. Sem upload novo
+ * per-conta — quem precisa sobe pelo template global acima.
+ *
+ * Custom URL/ID = NULL no banco = herda do listing.
+ */
+function PerAccountMediaCard({
+  listing,
+  allVideos,
+}: {
+  listing: Listing;
+  allVideos: AllVideosList;
+}) {
+  const accountsQuery = trpc.shopee.listActiveAccounts.useQuery();
+  const publicationsQuery = trpc.multiProduct.listPublications.useQuery(
+    { listingId: listing.id },
+  );
+  const utils = trpc.useUtils();
+
+  const accounts = accountsQuery.data ?? [];
+  const publications = publicationsQuery.data ?? [];
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
+
+  const onSaved = () => utils.multiProduct.listPublications.invalidate({ listingId: listing.id });
+  const isLoading = accountsQuery.isLoading || publicationsQuery.isLoading;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Store className="h-4 w-4 text-muted-foreground" />
+          Mídia por conta
+        </CardTitle>
+        <CardDescription>
+          Cada conta Shopee pode ter thumb e vídeo próprios. Vazio = herda do template acima.
+          Shopee penaliza thumbs idênticas entre lojas — varie pelo menos um pouco.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : publications.length === 0 ? (
+          <div className="text-xs text-muted-foreground italic">
+            Nenhuma conta marcada. Volte ao Step 1 e selecione as contas onde publicar.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {publications.map((pub) => {
+              const acc = accountById.get(pub.shopeeAccountId);
+              const isPrincipal = pub.shopeeAccountId === listing.shopeeAccountId;
+              return (
+                <div key={pub.id} className="rounded border border-gray-200 bg-gray-50/50">
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-white rounded-t">
+                    <Store className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      {acc?.shopName ?? `Conta #${acc?.shopId ?? pub.shopeeAccountId}`}
+                    </span>
+                    {acc?.shopId && (
+                      <span className="text-xs text-muted-foreground">#{acc.shopId}</span>
+                    )}
+                    {isPrincipal && (
+                      <Badge variant="outline" className="text-[10px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
+                        <Star className="h-3 w-3 fill-yellow-400" />
+                        principal
+                      </Badge>
+                    )}
+                  </div>
+                  <MediaSection publication={pub} listing={listing} allVideos={allVideos} onSaved={onSaved} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Editor de thumb + vídeo de uma publication. Save automático em cada ação
+ * (upload, IA, troca de dropdown). Inputs vazios não existem — limpar é
+ * botão explícito que envia NULL e volta a herdar do listing.
+ */
+function MediaSection({
+  publication,
+  listing,
+  allVideos,
+  onSaved,
+}: {
+  publication: {
+    id: number;
+    customThumbUrl: string | null;
+    customVideoId: number | null;
+  };
+  listing: Listing;
+  allVideos: AllVideosList;
+  onSaved: () => void;
+}) {
+  const [voice, setVoice] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const effectiveThumbUrl = publication.customThumbUrl ?? listing.thumbUrl;
+  const isHerdadoThumb = publication.customThumbUrl == null;
+
+  const currentVideoValue = publication.customVideoId != null
+    ? `bank:${publication.customVideoId}`
+    : "none";
+  const currentVideoMeta = publication.customVideoId != null
+    ? allVideos.find((v) => v.value === currentVideoValue)
+    : null;
+  // Aviso: listing pode usar vídeo BL (videoUrl puro sem videoBankId).
+  // Override per-conta só suporta videoBank — listing BL videos exigem subir
+  // no banco primeiro pra serem variáveis.
+  const listingHasBlVideo = !!listing.videoUrl && listing.videoBankId == null;
+
+  const updateMut = trpc.multiProduct.updatePublicationMedia.useMutation({
+    onSuccess: () => { toast.success("Mídia atualizada."); onSaved(); },
+    onError: (e) => toast.error(e.message),
+  });
+  const uploadMut = trpc.multiProduct.uploadThumbForPublication.useMutation({
+    onSuccess: () => { toast.success("Thumb enviada."); onSaved(); },
+    onError: (e) => toast.error(e.message),
+  });
+  const genThumbMut = trpc.multiProduct.generateThumbForPublication.useMutation({
+    onSuccess: () => { toast.success("Thumb gerada pela IA."); onSaved(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  async function handleUpload(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Use JPG, PNG ou WEBP.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64Data = dataUrl.split(",")[1];
+      uploadMut.mutate({
+        publicationId: publication.id,
+        contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
+        base64Data,
+      });
+    };
+    reader.onerror = () => toast.error("Erro ao ler arquivo.");
+    reader.readAsDataURL(file);
+  }
+
+  function changeVideo(value: string) {
+    if (value === "none") {
+      updateMut.mutate({
+        publicationId: publication.id,
+        customThumbUrl: publication.customThumbUrl,
+        customVideoId: null,
+      });
+      return;
+    }
+    if (value.startsWith("bank:")) {
+      const bankId = Number(value.slice(5));
+      updateMut.mutate({
+        publicationId: publication.id,
+        customThumbUrl: publication.customThumbUrl,
+        customVideoId: bankId,
+      });
+    }
+  }
+
+  function clearThumb() {
+    updateMut.mutate({
+      publicationId: publication.id,
+      customThumbUrl: null,
+      customVideoId: publication.customVideoId,
+    });
+  }
+
+  const busy = updateMut.isPending || uploadMut.isPending || genThumbMut.isPending;
+
+  return (
+    <div className="px-3 py-3 space-y-3">
+      {/* THUMB */}
+      <div>
+        <Label className="text-[11px] text-muted-foreground">Thumb</Label>
+        <div className="flex items-start gap-3 mt-1">
+          <div className="relative w-24 h-24 rounded border border-gray-200 bg-white overflow-hidden flex-shrink-0">
+            {effectiveThumbUrl ? (
+              <img src={effectiveThumbUrl} alt="thumb" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground">sem thumb</div>
+            )}
+            {isHerdadoThumb && effectiveThumbUrl && (
+              <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] text-center py-0.5">
+                herdado
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5 flex-1">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleUpload(f);
+                if (fileRef.current) fileRef.current.value = "";
+              }}
+            />
+            <Button
+              variant="outline" size="sm"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              className="h-7 text-xs justify-start"
+            >
+              <Upload className="h-3 w-3 mr-1" />
+              {uploadMut.isPending ? "Enviando..." : "Trocar (upload)"}
+            </Button>
+            <Button
+              variant="outline" size="sm"
+              onClick={() => genThumbMut.mutate({ publicationId: publication.id, voice: voice.trim() || undefined })}
+              disabled={busy}
+              className="h-7 text-xs justify-start"
+            >
+              {genThumbMut.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+              Variar com IA
+            </Button>
+            <Button
+              variant="ghost" size="sm"
+              onClick={clearThumb}
+              disabled={busy || isHerdadoThumb}
+              className="h-7 text-xs justify-start"
+            >
+              Limpar (herdar)
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <Label htmlFor={`voice-thumb-${publication.id}`} className="text-[11px] text-muted-foreground">
+          Tom/foco visual para IA (opcional)
+        </Label>
+        <Input
+          id={`voice-thumb-${publication.id}`}
+          value={voice}
+          onChange={(e) => setVoice(e.target.value.slice(0, 80))}
+          placeholder="ex: cor azul de destaque, vibe minimalista"
+          maxLength={80}
+          className="h-8 text-sm"
+        />
+      </div>
+
+      {/* VÍDEO */}
+      <div>
+        <Label className="text-[11px] text-muted-foreground">Vídeo</Label>
+        <Select value={currentVideoValue} onValueChange={changeVideo} disabled={busy}>
+          <SelectTrigger className="h-8 text-sm mt-0.5">
+            <SelectValue placeholder="herda do anúncio" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">
+              {listing.videoBankId || listing.videoUrl ? "Herda do anúncio" : "Sem vídeo"}
+            </SelectItem>
+            {allVideos
+              .filter((v) => v.source === "bank")
+              .map((v) => (
+                <SelectItem key={v.key} value={v.value}>
+                  {v.title}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+        {listingHasBlVideo && publication.customVideoId == null && (
+          <p className="text-[10px] text-orange-700 italic mt-1">
+            Anúncio usa vídeo BaseLinker — pra variar por conta, suba ao banco no template acima.
+          </p>
+        )}
+        {currentVideoMeta && (
+          <p className="text-[10px] text-muted-foreground mt-1">Selecionado: {currentVideoMeta.title}</p>
+        )}
+      </div>
     </div>
   );
 }
