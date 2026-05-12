@@ -25,7 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download,
-  Bot, Plus, Settings, Eye, EyeOff, Copy, ExternalLink, Trash2, Pencil,
+  Bot, Plus, Settings, Copy, ExternalLink, Trash2, Pencil,
 } from "lucide-react";
 
 type Props = {
@@ -56,17 +56,15 @@ export default function ThumbGeneratorModal({
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showManageDialog, setShowManageDialog] = useState(false);
   const [editingAccount, setEditingAccount] = useState<{
-    id: number; label: string; email: string; password: string; notes: string;
+    id: number; label: string; email: string; chromeProfileName: string; notes: string;
   } | null>(null);
   const [deleteAccountId, setDeleteAccountId] = useState<number | null>(null);
   const [newAccount, setNewAccount] = useState({
-    label: "", email: "", password: "", notes: "",
+    label: "", email: "", chromeProfileName: "", notes: "",
   });
-  const [showPasswordInForm, setShowPasswordInForm] = useState(false);
   const [revealedCredentials, setRevealedCredentials] = useState<{
-    email: string; password: string; label: string;
+    email: string; chromeProfileName: string; label: string;
   } | null>(null);
-  const [showRevealedPassword, setShowRevealedPassword] = useState(false);
 
   // Reset states quando modal abre
   useEffect(() => {
@@ -156,7 +154,7 @@ export default function ThumbGeneratorModal({
       toast.success("Conta cadastrada!");
       accountsQuery.refetch();
       setShowAddDialog(false);
-      setNewAccount({ label: "", email: "", password: "", notes: "" });
+      setNewAccount({ label: "", email: "", chromeProfileName: "", notes: "" });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -183,15 +181,15 @@ export default function ThumbGeneratorModal({
   const revealAccountMutation = trpc.chatgpt.reveal.useMutation({
     onSuccess: async (data) => {
       try {
-        await navigator.clipboard.writeText(data.email);
-        toast.success("Email copiado! Cole no ChatGPT.");
+        await navigator.clipboard.writeText(data.chromeProfileName);
+        toast.success(`Nome do perfil copiado: "${data.chromeProfileName}"`);
       } catch {
-        toast.error("Falha ao copiar email. Use o botão Copiar abaixo.");
+        // ignora silenciosamente — popup vai mostrar mesmo assim
       }
       window.open("https://chatgpt.com/", "_blank");
       setRevealedCredentials({
         email: data.email,
-        password: data.password,
+        chromeProfileName: data.chromeProfileName,
         label: data.label,
       });
     },
@@ -220,11 +218,11 @@ export default function ThumbGeneratorModal({
     revealAccountMutation.mutate({ id: selectedAccountId });
   }
 
-  async function handleCopyPassword() {
+  async function handleCopyProfileName() {
     if (!revealedCredentials) return;
     try {
-      await navigator.clipboard.writeText(revealedCredentials.password);
-      toast.success("Senha copiada! Cole no ChatGPT.");
+      await navigator.clipboard.writeText(revealedCredentials.chromeProfileName);
+      toast.success("Nome do perfil copiado!");
     } catch {
       toast.error("Falha ao copiar.");
     }
@@ -770,7 +768,6 @@ export default function ThumbGeneratorModal({
           if (!open) {
             setShowAddDialog(false);
             setEditingAccount(null);
-            setShowPasswordInForm(false);
           }
         }}
       >
@@ -816,29 +813,21 @@ export default function ThumbGeneratorModal({
             </div>
 
             <div>
-              <Label htmlFor="acc-password">
-                Senha {editingAccount && "(deixe vazio pra manter atual)"}
-              </Label>
-              <div className="relative">
-                <Input
-                  id="acc-password"
-                  type={showPasswordInForm ? "text" : "password"}
-                  placeholder={editingAccount ? "Nova senha (opcional)" : "Senha"}
-                  value={editingAccount ? editingAccount.password : newAccount.password}
-                  onChange={(e) =>
-                    editingAccount
-                      ? setEditingAccount({ ...editingAccount, password: e.target.value })
-                      : setNewAccount({ ...newAccount, password: e.target.value })
-                  }
-                />
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  onClick={() => setShowPasswordInForm(!showPasswordInForm)}
-                >
-                  {showPasswordInForm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+              <Label htmlFor="acc-profile">Nome do perfil Chrome</Label>
+              <Input
+                id="acc-profile"
+                placeholder="Ex: Douglas (higipack.com.br), Profile 8..."
+                value={editingAccount ? editingAccount.chromeProfileName : newAccount.chromeProfileName}
+                onChange={(e) =>
+                  editingAccount
+                    ? setEditingAccount({ ...editingAccount, chromeProfileName: e.target.value })
+                    : setNewAccount({ ...newAccount, chromeProfileName: e.target.value })
+                }
+                maxLength={200}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                💡 Clica no avatar do Chrome (canto superior direito) → veja o nome exato do perfil
+              </p>
             </div>
 
             <div>
@@ -871,18 +860,18 @@ export default function ThumbGeneratorModal({
                   const payload: any = { id: editingAccount.id };
                   if (editingAccount.label.trim()) payload.label = editingAccount.label.trim();
                   if (editingAccount.email.trim()) payload.email = editingAccount.email.trim();
-                  if (editingAccount.password.trim()) payload.password = editingAccount.password.trim();
+                  if (editingAccount.chromeProfileName.trim()) payload.chromeProfileName = editingAccount.chromeProfileName.trim();
                   payload.notes = editingAccount.notes?.trim() || "";
                   updateAccountMutation.mutate(payload);
                 } else {
-                  if (!newAccount.label.trim() || !newAccount.email.trim() || !newAccount.password.trim()) {
-                    toast.error("Preencha nome, email e senha.");
+                  if (!newAccount.label.trim() || !newAccount.email.trim() || !newAccount.chromeProfileName.trim()) {
+                    toast.error("Preencha nome, email e nome do perfil Chrome.");
                     return;
                   }
                   createAccountMutation.mutate({
                     label: newAccount.label.trim(),
                     email: newAccount.email.trim(),
-                    password: newAccount.password.trim(),
+                    chromeProfileName: newAccount.chromeProfileName.trim(),
                     notes: newAccount.notes?.trim() || undefined,
                   });
                 }
@@ -934,7 +923,7 @@ export default function ThumbGeneratorModal({
                           id: acc.id,
                           label: acc.label,
                           email: acc.email,
-                          password: "",
+                          chromeProfileName: acc.chromeProfileName,
                           notes: acc.notes || "",
                         });
                         setShowManageDialog(false);
@@ -992,76 +981,53 @@ export default function ThumbGeneratorModal({
       <Dialog
         open={revealedCredentials !== null}
         onOpenChange={(open) => {
-          if (!open) {
-            setRevealedCredentials(null);
-            setShowRevealedPassword(false);
-          }
+          if (!open) setRevealedCredentials(null);
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Credenciais — {revealedCredentials?.label}</DialogTitle>
+            <DialogTitle>📋 Use o perfil: {revealedCredentials?.label}</DialogTitle>
             <DialogDescription>
-              Email já foi copiado pra área de transferência. ChatGPT abriu em nova aba. Cole o email lá, volte aqui e copie a senha.
+              ChatGPT abriu em nova aba no perfil ATUAL. Pra usar a conta certa, troque o perfil do Chrome.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
-            <div>
-              <Label className="text-xs">Email</Label>
-              <div className="flex gap-2">
-                <Input value={revealedCredentials?.email ?? ""} readOnly className="font-mono text-sm" />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    if (!revealedCredentials) return;
-                    await navigator.clipboard.writeText(revealedCredentials.email);
-                    toast.success("Email copiado!");
-                  }}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
+          <div className="space-y-4">
+            <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 text-center">
+              <p className="text-xs text-muted-foreground mb-1">Nome do perfil Chrome:</p>
+              <p className="text-lg font-bold text-blue-900 break-words">
+                {revealedCredentials?.chromeProfileName}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={handleCopyProfileName}
+              >
+                <Copy className="h-3 w-3 mr-1" /> Copiar nome
+              </Button>
             </div>
 
-            <div>
-              <Label className="text-xs">Senha</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={revealedCredentials?.password ?? ""}
-                  readOnly
-                  type={showRevealedPassword ? "text" : "password"}
-                  className="font-mono text-sm"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowRevealedPassword(!showRevealedPassword)}
-                >
-                  {showRevealedPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopyPassword}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
+            <div className="bg-muted/30 rounded-lg p-3">
+              <p className="text-xs text-muted-foreground">Email da conta Google:</p>
+              <p className="text-sm font-mono">{revealedCredentials?.email}</p>
             </div>
 
-            <div className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded p-2">
-              🔒 Por segurança, este popup fecha sozinho ao trocar de conta ou fechar o modal.
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm space-y-1">
+              <p className="font-semibold mb-2">🎯 Como trocar de perfil:</p>
+              <ol className="list-decimal list-inside space-y-1 text-xs">
+                <li>Olha no canto superior <strong>DIREITO</strong> do Chrome</li>
+                <li>Clica no <strong>avatar/inicial</strong> do perfil atual</li>
+                <li>Escolhe o perfil <strong>"{revealedCredentials?.chromeProfileName}"</strong></li>
+                <li>Vai abrir nova janela no perfil correto</li>
+                <li>Digita <strong>chatgpt.com</strong> e tá logado!</li>
+              </ol>
             </div>
           </div>
 
           <DialogFooter>
-            <Button onClick={() => {
-              setRevealedCredentials(null);
-              setShowRevealedPassword(false);
-            }}>
-              Fechar
+            <Button onClick={() => setRevealedCredentials(null)}>
+              Entendi
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -5175,12 +5175,6 @@ export const appRouter = router({
   }),
 
   chatgpt: router({
-    testCrypto: protectedProcedure
-      .query(async () => {
-        const { selfTest } = await import("./_core/crypto");
-        return selfTest();
-      }),
-
     list: protectedProcedure
       .query(async ({ ctx }) => {
         const rows = await sharedDb
@@ -5188,6 +5182,7 @@ export const appRouter = router({
             id: chatgptAccounts.id,
             label: chatgptAccounts.label,
             email: chatgptAccounts.email,
+            chromeProfileName: chatgptAccounts.chromeProfileName,
             notes: chatgptAccounts.notes,
             lastUsedAt: chatgptAccounts.lastUsedAt,
             createdAt: chatgptAccounts.createdAt,
@@ -5204,23 +5199,19 @@ export const appRouter = router({
       .input(z.object({
         label: z.string().min(1).max(100),
         email: z.string().email().max(255),
-        password: z.string().min(1).max(500),
+        chromeProfileName: z.string().min(1).max(200),
         notes: z.string().max(2000).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        const { encrypt } = await import("./_core/crypto");
-
-        const encryptedPassword = encrypt(input.password);
-
         const [result] = await sharedDb.insert(chatgptAccounts).values({
           userId: ctx.user.id,
           label: input.label.trim(),
           email: input.email.trim().toLowerCase(),
-          encryptedPassword,
+          chromeProfileName: input.chromeProfileName.trim(),
           notes: input.notes?.trim() || null,
         });
 
-        console.log(`[chatgpt.create] User ${ctx.user.id} criou conta ${input.label} (${input.email})`);
+        console.log(`[chatgpt.create] User ${ctx.user.id} criou conta ${input.label} (perfil: ${input.chromeProfileName})`);
 
         return { id: result.insertId, label: input.label };
       }),
@@ -5230,7 +5221,7 @@ export const appRouter = router({
         id: z.number(),
         label: z.string().min(1).max(100).optional(),
         email: z.string().email().max(255).optional(),
-        password: z.string().min(1).max(500).optional(),
+        chromeProfileName: z.string().min(1).max(200).optional(),
         notes: z.string().max(2000).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
@@ -5254,12 +5245,8 @@ export const appRouter = router({
 
         if (input.label !== undefined) updates.label = input.label.trim();
         if (input.email !== undefined) updates.email = input.email.trim().toLowerCase();
+        if (input.chromeProfileName !== undefined) updates.chromeProfileName = input.chromeProfileName.trim();
         if (input.notes !== undefined) updates.notes = input.notes.trim() || null;
-
-        if (input.password !== undefined) {
-          const { encrypt } = await import("./_core/crypto");
-          updates.encryptedPassword = encrypt(input.password);
-        }
 
         if (Object.keys(updates).length === 0) {
           return { updated: false };
@@ -5332,31 +5319,18 @@ export const appRouter = router({
           });
         }
 
-        const { decrypt } = await import("./_core/crypto");
-
-        let password: string;
-        try {
-          password = decrypt(account.encryptedPassword);
-        } catch (e: any) {
-          console.error(`[chatgpt.reveal] Falha ao descriptografar conta ${input.id}:`, e?.message);
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Erro ao descriptografar senha. Chave de criptografia pode ter mudado.",
-          });
-        }
-
         await sharedDb
           .update(chatgptAccounts)
           .set({ lastUsedAt: new Date() })
           .where(eq(chatgptAccounts.id, input.id));
 
-        console.log(`[chatgpt.reveal] User ${ctx.user.id} revelou credenciais conta ${input.id}`);
+        console.log(`[chatgpt.reveal] User ${ctx.user.id} usou conta ${input.id} (perfil: ${account.chromeProfileName})`);
 
         return {
           id: account.id,
           label: account.label,
           email: account.email,
-          password,
+          chromeProfileName: account.chromeProfileName,
         };
       }),
   }),

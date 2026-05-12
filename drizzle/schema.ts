@@ -716,7 +716,7 @@ export const chatgptAccounts = mysqlTable("chatgpt_accounts", {
   userId: int("user_id").notNull(),
   label: varchar("label", { length: 100 }).notNull(),
   email: varchar("email", { length: 255 }).notNull(),
-  encryptedPassword: text("encrypted_password").notNull(),
+  chromeProfileName: varchar("chrome_profile_name", { length: 200 }).notNull(),
   notes: text("notes"),
   lastUsedAt: timestamp("last_used_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
