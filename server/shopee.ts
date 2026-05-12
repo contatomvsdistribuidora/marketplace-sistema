@@ -17,6 +17,26 @@ import { db } from "./db";
 const SHOPEE_API_BASE = "https://partner.shopeemobile.com";
 const SHOPEE_AUTH_BASE = "https://partner.shopeemobile.com";
 
+// ============ PARTNER CREDENTIALS ============
+
+/**
+ * Resolve partner credentials.
+ * Prioridade: account fornecido > ENV (fallback Bella legacy).
+ */
+export function resolvePartnerCredentials(
+  account?: { partnerId?: number | null; partnerKey?: string | null }
+): { partnerId: number; partnerKey: string } {
+  if (account?.partnerId && account?.partnerKey) {
+    return { partnerId: account.partnerId, partnerKey: account.partnerKey };
+  }
+  const partnerId = parseInt(ENV.shopeePartnerId, 10);
+  const partnerKey = ENV.shopeePartnerKey;
+  if (!partnerId || !partnerKey) {
+    throw new Error("Partner credentials não disponíveis (sem account + ENV vazio)");
+  }
+  return { partnerId, partnerKey };
+}
+
 // ============ SIGNATURE HELPERS ============
 
 /**
@@ -27,12 +47,12 @@ export function generateSignature(
   path: string,
   timestamp: number,
   accessToken?: string,
-  shopId?: number
+  shopId?: number,
+  partner?: { partnerId: number; partnerKey: string }
 ): string {
-  const partnerId = parseInt(ENV.shopeePartnerId, 10);
-  const partnerKey = ENV.shopeePartnerKey;
+  const creds = partner ?? resolvePartnerCredentials();
 
-  let baseString = `${partnerId}${path}${timestamp}`;
+  let baseString = `${creds.partnerId}${path}${timestamp}`;
   if (accessToken) {
     baseString += accessToken;
   }
@@ -41,7 +61,7 @@ export function generateSignature(
   }
 
   return crypto
-    .createHmac("sha256", partnerKey)
+    .createHmac("sha256", creds.partnerKey)
     .update(baseString)
     .digest("hex");
 }
@@ -53,14 +73,15 @@ function buildSignedUrl(
   path: string,
   params: Record<string, string | number> = {},
   accessToken?: string,
-  shopId?: number
+  shopId?: number,
+  partner?: { partnerId: number; partnerKey: string }
 ): string {
   const timestamp = Math.floor(Date.now() / 1000);
-  const partnerId = parseInt(ENV.shopeePartnerId, 10);
-  const sign = generateSignature(path, timestamp, accessToken, shopId);
+  const creds = partner ?? resolvePartnerCredentials();
+  const sign = generateSignature(path, timestamp, accessToken, shopId, creds);
 
   const urlParams = new URLSearchParams({
-    partner_id: partnerId.toString(),
+    partner_id: creds.partnerId.toString(),
     timestamp: timestamp.toString(),
     sign,
     ...Object.fromEntries(
@@ -84,31 +105,43 @@ function buildSignedUrl(
  * Generate the OAuth authorization URL for a user to connect their Shopee shop.
  * The user will be redirected to Shopee to authorize the app.
  */
-export function getAuthorizationUrl(_redirectUrl?: string, _state?: string): string {
-  const partnerId = process.env.SHOPEE_PARTNER_ID!;
-  const partnerKey = process.env.SHOPEE_PARTNER_KEY!;
+export function getAuthorizationUrl(
+  redirectUrl?: string,
+  state?: string,
+  partner?: { partnerId: number; partnerKey: string }
+): string {
+  const creds = partner ?? resolvePartnerCredentials();
   const path = "/api/v2/shop/auth_partner";
   const timestamp = Math.floor(Date.now() / 1000);
-  const baseString = `${partnerId}${path}${timestamp}`;
-  const sign = crypto.createHmac("sha256", partnerKey).update(baseString).digest("hex");
+  const baseString = `${creds.partnerId}${path}${timestamp}`;
+  const sign = crypto.createHmac("sha256", creds.partnerKey).update(baseString).digest("hex");
 
-  console.log({ partnerId, path, timestamp, baseString, sign });
+  console.log({ partnerId: creds.partnerId, path, timestamp, baseString, sign });
 
-  const redirect = encodeURIComponent("https://marketplace-sistema-production-04eb.up.railway.app/api/shopee/callback");
+  const defaultRedirect = "https://marketplace-sistema-production-04eb.up.railway.app/api/shopee/callback";
+  const redirect = encodeURIComponent(redirectUrl || defaultRedirect);
 
-  return `https://partner.shopeemobile.com/api/v2/shop/auth_partner?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&redirect=${redirect}`;
+  let url = `https://partner.shopeemobile.com/api/v2/shop/auth_partner?partner_id=${creds.partnerId}&timestamp=${timestamp}&sign=${sign}&redirect=${redirect}`;
+  if (state) {
+    url += `&state=${encodeURIComponent(state)}`;
+  }
+  return url;
 }
 
 /**
  * Exchange the authorization code + shop_id for access_token and refresh_token.
  */
-export async function exchangeCodeForToken(code: string, shopId: number) {
+export async function exchangeCodeForToken(
+  code: string,
+  shopId: number,
+  partner?: { partnerId: number; partnerKey: string }
+) {
+  const creds = partner ?? resolvePartnerCredentials();
   const path = "/api/v2/auth/token/get";
   const timestamp = Math.floor(Date.now() / 1000);
-  const partnerId = parseInt(ENV.shopeePartnerId, 10);
-  const sign = generateSignature(path, timestamp);
+  const sign = generateSignature(path, timestamp, undefined, undefined, creds);
 
-  const url = `${SHOPEE_API_BASE}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}`;
+  const url = `${SHOPEE_API_BASE}${path}?partner_id=${creds.partnerId}&timestamp=${timestamp}&sign=${sign}`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -116,7 +149,7 @@ export async function exchangeCodeForToken(code: string, shopId: number) {
     body: JSON.stringify({
       code,
       shop_id: shopId,
-      partner_id: partnerId,
+      partner_id: creds.partnerId,
     }),
   });
 
@@ -144,13 +177,17 @@ export async function exchangeCodeForToken(code: string, shopId: number) {
 /**
  * Refresh an expired access token using the refresh token.
  */
-export async function refreshAccessToken(refreshToken: string, shopId: number) {
+export async function refreshAccessToken(
+  refreshToken: string,
+  shopId: number,
+  partner?: { partnerId: number; partnerKey: string }
+) {
+  const creds = partner ?? resolvePartnerCredentials();
   const path = "/api/v2/auth/access_token/get";
   const timestamp = Math.floor(Date.now() / 1000);
-  const partnerId = parseInt(ENV.shopeePartnerId, 10);
-  const sign = generateSignature(path, timestamp);
+  const sign = generateSignature(path, timestamp, undefined, undefined, creds);
 
-  const url = `${SHOPEE_API_BASE}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}`;
+  const url = `${SHOPEE_API_BASE}${path}?partner_id=${creds.partnerId}&timestamp=${timestamp}&sign=${sign}`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -158,7 +195,7 @@ export async function refreshAccessToken(refreshToken: string, shopId: number) {
     body: JSON.stringify({
       refresh_token: refreshToken,
       shop_id: shopId,
-      partner_id: partnerId,
+      partner_id: creds.partnerId,
     }),
   });
 
