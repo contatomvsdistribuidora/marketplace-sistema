@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Star, Image as ImageIcon, Send, AlertTriangle, CheckCircle2, Loader2,
-  Eye, AlertCircle, X, Unlink,
+  Eye, AlertCircle, X, Unlink, Copy,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -50,6 +50,14 @@ export function StepD({
       onChange(); // Refetch para pegar listing.status='error' + lastError do servidor
       toast.error(e.message);
     },
+  });
+
+  const cloneMutation = trpc.multiProduct.cloneListing.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Anúncio clonado! ID #${data.id}`);
+      window.location.href = `/multi-product-wizard?id=${data.id}`;
+    },
+    onError: (e) => toast.error(e.message),
   });
 
   const previewQuery = trpc.multiProduct.previewPublishPayload.useQuery(
@@ -399,6 +407,31 @@ export function StepD({
               onRefresh={() => refreshDiagnosisMutation.mutate({ id: listing.id })}
               refreshing={refreshDiagnosisMutation.isPending}
             />
+          )}
+
+          {listing.status === "published" && (
+            <div className="border-t pt-4 mt-4">
+              <p className="text-sm text-muted-foreground mb-2">
+                💡 Quer criar OUTRO anúncio do mesmo produto com fotos/thumb diferentes?
+              </p>
+              <Button
+                variant="outline"
+                size="lg"
+                className="w-full"
+                disabled={cloneMutation.isPending}
+                onClick={() => {
+                  if (confirm("Clonar este anúncio? Vai criar uma cópia em rascunho que você pode editar antes de publicar de novo.")) {
+                    cloneMutation.mutate({ id: listing.id });
+                  }
+                }}
+              >
+                {cloneMutation.isPending ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Clonando...</>
+                ) : (
+                  <><Copy className="h-4 w-4 mr-2" /> Clonar anúncio (criar versão nova)</>
+                )}
+              </Button>
+            </div>
           )}
 
           {listing.status === "published" && (

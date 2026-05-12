@@ -4936,6 +4936,85 @@ export const appRouter = router({
         return result;
       }),
 
+    cloneListing: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const [original] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+
+        if (!original) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Anúncio original não encontrado.",
+          });
+        }
+
+        const [result] = await sharedDb.insert(multiProductListings).values({
+          userId: ctx.user.id,
+          shopeeAccountId: original.shopeeAccountId,
+
+          title: original.title ? `${original.title} (cópia)` : null,
+          description: original.description,
+
+          mode: "new",
+          status: "draft",
+
+          mainProductSource: original.mainProductSource,
+          mainProductSourceId: original.mainProductSourceId,
+
+          variation2Type: original.variation2Type,
+          variation2OptionsJson: original.variation2OptionsJson,
+          variation2CellsJson: original.variation2CellsJson,
+
+          thumbUrl: original.thumbUrl,
+          thumbStatus: original.thumbStatus,
+          videoUrl: original.videoUrl,
+          videoBankId: original.videoBankId,
+
+          wizardStateJson: original.wizardStateJson,
+
+          shopeeItemId: null,
+          existingShopeeItemId: null,
+          publishedAt: null,
+          lastError: null,
+          qualityLevel: null,
+          unfinishedTasks: null,
+        });
+
+        const newListingId = Number(result.insertId);
+
+        const originalItems = await sharedDb
+          .select()
+          .from(multiProductListingItems)
+          .where(eq(multiProductListingItems.listingId, input.id));
+
+        if (originalItems.length > 0) {
+          await sharedDb.insert(multiProductListingItems).values(
+            originalItems.map((item) => ({
+              listingId: newListingId,
+              source: item.source,
+              sourceId: item.sourceId,
+              position: item.position,
+              customPrice: item.customPrice,
+              customSku: item.customSku,
+            }))
+          );
+        }
+
+        console.log(`[cloneListing] User ${ctx.user.id} clonou listing ${input.id} → novo ${newListingId} (${originalItems.length} itens copiados)`);
+
+        return {
+          id: newListingId,
+          title: original.title ? `${original.title} (cópia)` : "Cópia",
+        };
+      }),
+
     previewPublishPayload: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
