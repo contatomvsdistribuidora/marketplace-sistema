@@ -50,7 +50,7 @@ export function useResolvedProducts(listing: Listing, items: ListingItem[]) {
   }, [blCostInfo]);
 
   const { data: shopeeData, isLoading: shopeeLoading } = trpc.shopee.getProducts.useQuery(
-    { accountId: listing.shopeeAccountId, offset: 0, limit: 200, hasVariation: false },
+    { accountId: listing.shopeeAccountId, offset: 0, limit: 200 },
     { enabled: hasShopee },
   );
 
