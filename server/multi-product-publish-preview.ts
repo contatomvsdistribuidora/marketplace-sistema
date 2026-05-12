@@ -4,6 +4,7 @@ import {
   multiProductListings, multiProductListingItems,
   productCache, shopeeProducts,
 } from "../drizzle/schema";
+import { getRichOptionLabels } from "./lib/wizard-labels";
 
 export class PreviewPublishError extends Error {
   constructor(public code: string, message: string) {
@@ -191,8 +192,9 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
   }
 
   const variation2Name = deriveVariationName(ws.selectedType);
-  const variation2Options = (ws.optionLabels ?? [])
-    .filter((l: string) => l && l.trim())
+  // Preferir texto rico de optionDetailsMatrix sobre optionLabels cru
+  // (mesmo fix aplicado em multi-product-publish.ts pro Tier 2 nao sair so como numero).
+  const variation2Options = getRichOptionLabels(ws)
     .map((label: string) => ({ option: String(label).slice(0, 20) }));
   if (variation2Options.length > 0) {
     tierVariations.push({ name: variation2Name.slice(0, 20), option_list: variation2Options });

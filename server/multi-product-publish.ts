@@ -23,6 +23,7 @@ import * as shopeePublish from "./shopee-publish";
 import * as shopeeVideo from "./shopee-video";
 import { getValidToken } from "./shopee";
 import { fetchContentDiagnosis } from "./shopee/content-diagnosis";
+import { getRichOptionLabels } from "./lib/wizard-labels";
 
 export class PublishMultiProductError extends Error {
   constructor(public code: string, message: string) {
@@ -400,9 +401,10 @@ export async function publishMultiProductListing(
     let shopeeItemId: number;
     let mode: "create" | "promote";
 
-    const optionLabels: string[] = Array.isArray(ws.optionLabels)
-      ? ws.optionLabels.filter((l: string) => l && l.trim())
-      : [];
+    // Labels da 2a tier_variation: preferir texto rico de optionDetailsMatrix
+    // (editado no Step C ou gerado pela IA). ws.optionLabels guarda apenas o
+    // cru do Step B ("1", "2", "3"), que era o bug — Tier 2 saia so com numero.
+    const optionLabels: string[] = getRichOptionLabels(ws);
     const computedCellsList: any[] = Array.isArray(ws.computedCells) ? ws.computedCells : [];
     const computedByCellKey = new Map<string, any>();
     computedCellsList.forEach((c: any) => computedByCellKey.set(c.cellKey, c));
