@@ -10,8 +10,11 @@
  */
 
 import type { Express, Request, Response } from "express";
+import { and, eq } from "drizzle-orm";
 import * as shopee from "./shopee";
 import { sdk } from "./_core/sdk";
+import { db } from "./db";
+import { shopeePartners } from "../drizzle/schema";
 
 // Helper to extract userId from session cookie using the SDK
 async function getUserIdFromRequest(req: Request): Promise<number | null> {
@@ -48,15 +51,19 @@ export function registerShopeeRoutes(app: Express) {
         return res.redirect("/shopee-accounts?shopee_error=invalid_shop_id");
       }
 
-      // Get userId from state or session cookie
+      // Get userId / origin / partnerId from state, or fall back to session cookie
       let userId: number | null = null;
       let originUrl = "";
+      let statePartnerId: number | undefined;
 
       if (state) {
         try {
           const stateData = JSON.parse(Buffer.from(String(state), "base64").toString());
           userId = stateData.userId;
           originUrl = stateData.origin || "";
+          if (typeof stateData.partnerId === "number") {
+            statePartnerId = stateData.partnerId;
+          }
         } catch {
           userId = await getUserIdFromRequest(req);
         }
@@ -71,13 +78,41 @@ export function registerShopeeRoutes(app: Express) {
         return res.redirect(errorRedirect);
       }
 
-      console.log("[Shopee callback] recebido:", { code: String(code).substring(0, 8) + "...", shop_id, userId });
+      // Resolve partner credentials se o state trouxe partnerId.
+      // Sem partnerId no state (Bella legacy), partnerToUse fica undefined e
+      // shopee.* cai no fallback ENV automaticamente.
+      let partnerToUse: { partnerId: number; partnerKey: string } | undefined;
+      if (statePartnerId) {
+        const [partner] = await db
+          .select()
+          .from(shopeePartners)
+          .where(and(
+            eq(shopeePartners.partnerId, statePartnerId),
+            eq(shopeePartners.isActive, 1),
+          ))
+          .limit(1);
+
+        if (!partner) {
+          console.error(`[Shopee OAuth] Partner ${statePartnerId} não encontrado/inativo`);
+          return res.redirect(
+            `/shopee-accounts?shopee_error=${encodeURIComponent(`partner_not_found: ${statePartnerId}`)}`,
+          );
+        }
+        partnerToUse = { partnerId: partner.partnerId, partnerKey: partner.partnerKey };
+      }
+
+      console.log("[Shopee callback] recebido:", {
+        code: String(code).substring(0, 8) + "...",
+        shop_id,
+        userId,
+        partnerId: partnerToUse?.partnerId ?? "(fallback ENV)",
+      });
 
       // Exchange code for tokens
       console.log(`[Shopee OAuth] Exchanging code for shop ${shopId}, user ${userId}...`);
       let tokenData: Awaited<ReturnType<typeof shopee.exchangeCodeForToken>>;
       try {
-        tokenData = await shopee.exchangeCodeForToken(String(code), shopId);
+        tokenData = await shopee.exchangeCodeForToken(String(code), shopId, partnerToUse);
         console.log("[Shopee OAuth] Token recebido:", {
           hasAccessToken: !!tokenData.accessToken,
           hasRefreshToken: !!tokenData.refreshToken,
@@ -108,7 +143,8 @@ export function registerShopeeRoutes(app: Express) {
           tokenData.refreshToken,
           tokenData.expiresIn,
           shopName,
-          tokenData.refreshTokenExpiresIn
+          tokenData.refreshTokenExpiresIn,
+          partnerToUse,
         );
         console.log("[Shopee OAuth] Salvo com sucesso no banco.");
       } catch (err: any) {

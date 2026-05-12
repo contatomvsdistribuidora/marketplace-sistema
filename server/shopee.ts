@@ -490,7 +490,8 @@ export async function saveAccount(
   refreshToken: string,
   expiresIn: number,
   shopName?: string,
-  refreshTokenExpiresIn?: number
+  refreshTokenExpiresIn?: number,
+  partner?: { partnerId: number; partnerKey: string }
 ) {
   const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
   const refreshTokenExpiresAt = new Date(
@@ -514,17 +515,22 @@ export async function saveAccount(
   if (existing) {
     console.log("[saveAccount] Atualizando conta existente id:", existing.id);
     try {
+      const updateValues: Partial<typeof shopeeAccounts.$inferInsert> = {
+        accessToken,
+        refreshToken,
+        tokenExpiresAt,
+        refreshTokenExpiresAt,
+        tokenStatus: "active",
+        shopName: shopName || existing.shopName,
+        isActive: 1,
+      };
+      if (partner) {
+        updateValues.partnerId = partner.partnerId;
+        updateValues.partnerKey = partner.partnerKey;
+      }
       await db
         .update(shopeeAccounts)
-        .set({
-          accessToken,
-          refreshToken,
-          tokenExpiresAt,
-          refreshTokenExpiresAt,
-          tokenStatus: "active",
-          shopName: shopName || existing.shopName,
-          isActive: 1,
-        })
+        .set(updateValues)
         .where(eq(shopeeAccounts.id, existing.id));
     } catch (err: any) {
       console.error("[saveAccount] Erro no UPDATE:", err.message, "cause:", err.cause?.message ?? err.cause, "code:", err.cause?.code ?? err.code);
@@ -545,6 +551,8 @@ export async function saveAccount(
         tokenStatus: "active",
         region: "BR",
         isActive: 1,
+        partnerId: partner?.partnerId,
+        partnerKey: partner?.partnerKey,
       });
       console.log("[saveAccount] Inserido com sucesso, insertId:", result.insertId);
       return result.insertId;
