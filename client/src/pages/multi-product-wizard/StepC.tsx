@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, Search, X, Film } from "lucide-react";
+import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, Search, X, Film, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { type Listing } from "./types";
 import {
@@ -121,6 +121,8 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const [importTitle, setImportTitle] = useState("");
   const [importingUrl, setImportingUrl] = useState(false);
   const videoFileInputRef = useRef<HTMLInputElement>(null);
+  const thumbFileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingThumb, setUploadingThumb] = useState(false);
 
   const { data: invData } = trpc.settings.getInventoryId.useQuery();
   const inventoryId = invData?.inventoryId;
@@ -289,6 +291,47 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
   const confirmUploadMut = trpc.videoBank.confirmUpload.useMutation();
   const importFromUrlMut = trpc.videoBank.importFromUrl.useMutation();
   const utilsVideoBank = trpc.useUtils();
+
+  const uploadThumbFileMutation = trpc.multiProduct.uploadThumbFile.useMutation({
+    onSuccess: () => {
+      toast.success("Thumb enviada!");
+      onChange();
+      setUploadingThumb(false);
+    },
+    onError: (e) => {
+      toast.error(e.message);
+      setUploadingThumb(false);
+    },
+  });
+
+  async function handleUploadThumbFromPC(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB. Reduza antes de enviar.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Formato inválido. Use JPG, PNG ou WEBP.");
+      return;
+    }
+
+    setUploadingThumb(true);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64Data = dataUrl.split(",")[1];
+      uploadThumbFileMutation.mutate({
+        id: listing.id,
+        contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
+        base64Data,
+      });
+    };
+    reader.onerror = () => {
+      toast.error("Erro ao ler arquivo.");
+      setUploadingThumb(false);
+    };
+    reader.readAsDataURL(file);
+  }
 
   function handleSelectVideo(value: string) {
     if (value === "none") {
@@ -591,7 +634,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
               <Badge variant="outline" className="text-xs">
                 Status: {listing.thumbStatus}
               </Badge>
-              <div>
+              <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -599,6 +642,29 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
                 >
                   <Sparkles className="h-4 w-4 mr-2" />
                   {listing.thumbUrl ? "Regenerar com IA" : "Gerar com IA"}
+                </Button>
+                <input
+                  ref={thumbFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleUploadThumbFromPC(f);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={uploadingThumb}
+                  onClick={() => thumbFileInputRef.current?.click()}
+                >
+                  {uploadingThumb ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Enviando...</>
+                  ) : (
+                    <><Upload className="h-4 w-4 mr-2" /> Enviar do computador</>
+                  )}
                 </Button>
               </div>
             </div>

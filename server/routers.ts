@@ -4729,6 +4729,59 @@ export const appRouter = router({
         return result;
       }),
 
+    uploadThumbFile: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+        base64Data: z.string().min(100),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const sizeBytes = (input.base64Data.length * 3) / 4;
+        if (sizeBytes > 5 * 1024 * 1024) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Imagem maior que 5MB. Reduza antes de enviar.",
+          });
+        }
+
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+
+        if (!listing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Listing não encontrado" });
+        }
+
+        const buf = Buffer.from(input.base64Data, "base64");
+
+        const ext = input.contentType === "image/jpeg" ? "jpg"
+                  : input.contentType === "image/png" ? "png"
+                  : "webp";
+
+        const key = `multi-product-thumbs/${ctx.user.id}/${input.id}-${Date.now()}.${ext}`;
+        const stored = await storagePut(key, buf, input.contentType);
+
+        await sharedDb
+          .update(multiProductListings)
+          .set({
+            thumbUrl: stored.url,
+            thumbStatus: "generated" as any,
+          })
+          .where(and(
+            eq(multiProductListings.id, input.id),
+            eq(multiProductListings.userId, ctx.user.id),
+          ));
+
+        console.log(`[uploadThumbFile] Listing ${input.id} → thumb ${stored.url} (${(buf.length / 1024).toFixed(0)}KB)`);
+
+        return { thumbUrl: stored.url };
+      }),
+
     generateThumbBatchWithAI: protectedProcedure
       .input(z.object({
         id: z.number(),
