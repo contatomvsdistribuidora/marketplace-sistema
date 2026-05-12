@@ -45,7 +45,8 @@ multi_product_listings (1) ─┬→ Bella     → shopeeItemId X (custom title/
 | `id` | INT PK auto | — | |
 | `listing_id` | BIGINT | NOT NULL | FK lógica → `multi_product_listings.id` |
 | `shopee_account_id` | BIGINT | NOT NULL | FK lógica → `shopee_accounts.id` |
-| `price_multiplier` | DECIMAL(8,4) | NULL | Multiplicador de preço. NULL = sem override |
+| `price_multiplier` | DECIMAL(8,4) | NULL | Multiplicador de preço. NULL = herda do anúncio |
+| `min_margin_pct` | DECIMAL(5,2) | NULL | Piso de margem % por conta. NULL = herda do anúncio |
 | `custom_title` | VARCHAR(120) | NULL | Título por conta. NULL = herda do listing |
 | `custom_description` | TEXT | NULL | Descrição por conta. NULL = herda do listing |
 | `custom_thumb_url` | VARCHAR(500) | NULL | Thumb por conta. NULL = herda do listing |
@@ -114,9 +115,9 @@ publishMultiProductListing(listingId)
 
 | Fase | Escopo | Status |
 |---|---|---|
-| **1** | Documentação + schema tabela | **EM ANDAMENTO** |
-| 2 | Step "Contas" — UI seleção checkbox | pendente |
-| 3 | Step "Contas" — UI override por conta (multiplier, title, etc) | pendente |
+| **1** | Documentação + schema tabela | concluída |
+| **2** | Step "Contas" — UI seleção checkbox | concluída |
+| **3** | Step "Contas" — UI override de pricing por conta (price_multiplier + min_margin_pct) | concluída |
 | 4 | Persistência: upsert em `shopee_listing_publications` no autosave | pendente |
 | 5 | Preview consolidado por conta (Step C) | pendente |
 | 6 | Backend: `publishMultiProductListing` itera publications | pendente |

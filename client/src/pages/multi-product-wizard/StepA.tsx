@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Loader2, ArrowUp, ArrowDown, Pencil, Trash2, Plus, Star, Package, Store,
+  ChevronDown, ChevronRight, Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -421,8 +422,26 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
     onError: (e) => toast.error(e.message),
   });
 
+  // Defaults do anúncio pra usar como placeholder nos overrides — vêm do
+  // wizard JSON (CombinedWizard armazena tudo em wizardStateJson.pricing).
+  // Se o JSON ainda não existe (anúncio sem variações configuradas), cai pros
+  // defaults hardcoded do CombinedWizard.
+  const wizardDefaults = useMemo(() => {
+    try {
+      const ws = listing.wizardStateJson ? JSON.parse(listing.wizardStateJson) : null;
+      return {
+        multiplier: String(ws?.pricing?.marginMultiplier ?? "2.5"),
+        minMargin: String(ws?.pricing?.minMarginPct ?? "15"),
+      };
+    } catch {
+      return { multiplier: "2.5", minMargin: "15" };
+    }
+  }, [listing.wizardStateJson]);
+
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const accounts = accountsQuery.data ?? [];
   const publications = publicationsQuery.data ?? [];
+  const pubsByAccountId = new Map(publications.map((p) => [p.shopeeAccountId, p]));
   const selectedIds = new Set(publications.map((p) => p.shopeeAccountId));
 
   function toggle(accountId: number, checked: boolean) {
@@ -434,6 +453,7 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
       toast.error("Selecione pelo menos 1 conta.");
       return;
     }
+    if (!checked && expandedId === accountId) setExpandedId(null);
     saveMutation.mutate({
       listingId: listing.id,
       accountIds: Array.from(next),
@@ -455,8 +475,8 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
           </span>
         </div>
         <p className="text-xs text-muted-foreground mb-3">
-          Marque as contas onde este anúncio será publicado. A conta principal do anúncio fica
-          com badge ⭐ (publicação multi-loja real chega na Fase 6).
+          Marque as contas onde este anúncio será publicado. Cada conta pode ter multiplicador e
+          piso de margem próprios — vazio = herda do anúncio. Publicação multi-loja real chega na Fase 6.
         </p>
 
         {isLoading ? (
@@ -472,30 +492,166 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
             {accounts.map((acc) => {
               const checked = selectedIds.has(acc.id);
               const isPrincipal = acc.id === listing.shopeeAccountId;
+              const pub = pubsByAccountId.get(acc.id);
+              const isExpanded = expandedId === acc.id;
+              const hasOverride = pub && (pub.priceMultiplier != null || pub.minMarginPct != null);
               return (
-                <label
-                  key={acc.id}
-                  className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-muted"
-                >
-                  <Checkbox
-                    checked={checked}
-                    disabled={saveMutation.isPending}
-                    onCheckedChange={(v) => toggle(acc.id, v === true)}
-                  />
-                  <span className="text-sm font-medium">{acc.shopName ?? `Conta #${acc.shopId}`}</span>
-                  <span className="text-xs text-muted-foreground">#{acc.shopId}</span>
-                  {isPrincipal && (
-                    <Badge variant="outline" className="text-[10px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
-                      <Star className="h-3 w-3 fill-yellow-400" />
-                      principal
-                    </Badge>
+                <div key={acc.id} className="rounded border border-gray-200">
+                  <div className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted">
+                    <Checkbox
+                      checked={checked}
+                      disabled={saveMutation.isPending}
+                      onCheckedChange={(v) => toggle(acc.id, v === true)}
+                    />
+                    <span className="text-sm font-medium flex-1">{acc.shopName ?? `Conta #${acc.shopId}`}</span>
+                    <span className="text-xs text-muted-foreground">#{acc.shopId}</span>
+                    {isPrincipal && (
+                      <Badge variant="outline" className="text-[10px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
+                        <Star className="h-3 w-3 fill-yellow-400" />
+                        principal
+                      </Badge>
+                    )}
+                    {hasOverride && (
+                      <Badge variant="outline" className="text-[10px] gap-1 border-orange-300 bg-orange-50 text-orange-700">
+                        <Settings2 className="h-3 w-3" />
+                        {pub.priceMultiplier != null && `×${Number(pub.priceMultiplier)}`}
+                        {pub.priceMultiplier != null && pub.minMarginPct != null && " / "}
+                        {pub.minMarginPct != null && `${Number(pub.minMarginPct)}%`}
+                      </Badge>
+                    )}
+                    {checked && pub && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(isExpanded ? null : acc.id)}
+                        className="text-xs text-orange-600 hover:text-orange-700 flex items-center gap-0.5"
+                      >
+                        {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                        pricing
+                      </button>
+                    )}
+                  </div>
+                  {checked && pub && isExpanded && (
+                    <PublicationPricingPanel
+                      publication={pub}
+                      defaults={wizardDefaults}
+                      onSaved={() => utils.multiProduct.listPublications.invalidate({ listingId: listing.id })}
+                    />
                   )}
-                </label>
+                </div>
               );
             })}
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Painel inline pra configurar overrides de pricing de uma publicação.
+ *
+ * Inputs vazios = NULL no banco = herda do anúncio (placeholder mostra o valor
+ * que seria herdado). Botão "Limpar" zera ambos campos de uma vez.
+ */
+function PublicationPricingPanel({
+  publication,
+  defaults,
+  onSaved,
+}: {
+  publication: { id: number; priceMultiplier: string | null; minMarginPct: string | null };
+  defaults: { multiplier: string; minMargin: string };
+  onSaved: () => void;
+}) {
+  const [multiplier, setMultiplier] = useState(publication.priceMultiplier ?? "");
+  const [minMargin, setMinMargin] = useState(publication.minMarginPct ?? "");
+
+  // Re-sync quando a publication muda (toggle/checkbox recria a row).
+  useEffect(() => {
+    setMultiplier(publication.priceMultiplier ?? "");
+    setMinMargin(publication.minMarginPct ?? "");
+  }, [publication.id, publication.priceMultiplier, publication.minMarginPct]);
+
+  const updateMut = trpc.multiProduct.updatePublicationPricing.useMutation({
+    onSuccess: () => {
+      toast.success("Pricing atualizado.");
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  function save() {
+    updateMut.mutate({
+      publicationId: publication.id,
+      priceMultiplier: multiplier.trim() === "" ? null : multiplier.trim(),
+      minMarginPct: minMargin.trim() === "" ? null : minMargin.trim(),
+    });
+  }
+
+  function clear() {
+    setMultiplier("");
+    setMinMargin("");
+    updateMut.mutate({
+      publicationId: publication.id,
+      priceMultiplier: null,
+      minMarginPct: null,
+    });
+  }
+
+  return (
+    <div className="px-3 py-2 border-t bg-gray-50/50 space-y-2">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor={`mult-${publication.id}`} className="text-[11px] text-muted-foreground">
+            Multiplicador
+          </Label>
+          <Input
+            id={`mult-${publication.id}`}
+            type="text"
+            inputMode="decimal"
+            value={multiplier}
+            placeholder={defaults.multiplier}
+            onChange={(e) => setMultiplier(e.target.value)}
+            className="h-8 text-sm"
+          />
+        </div>
+        <div>
+          <Label htmlFor={`mm-${publication.id}`} className="text-[11px] text-muted-foreground">
+            Margem mín %
+          </Label>
+          <Input
+            id={`mm-${publication.id}`}
+            type="text"
+            inputMode="decimal"
+            value={minMargin}
+            placeholder={defaults.minMargin}
+            onChange={(e) => setMinMargin(e.target.value)}
+            className="h-8 text-sm"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={clear}
+          disabled={updateMut.isPending || (multiplier === "" && minMargin === "")}
+          className="h-7 text-xs"
+        >
+          Limpar (herdar)
+        </Button>
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={updateMut.isPending}
+          className="h-7 text-xs"
+        >
+          {updateMut.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+          Salvar
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground italic">
+        Vazio = herda do anúncio (mostrado como placeholder). Override é aplicado só nesta conta.
+      </p>
+    </div>
   );
 }

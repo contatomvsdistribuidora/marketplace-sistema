@@ -4501,6 +4501,53 @@ export const appRouter = router({
         return final;
       }),
 
+    // Override de pricing por publicação (Fase 3).
+    //
+    // Cada campo é independente: passar null limpa o override (herda o valor
+    // global do anúncio); passar string com decimal grava o override.
+    // Validação de range é fraca aqui — o valor entra no banco como decimal e a
+    // sanidade efetiva acontece no motor de cálculo do wizard (que já trata
+    // multiplicadores < 1, etc).
+    updatePublicationPricing: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        // Numeric string, pra preservar precisão decimal de DECIMAL(8,4)/(5,2).
+        // null = remove override.
+        priceMultiplier: z.string().regex(/^\d{1,4}\.?\d{0,4}$/).nullable(),
+        minMarginPct: z.string().regex(/^\d{1,3}\.?\d{0,2}$/).nullable(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Ownership via JOIN: publicação → listing → user.
+        const [own] = await sharedDb
+          .select({ pubId: shopeeListingPublications.id })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({
+            priceMultiplier: input.priceMultiplier,
+            minMarginPct: input.minMarginPct,
+          })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        const [updated] = await sharedDb
+          .select()
+          .from(shopeeListingPublications)
+          .where(eq(shopeeListingPublications.id, input.publicationId))
+          .limit(1);
+        return updated;
+      }),
+
     // Desvincula o item Shopee da listing — uso pra "item orfao" (publicou
     // mas a listing foi resetada/regenerada e o itemId antigo nao bate mais).
     // Reseta status pra "draft" se estava "published"/"error" pra permitir
