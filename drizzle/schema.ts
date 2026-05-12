@@ -697,7 +697,7 @@ export const shopeeListingPublications = mysqlTable("shopee_listing_publications
   id: int("id").autoincrement().primaryKey(),
   listingId: bigint("listing_id", { mode: "number" }).notNull(),
   shopeeAccountId: bigint("shopee_account_id", { mode: "number" }).notNull(),
-  multiplier: decimal("multiplier", { precision: 8, scale: 4 }),
+  priceMultiplier: decimal("price_multiplier", { precision: 8, scale: 4 }),
   customTitle: varchar("custom_title", { length: 120 }),
   customDescription: text("custom_description"),
   customThumbUrl: varchar("custom_thumb_url", { length: 500 }),

@@ -45,7 +45,7 @@ multi_product_listings (1) ─┬→ Bella     → shopeeItemId X (custom title/
 | `id` | INT PK auto | — | |
 | `listing_id` | BIGINT | NOT NULL | FK lógica → `multi_product_listings.id` |
 | `shopee_account_id` | BIGINT | NOT NULL | FK lógica → `shopee_accounts.id` |
-| `multiplier` | DECIMAL(8,4) | NULL | Multiplicador de preço. NULL = sem override |
+| `price_multiplier` | DECIMAL(8,4) | NULL | Multiplicador de preço. NULL = sem override |
 | `custom_title` | VARCHAR(120) | NULL | Título por conta. NULL = herda do listing |
 | `custom_description` | TEXT | NULL | Descrição por conta. NULL = herda do listing |
 | `custom_thumb_url` | VARCHAR(500) | NULL | Thumb por conta. NULL = herda do listing |
@@ -104,7 +104,7 @@ publishMultiProductListing(listingId)
 - **CombinedWizard:** novo step "Contas" antes da revisão. Lista checkbox de
   contas Shopee ativas do usuário. Pra cada conta marcada, painel expandível
   com multiplicador, título, descrição, thumb, vídeo.
-- **Wizard state:** salva `accountConfigs: Record<accountId, {multiplier, customTitle, ...}>`
+- **Wizard state:** salva `accountConfigs: Record<accountId, {priceMultiplier, customTitle, ...}>`
   no `wizardStateJson`.
 - **Persistência:** ao avançar do step "Contas", upsert em `shopee_listing_publications`
   (1 row por conta marcada). Desmarcar conta → soft delete (ou hard delete se
