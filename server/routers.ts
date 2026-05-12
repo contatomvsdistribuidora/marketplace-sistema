@@ -4548,6 +4548,124 @@ export const appRouter = router({
         return updated;
       }),
 
+    // Override de conteúdo (title + description) por publicação (Fase 4).
+    // Null em cada campo limpa o override; herda do listing-pai (Step B).
+    updatePublicationContent: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        customTitle: z.string().max(120).nullable(),
+        customDescription: z.string().max(5000).nullable(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [own] = await sharedDb
+          .select({ pubId: shopeeListingPublications.id })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({
+            customTitle: input.customTitle,
+            customDescription: input.customDescription,
+          })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        const [updated] = await sharedDb
+          .select()
+          .from(shopeeListingPublications)
+          .where(eq(shopeeListingPublications.id, input.publicationId))
+          .limit(1);
+        return updated;
+      }),
+
+    // Gera título por conta usando o mesmo gerador do Step B, mas com hint de
+    // voz opcional pra reduzir similaridade entre contas (Shopee penaliza).
+    // Escreve em custom_title (não no listing-pai). Não muda outras contas.
+    generateTitleForPublication: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        voice: z.string().max(80).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [own] = await sharedDb
+          .select({
+            pubId: shopeeListingPublications.id,
+            listingId: shopeeListingPublications.listingId,
+          })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        const title = await multiProductAi.generateMultiProductTitle(
+          own.listingId,
+          ctx.user.id,
+          input.voice,
+        );
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({ customTitle: title.slice(0, 120) })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        return { title };
+      }),
+
+    // Gera descrição por conta com voice hint opcional. Mesma estrutura do
+    // generateTitleForPublication.
+    generateDescriptionForPublication: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        voice: z.string().max(80).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [own] = await sharedDb
+          .select({
+            pubId: shopeeListingPublications.id,
+            listingId: shopeeListingPublications.listingId,
+          })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        const description = await multiProductAi.generateMultiProductDescription(
+          own.listingId,
+          ctx.user.id,
+          input.voice,
+        );
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({ customDescription: description })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        return { description };
+      }),
+
     // Desvincula o item Shopee da listing — uso pra "item orfao" (publicou
     // mas a listing foi resetada/regenerada e o itemId antigo nao bate mais).
     // Reseta status pra "draft" se estava "published"/"error" pra permitir

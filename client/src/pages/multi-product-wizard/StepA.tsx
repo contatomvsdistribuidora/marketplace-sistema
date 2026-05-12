@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -19,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Loader2, ArrowUp, ArrowDown, Pencil, Trash2, Plus, Star, Package, Store,
-  Settings2,
+  Settings2, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -518,8 +519,9 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
                     )}
                   </div>
                   {checked && pub && (
-                    <PublicationPricingPanel
+                    <PublicationOverridesPanel
                       publication={pub}
+                      listing={listing}
                       defaults={wizardDefaults}
                       onSaved={() => utils.multiProduct.listPublications.invalidate({ listingId: listing.id })}
                     />
@@ -535,12 +537,41 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
 }
 
 /**
- * Painel inline pra configurar overrides de pricing de uma publicação.
+ * Painel inline pra configurar overrides de uma publicação (multi-store).
  *
- * Inputs vazios = NULL no banco = herda do anúncio (placeholder mostra o valor
- * que seria herdado). Botão "Limpar" zera ambos campos de uma vez.
+ * 2 seções com Saves independentes:
+ *  - Pricing: multiplicador + piso de margem (Fase 3)
+ *  - Conteúdo: título + descrição + voice hint pra IA (Fase 4)
+ *
+ * Inputs vazios = NULL no banco = herda do anúncio (placeholders mostram o
+ * valor herdado).
  */
-function PublicationPricingPanel({
+function PublicationOverridesPanel({
+  publication,
+  listing,
+  defaults,
+  onSaved,
+}: {
+  publication: {
+    id: number;
+    priceMultiplier: string | null;
+    minMarginPct: string | null;
+    customTitle: string | null;
+    customDescription: string | null;
+  };
+  listing: Listing;
+  defaults: { multiplier: string; minMargin: string };
+  onSaved: () => void;
+}) {
+  return (
+    <div className="border-t bg-gray-50/50">
+      <PricingSection publication={publication} defaults={defaults} onSaved={onSaved} />
+      <ContentSection publication={publication} listing={listing} onSaved={onSaved} />
+    </div>
+  );
+}
+
+function PricingSection({
   publication,
   defaults,
   onSaved,
@@ -552,7 +583,6 @@ function PublicationPricingPanel({
   const [multiplier, setMultiplier] = useState(publication.priceMultiplier ?? "");
   const [minMargin, setMinMargin] = useState(publication.minMarginPct ?? "");
 
-  // Re-sync quando a publication muda (toggle/checkbox recria a row).
   useEffect(() => {
     setMultiplier(publication.priceMultiplier ?? "");
     setMinMargin(publication.minMarginPct ?? "");
@@ -573,19 +603,15 @@ function PublicationPricingPanel({
       minMarginPct: minMargin.trim() === "" ? null : minMargin.trim(),
     });
   }
-
   function clear() {
     setMultiplier("");
     setMinMargin("");
-    updateMut.mutate({
-      publicationId: publication.id,
-      priceMultiplier: null,
-      minMarginPct: null,
-    });
+    updateMut.mutate({ publicationId: publication.id, priceMultiplier: null, minMarginPct: null });
   }
 
   return (
-    <div className="px-3 py-2 border-t bg-gray-50/50 space-y-2">
+    <div className="px-3 py-2 space-y-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Pricing</div>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label htmlFor={`mult-${publication.id}`} className="text-[11px] text-muted-foreground">
@@ -626,19 +652,171 @@ function PublicationPricingPanel({
         >
           Limpar (herdar)
         </Button>
-        <Button
-          size="sm"
-          onClick={save}
-          disabled={updateMut.isPending}
-          className="h-7 text-xs"
-        >
+        <Button size="sm" onClick={save} disabled={updateMut.isPending} className="h-7 text-xs">
           {updateMut.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-          Salvar
+          Salvar pricing
         </Button>
       </div>
-      <p className="text-[10px] text-muted-foreground italic">
-        Vazio = herda do anúncio (mostrado como placeholder). Override é aplicado só nesta conta.
-      </p>
+    </div>
+  );
+}
+
+function ContentSection({
+  publication,
+  listing,
+  onSaved,
+}: {
+  publication: {
+    id: number;
+    customTitle: string | null;
+    customDescription: string | null;
+  };
+  listing: Listing;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(publication.customTitle ?? "");
+  const [description, setDescription] = useState(publication.customDescription ?? "");
+  const [voice, setVoice] = useState("");
+
+  useEffect(() => {
+    setTitle(publication.customTitle ?? "");
+    setDescription(publication.customDescription ?? "");
+  }, [publication.id, publication.customTitle, publication.customDescription]);
+
+  const updateMut = trpc.multiProduct.updatePublicationContent.useMutation({
+    onSuccess: () => {
+      toast.success("Conteúdo atualizado.");
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const genTitleMut = trpc.multiProduct.generateTitleForPublication.useMutation({
+    onSuccess: (data) => {
+      setTitle(data.title);
+      toast.success("Título gerado pela IA.");
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const genDescMut = trpc.multiProduct.generateDescriptionForPublication.useMutation({
+    onSuccess: (data) => {
+      setDescription(data.description);
+      toast.success("Descrição gerada pela IA.");
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  function save() {
+    updateMut.mutate({
+      publicationId: publication.id,
+      customTitle: title.trim() === "" ? null : title.trim(),
+      customDescription: description.trim() === "" ? null : description.trim(),
+    });
+  }
+  function clear() {
+    setTitle("");
+    setDescription("");
+    updateMut.mutate({ publicationId: publication.id, customTitle: null, customDescription: null });
+  }
+
+  const titleLen = title.length;
+  const titleColor =
+    titleLen === 0 ? "text-muted-foreground"
+    : titleLen > 120 ? "text-red-600"
+    : titleLen >= 70 ? "text-green-600"
+    : "text-yellow-600";
+
+  const aiBusy = genTitleMut.isPending || genDescMut.isPending;
+
+  return (
+    <div className="px-3 py-2 border-t border-gray-200 space-y-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Conteúdo</div>
+
+      <div>
+        <Label htmlFor={`title-${publication.id}`} className="text-[11px] text-muted-foreground">
+          Título (até 120 chars)
+        </Label>
+        <Input
+          id={`title-${publication.id}`}
+          value={title}
+          onChange={(e) => setTitle(e.target.value.slice(0, 120))}
+          placeholder={listing.title ?? "(usa título do anúncio)"}
+          maxLength={120}
+          className="h-8 text-sm"
+        />
+        <div className="flex items-center justify-between mt-0.5">
+          <span className={`text-[10px] ${titleColor}`}>{titleLen}/120</span>
+        </div>
+      </div>
+
+      <div>
+        <Label htmlFor={`desc-${publication.id}`} className="text-[11px] text-muted-foreground">
+          Descrição
+        </Label>
+        <Textarea
+          id={`desc-${publication.id}`}
+          rows={4}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder={listing.description ?? "(usa descrição do anúncio)"}
+          className="text-sm"
+        />
+        <div className="text-[10px] text-muted-foreground mt-0.5">{description.length} caracteres</div>
+      </div>
+
+      <div>
+        <Label htmlFor={`voice-${publication.id}`} className="text-[11px] text-muted-foreground">
+          Tom/foco para IA (opcional)
+        </Label>
+        <Input
+          id={`voice-${publication.id}`}
+          value={voice}
+          onChange={(e) => setVoice(e.target.value.slice(0, 80))}
+          placeholder="ex: tom mais formal, foco em durabilidade"
+          maxLength={80}
+          className="h-8 text-sm"
+        />
+        <p className="text-[10px] text-muted-foreground italic mt-0.5">
+          Usado pela IA pra diferenciar título/descrição desta conta das outras (evita penalidade Shopee).
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 justify-end pt-1">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => genTitleMut.mutate({ publicationId: publication.id, voice: voice.trim() || undefined })}
+          disabled={aiBusy}
+          className="h-7 text-xs"
+        >
+          {genTitleMut.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+          IA título
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => genDescMut.mutate({ publicationId: publication.id, voice: voice.trim() || undefined })}
+          disabled={aiBusy}
+          className="h-7 text-xs"
+        >
+          {genDescMut.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+          IA descrição
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={clear}
+          disabled={updateMut.isPending || (title === "" && description === "")}
+          className="h-7 text-xs"
+        >
+          Limpar (herdar)
+        </Button>
+        <Button size="sm" onClick={save} disabled={updateMut.isPending} className="h-7 text-xs">
+          {updateMut.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+          Salvar conteúdo
+        </Button>
+      </div>
     </div>
   );
 }

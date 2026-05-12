@@ -118,6 +118,7 @@ publishMultiProductListing(listingId)
 | **1** | Documentação + schema tabela | concluída |
 | **2** | Step "Contas" — UI seleção checkbox | concluída |
 | **3** | Step "Contas" — UI override de pricing por conta (price_multiplier + min_margin_pct) | concluída |
+| **4** | Step "Contas" — UI override de conteúdo por conta (title + description + IA com voice hint) | concluída |
 | 4 | Persistência: upsert em `shopee_listing_publications` no autosave | pendente |
 | 5 | Preview consolidado por conta (Step C) | pendente |
 | 6 | Backend: `publishMultiProductListing` itera publications | pendente |

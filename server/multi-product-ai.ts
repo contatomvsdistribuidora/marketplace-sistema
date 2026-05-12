@@ -184,6 +184,7 @@ async function resolveListingContext(listingId: number, userId: number) {
 export async function generateMultiProductTitle(
   listingId: number,
   userId: number,
+  voiceHint?: string,
 ): Promise<string> {
   await loadAiProviderFromDb();
   const { resolved, principal, category, brand, variation2Type, variation2Options } =
@@ -197,10 +198,16 @@ export async function generateMultiProductTitle(
     ? `\n\nVariação 2 (${variation2Type ?? "personalizada"}): ${variation2Options.join(", ")}`
     : "";
 
+  // Voice hint é injetado pra gerar variações distintas entre contas Shopee
+  // (multi-store publish) — evita penalização por anúncios idênticos.
+  const voiceLine = voiceHint && voiceHint.trim()
+    ? `\nTOM/FOCO ESPECÍFICO PARA ESTA VERSÃO: ${voiceHint.trim()}. Use isso pra diferenciar o título de outras versões do mesmo produto.\n`
+    : "";
+
   const systemPrompt = `Atue como Especialista em SEO para Shopee Brasil focado em ALTA CONVERSÃO.
 
 CONTEXTO: Você está criando o título de um ANÚNCIO COMBINADO que reúne múltiplos produtos como variações dentro de UMA listagem Shopee.
-
+${voiceLine}
 REGRAS OBRIGATÓRIAS:
 - Título deve ter ENTRE 70 e 100 caracteres. NUNCA menos, NUNCA mais. Conte com cuidado.
 - Resumir as variações de forma compacta (ex: 30L,50L,100L | P/M/G | 10,20,50un).
@@ -496,6 +503,7 @@ TAREFA: gere o prompt COMPLETO seguindo EXATAMENTE o estilo do EXEMPLO no system
 export async function generateMultiProductDescription(
   listingId: number,
   userId: number,
+  voiceHint?: string,
 ): Promise<string> {
   await loadAiProviderFromDb();
   const { listing, resolved, principal, category, brand, variation2Type, variation2Options, optionDetailsMatrix } =
@@ -532,9 +540,15 @@ export async function generateMultiProductDescription(
     matrixText = `\n\nVariação 2 (${variation2Type ?? "personalizada"}): ${variation2Options.join(", ")}`;
   }
 
+  // Voice hint pra variar descrições entre contas Shopee (multi-store).
+  const voiceLine = voiceHint && voiceHint.trim()
+    ? `\nTOM/FOCO ESPECÍFICO PARA ESTA VERSÃO: ${voiceHint.trim()}. Use isso pra diferenciar esta descrição de outras versões do mesmo produto (escolha de palavras, ênfase em benefícios diferentes, ordem dos bullets) — mas siga a estrutura abaixo.\n`
+    : "";
+
   const systemPrompt = `Atue como Copywriter Sênior especialista em Shopee Brasil.
 
 CONTEXTO: Você está criando a descrição de um ANÚNCIO COMBINADO que reúne múltiplos produtos como variações dentro de UMA listagem Shopee. O comprador escolhe a variação no momento da compra.
+${voiceLine}
 
 ESTRUTURA OBRIGATÓRIA (use exatamente esta ordem, em texto puro sem markdown):
 
