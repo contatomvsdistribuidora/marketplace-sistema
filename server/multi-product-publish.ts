@@ -244,38 +244,44 @@ export async function publishMultiProductListing(
       "normal",
     );
 
-    // Resolve URL do video (direto ou via videoBank) e faz upload pra Shopee.
-    // Se falhar, publica o anuncio sem video (nao bloqueia).
+    // Resolve URL + duração do video e faz upload pra Shopee.
+    //
+    // Prioridade: videoBankId primeiro (tem duration_seconds salvo), URL crua
+    // depois (caso BL legado, sem duration — fallback hardcoded em
+    // uploadVideoFromUrl). O wizard salva os DOIS campos quando o user pega
+    // vídeo do banco, então a ordem importa pra não perder a duration.
+    //
+    // Falha de upload do vídeo PROPAGA — operador precisa saber que o vídeo
+    // não foi pra Shopee (antes silenciava e publicava sem vídeo, gerando
+    // anúncio sem vídeo sem o user perceber). O bloco vem ANTES de
+    // createProduct, então jogar erro aqui não deixa item órfão.
     let videoUploadIds: string[] | undefined = undefined;
     let resolvedVideoUrl: string | null = null;
-    if ((listing as any).videoUrl) {
-      resolvedVideoUrl = (listing as any).videoUrl;
-    } else if ((listing as any).videoBankId) {
-      try {
-        const [vb] = await sharedDb
-          .select({ url: videoBank.url })
-          .from(videoBank)
-          .where(eq(videoBank.id, (listing as any).videoBankId))
-          .limit(1);
-        if (vb?.url) resolvedVideoUrl = vb.url;
-      } catch (e) {
-        console.warn("[multi-publish] falha ao resolver videoBank:", e);
+    let resolvedDuration: number | undefined = undefined;
+    if ((listing as any).videoBankId) {
+      const [vb] = await sharedDb
+        .select({ url: videoBank.url, duration: videoBank.durationSeconds })
+        .from(videoBank)
+        .where(eq(videoBank.id, (listing as any).videoBankId))
+        .limit(1);
+      if (vb?.url) {
+        resolvedVideoUrl = vb.url;
+        resolvedDuration = vb.duration ?? undefined;
       }
     }
+    if (!resolvedVideoUrl && (listing as any).videoUrl) {
+      resolvedVideoUrl = (listing as any).videoUrl;
+    }
     if (resolvedVideoUrl) {
-      try {
-        onProgress?.("Enviando vídeo para Shopee (pode demorar até 1 min)");
-        const videoId = await shopeeVideo.uploadVideoFromUrl(
-          accessToken,
-          shopId,
-          resolvedVideoUrl,
-        );
-        videoUploadIds = [videoId];
-        onProgress?.("Vídeo processado com sucesso");
-      } catch (e: any) {
-        console.warn("[multi-publish] upload de video falhou - publicando sem video:", e?.message ?? e);
-        onProgress?.(`Vídeo falhou (${e?.message?.substring(0, 60) ?? "erro"}) - continuando sem vídeo`);
-      }
+      onProgress?.("Enviando vídeo para Shopee (pode demorar até 1 min)");
+      const videoId = await shopeeVideo.uploadVideoFromUrl(
+        accessToken,
+        shopId,
+        resolvedVideoUrl,
+        resolvedDuration,
+      );
+      videoUploadIds = [videoId];
+      onProgress?.("Vídeo processado com sucesso");
     }
 
     onProgress?.(`Fazendo upload de ${resolved.length} imagens das variações`);

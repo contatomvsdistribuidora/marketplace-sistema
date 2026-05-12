@@ -355,6 +355,31 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     }
   }
 
+  // Shopee exige que init_video_upload receba a duração REAL do arquivo (±tolerância).
+  // Sem isso, o processamento server-side da Shopee retorna FAILED. Lemos via
+  // <video>.duration de um Object URL temporário. Pode falhar (CORS pra URL externa,
+  // metadata indisponível) — chamador deve tratar fallback.
+  function getVideoDuration(fileOrUrl: File | string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      const cleanup = () => {
+        if (fileOrUrl instanceof File) URL.revokeObjectURL(video.src);
+      };
+      video.onloadedmetadata = () => {
+        const d = Math.round(video.duration);
+        cleanup();
+        if (!Number.isFinite(d) || d <= 0) reject(new Error("Duração inválida"));
+        else resolve(d);
+      };
+      video.onerror = () => {
+        cleanup();
+        reject(new Error("Não foi possível ler duração do vídeo"));
+      };
+      video.src = fileOrUrl instanceof File ? URL.createObjectURL(fileOrUrl) : fileOrUrl;
+    });
+  }
+
   async function handleUploadVideoFromPC(file: File) {
     if (!file) return;
     if (file.size > 30 * 1024 * 1024) {
@@ -369,6 +394,15 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     setUploadingVideo(true);
     setUploadProgress(0);
     try {
+      // Extrai duração do arquivo local antes de subir — Shopee valida contra
+      // a duração real do arquivo no init_video_upload.
+      let durationSeconds: number | undefined;
+      try {
+        durationSeconds = await getVideoDuration(file);
+      } catch (e) {
+        console.warn("[video] não consegui ler duração local:", e);
+      }
+
       const presigned = await requestUploadMut.mutateAsync({
         contentType: file.type as any,
         sizeBytes: file.size,
@@ -388,6 +422,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
       const confirmed = await confirmUploadMut.mutateAsync({
         key: presigned.key,
         title: titleClean,
+        durationSeconds,
       });
       handleSelectVideo(`bank:${confirmed.id}`);
       await utilsVideoBank.videoBank.listVideos.invalidate();
@@ -409,9 +444,20 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     }
     setImportingUrl(true);
     try {
+      // Tenta ler duração da URL antes de mandar importar. CORS frequentemente
+      // bloqueia (URL não responde com Access-Control-Allow-Origin), nesse caso
+      // mandamos undefined e o backend usa fallback. Não é fatal.
+      let durationSeconds: number | undefined;
+      try {
+        durationSeconds = await getVideoDuration(importUrl.trim());
+      } catch (e) {
+        console.warn("[video] não consegui ler duração da URL (CORS?):", e);
+      }
+
       const result = await importFromUrlMut.mutateAsync({
         sourceUrl: importUrl.trim(),
         title: importTitle.trim(),
+        durationSeconds,
       });
       handleSelectVideo(`bank:${result.id}`);
       await utilsVideoBank.videoBank.listVideos.invalidate();

@@ -5324,6 +5324,10 @@ export const appRouter = router({
       .input(z.object({
         sourceUrl: z.string().url("URL invalida"),
         title: z.string().min(1).max(256),
+        // Duração lida no cliente via <video>.duration. CORS pode bloquear na
+        // origem (não fatal — fallback hardcoded no publish). Shopee precisa
+        // dessa duração no init_video_upload pra não falhar processamento.
+        durationSeconds: z.number().int().positive().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         let downloaded;
@@ -5341,7 +5345,7 @@ export const appRouter = router({
           title: input.title,
           url: stored.publicUrl,
           source: "external_url",
-          durationSeconds: null,
+          durationSeconds: input.durationSeconds ?? null,
           thumbnailUrl: null,
           isActive: 1,
         });

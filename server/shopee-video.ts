@@ -173,11 +173,17 @@ async function waitVideoProcessing(
 
 /**
  * Funcao high-level: baixa video da URL, sobe na Shopee em chunks e retorna video_upload_id.
+ *
+ * `providedDuration` deve ser a duração REAL do vídeo em segundos (lida no
+ * cliente via <video>.duration). Shopee valida esse campo no init_video_upload
+ * contra o arquivo real — se divergir, o processamento server-side retorna
+ * FAILED. Fallback de 30s é último recurso.
  */
 export async function uploadVideoFromUrl(
   accessToken: string,
   shopId: number,
   videoUrl: string,
+  providedDuration?: number,
 ): Promise<string> {
   console.log(`[shopee-video] INICIO upload videoUrl=${videoUrl}`);
 
@@ -195,9 +201,9 @@ export async function uploadVideoFromUrl(
     throw new Error(`Video tem ${(fileBuffer.length / 1024 / 1024).toFixed(1)}MB - limite Shopee e 30MB`);
   }
 
-  const durationSeconds = 30;
+  const durationSeconds = providedDuration && providedDuration > 0 ? providedDuration : 30;
   const fileMd5 = crypto.createHash("md5").update(fileBuffer).digest("hex");
-  console.log(`[shopee-video] MD5=${fileMd5} duration=${durationSeconds}s`);
+  console.log(`[shopee-video] MD5=${fileMd5} duration=${durationSeconds}s${providedDuration ? "" : " (FALLBACK)"}`);
 
   // 2. init upload
   console.log(`[shopee-video] chamando init_video_upload...`);
