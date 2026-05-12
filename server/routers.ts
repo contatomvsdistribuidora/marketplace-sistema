@@ -33,6 +33,7 @@ import {
   multiProductListingItems,
   videoBank,
   shopeeAccounts,
+  shopeePartners,
   productCache,
   shopeeProducts,
 } from "../drizzle/schema";
@@ -1907,11 +1908,56 @@ export const appRouter = router({
 
   // ============ SHOPEE ============
   shopee: router({
+    // List active Shopee partners (sem expor partner_key)
+    listPartners: protectedProcedure.query(async () => {
+      const partners = await sharedDb
+        .select({
+          id: shopeePartners.id,
+          partnerId: shopeePartners.partnerId,
+          label: shopeePartners.label,
+        })
+        .from(shopeePartners)
+        .where(eq(shopeePartners.isActive, 1))
+        .orderBy(asc(shopeePartners.label));
+      return partners;
+    }),
+
     // Get OAuth authorization URL
     getAuthUrl: protectedProcedure
-      .input(z.object({ redirectUrl: z.string() }))
-      .query(({ input }) => {
-        const url = shopee.getAuthorizationUrl(input.redirectUrl);
+      .input(z.object({
+        partnerId: z.number(),
+        redirectUrl: z.string(),
+      }))
+      .query(async ({ input, ctx }) => {
+        const [partner] = await sharedDb
+          .select()
+          .from(shopeePartners)
+          .where(and(
+            eq(shopeePartners.partnerId, input.partnerId),
+            eq(shopeePartners.isActive, 1),
+          ))
+          .limit(1);
+
+        if (!partner) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Partner ${input.partnerId} não encontrado ou inativo`,
+          });
+        }
+
+        const stateObj = {
+          userId: ctx.user.id,
+          origin: input.redirectUrl,
+          partnerId: input.partnerId,
+        };
+        const state = Buffer.from(JSON.stringify(stateObj)).toString("base64");
+
+        const url = shopee.getAuthorizationUrl(
+          input.redirectUrl,
+          state,
+          { partnerId: partner.partnerId, partnerKey: partner.partnerKey },
+        );
+
         return { url };
       }),
 
