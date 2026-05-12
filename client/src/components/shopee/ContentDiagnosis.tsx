@@ -54,6 +54,14 @@ export function ContentDiagnosis({ qualityLevel, unfinishedTasks, onRefresh, ref
       ? { border: "border-amber-300", bg: "bg-amber-50", text: "text-amber-900", star: "text-amber-500" }
       : { border: "border-rose-300", bg: "bg-rose-50", text: "text-rose-900", star: "text-rose-500" };
 
+  const qualityLabel = (() => {
+    if (isMax) return { text: "EXCELENTE", color: "text-emerald-700 bg-emerald-100" };
+    if (qualityLevel === 3) return { text: "ÓTIMO", color: "text-emerald-700 bg-emerald-100" };
+    if (qualityLevel === 2) return { text: "BOM", color: "text-amber-700 bg-amber-100" };
+    if (qualityLevel === 1) return { text: "BÁSICO", color: "text-amber-700 bg-amber-100" };
+    return { text: "PRECISA MELHORAR", color: "text-rose-700 bg-rose-100" };
+  })();
+
   return (
     <div className={`border rounded-lg p-3 ${tone.border} ${tone.bg}`}>
       <div className="flex items-center justify-between gap-2">
@@ -73,6 +81,9 @@ export function ContentDiagnosis({ qualityLevel, unfinishedTasks, onRefresh, ref
                 className={`h-4 w-4 ${n <= qualityLevel ? `${tone.star} fill-current` : "text-gray-300"}`}
               />
             ))}
+          </span>
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded ${qualityLabel.color}`}>
+            {qualityLabel.text}
           </span>
         </div>
         {onRefresh && (

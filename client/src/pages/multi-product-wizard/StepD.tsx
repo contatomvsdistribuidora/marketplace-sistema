@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,6 +84,18 @@ export function StepD({
     },
     onError: (e) => toast.error(e.message),
   });
+
+  useEffect(() => {
+    if (listing.shopeeItemId && !refreshDiagnosisMutation.isPending) {
+      const lastRefresh = sessionStorage.getItem(`diag-refresh-${listing.id}`);
+      const now = Date.now();
+      if (!lastRefresh || now - Number(lastRefresh) > 30 * 1000) {
+        sessionStorage.setItem(`diag-refresh-${listing.id}`, String(now));
+        refreshDiagnosisMutation.mutate({ id: listing.id });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listing.id, listing.shopeeItemId]);
 
   const isPrincipalShopee = listing.mainProductSource === "shopee";
   const wsCategoryId = (() => {
