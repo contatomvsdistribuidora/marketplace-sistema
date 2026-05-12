@@ -420,6 +420,8 @@ export const shopeeAccounts = mysqlTable("shopee_accounts", {
   isActive: int("isActive").default(1).notNull(),
   lastSyncAt: timestamp("lastSyncAt"),
   lastUsedAt: timestamp("lastUsedAt"),
+  partnerId: bigint("partner_id", { mode: "number" }),
+  partnerKey: varchar("partner_key", { length: 256 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
