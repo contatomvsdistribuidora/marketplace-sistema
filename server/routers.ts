@@ -5172,6 +5172,14 @@ export const appRouter = router({
         return rows;
       }),
   }),
+
+  chatgpt: router({
+    testCrypto: protectedProcedure
+      .query(async () => {
+        const { selfTest } = await import("./_core/crypto");
+        return selfTest();
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;
