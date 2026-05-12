@@ -4782,6 +4782,78 @@ export const appRouter = router({
         return { thumbUrl: stored.url };
       }),
 
+    generateCollage: protectedProcedure
+      .input(z.object({
+        imageUrls: z.array(z.string().url()).min(1).max(16),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const sharp = (await import("sharp")).default;
+
+        const n = input.imageUrls.length;
+
+        let cols: number, rows: number;
+        if (n === 1) { cols = 1; rows = 1; }
+        else if (n === 2) { cols = 2; rows = 1; }
+        else if (n === 3) { cols = 3; rows = 1; }
+        else if (n === 4) { cols = 2; rows = 2; }
+        else if (n <= 6) { cols = 3; rows = 2; }
+        else if (n <= 9) { cols = 3; rows = 3; }
+        else if (n <= 12) { cols = 4; rows = 3; }
+        else { cols = 4; rows = 4; }
+
+        const CANVAS_SIZE = 2048;
+        const cellW = Math.floor(CANVAS_SIZE / cols);
+        const cellH = Math.floor(CANVAS_SIZE / rows);
+
+        const buffers = await Promise.all(
+          input.imageUrls.map(async (url) => {
+            try {
+              const res = await fetch(url);
+              if (!res.ok) throw new Error(`Fetch falhou: ${res.status}`);
+              const buf = Buffer.from(await res.arrayBuffer());
+              return await sharp(buf)
+                .resize(cellW, cellH, { fit: "contain", background: "#ffffff" })
+                .toBuffer();
+            } catch (e: any) {
+              console.warn(`[collage] falha em ${url}:`, e?.message);
+              return await sharp({
+                create: {
+                  width: cellW,
+                  height: cellH,
+                  channels: 3,
+                  background: "#ffffff",
+                },
+              }).png().toBuffer();
+            }
+          })
+        );
+
+        const composites = buffers.map((buf, idx) => ({
+          input: buf,
+          left: (idx % cols) * cellW,
+          top: Math.floor(idx / cols) * cellH,
+        }));
+
+        const collage = await sharp({
+          create: {
+            width: cols * cellW,
+            height: rows * cellH,
+            channels: 3,
+            background: "#ffffff",
+          },
+        })
+          .composite(composites)
+          .png()
+          .toBuffer();
+
+        const key = `collages/${ctx.user.id}/${Date.now()}.png`;
+        const stored = await storagePut(key, collage, "image/png");
+
+        console.log(`[generateCollage] ${n} fotos → ${cols}x${rows} grid → ${(collage.length / 1024).toFixed(0)}KB`);
+
+        return { url: stored.url, cols, rows };
+      }),
+
     generateThumbBatchWithAI: protectedProcedure
       .input(z.object({
         id: z.number(),

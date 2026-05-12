@@ -11,7 +11,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Loader2, Sparkles, ZoomIn, ImageIcon, Check } from "lucide-react";
+import { Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download } from "lucide-react";
 
 type Props = {
   isOpen: boolean;
@@ -94,6 +94,28 @@ export default function ThumbGeneratorModal({
       },
       onError: (e) => toast.error(e.message),
     });
+
+  const generateCollageMutation = trpc.multiProduct.generateCollage.useMutation({
+    onSuccess: (data) => {
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.download = `collage-${data.cols}x${data.rows}-${Date.now()}.png`;
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast.success(`Collage ${data.cols}×${data.rows} gerado! Anexe no ChatGPT.`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  function handleGenerateCollage() {
+    if (selected.length === 0) {
+      toast.error("Selecione ao menos 1 foto.");
+      return;
+    }
+    generateCollageMutation.mutate({ imageUrls: selected });
+  }
 
   function toggleImage(url: string) {
     setSelected((prev) =>
@@ -395,6 +417,21 @@ export default function ThumbGeneratorModal({
                     {customPromptText.length}/5000 caracteres
                   </p>
                 </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={generateCollageMutation.isPending || selected.length === 0}
+                  onClick={handleGenerateCollage}
+                  className="w-full"
+                >
+                  {generateCollageMutation.isPending ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Gerando collage...</>
+                  ) : (
+                    <><Download className="h-4 w-4 mr-2" /> Baixar imagem das {selected.length} fotos (pra ChatGPT)</>
+                  )}
+                </Button>
               </div>
 
               {/* COLUNA 3 — PREVIEW */}
