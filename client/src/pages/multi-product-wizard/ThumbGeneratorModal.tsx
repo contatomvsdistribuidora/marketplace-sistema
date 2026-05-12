@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import {
@@ -7,25 +7,13 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download,
-  Bot, Plus, Settings, Copy, ExternalLink, Trash2, Pencil,
+  Copy, Clipboard, Upload,
 } from "lucide-react";
 
 type Props = {
@@ -34,6 +22,83 @@ type Props = {
   listingId: number;
   initialThumbUrl?: string | null;
   onThumbGenerated?: (url: string) => void;
+};
+
+const PROMPT_TEMPLATES = {
+  promocional: {
+    label: "🛒 Promocional",
+    template: `Create a Shopee marketplace thumbnail (1:1 ratio, 1024x1024px) with strong promotional appeal.
+
+Style: bright, eye-catching, retail-style
+Composition: hero product centered, large size taking 60% of the canvas
+Background: solid bright color (yellow or red) with subtle gradient
+Text overlays (in Portuguese, large bold sans-serif):
+- Top: "OFERTA" or "MELHOR PREÇO"
+- Bottom-right corner: discount badge like "-30%" or "50% OFF"
+- If product has variations (sizes/colors), show them as small icons in a strip at the bottom
+
+Product details:
+{{PRODUCT_INFO}}
+
+Visual requirements:
+- High saturation colors
+- Bold drop shadows on product
+- Clear, readable text even at small thumbnail size
+- Optional: yellow burst/star shape behind discount text
+- Avoid clutter, max 3 text elements total
+
+Output: photorealistic, professional e-commerce style`,
+  },
+
+  premium: {
+    label: "✨ Premium",
+    template: `Create a premium Shopee marketplace thumbnail (1:1 ratio, 1024x1024px) with elegant, high-end retail aesthetic.
+
+Style: minimalist, sophisticated, Apple-like product photography
+Composition: product centered with breathing room, hero shot at slight 3/4 angle
+Background: subtle gradient (white to light gray) OR soft blurred lifestyle scene
+Lighting: studio-quality, soft shadows beneath product
+Text overlays (minimal, Portuguese):
+- Optional small product name at bottom (thin elegant font)
+- NO heavy promotional badges
+- If variations exist, show them as a clean horizontal strip below product
+
+Product details:
+{{PRODUCT_INFO}}
+
+Visual requirements:
+- Muted/neutral color palette
+- Sharp focus on product
+- Professional shadows (not harsh)
+- Generous white space
+- Sense of premium quality
+
+Output: photorealistic, magazine-quality product photography`,
+  },
+
+  comparativo: {
+    label: "🎨 Comparativo",
+    template: `Create a comparative Shopee marketplace thumbnail (1:1 ratio, 1024x1024px) showing all product variations side by side.
+
+Style: organized retail catalog
+Composition: grid or horizontal arrangement of all variations equally spaced
+Background: solid white or very light gradient
+Labels: each variation clearly labeled below it in Portuguese (e.g., "30L", "50L", "100L" or "Branco", "Preto")
+Top banner (optional): "VARIAÇÕES DISPONÍVEIS" or "ESCOLHA O TAMANHO"
+
+Product details:
+{{PRODUCT_INFO}}
+
+Visual requirements:
+- Equal sizing for all variations (same height/width)
+- Subtle dividers or shadows between items
+- Bold, readable labels at base of each variation
+- Consistent angle/perspective across all items
+- Optional: numbered or alphabetical order
+- Highlight ONE variation as "MAIS VENDIDO" with a small badge
+
+Output: photorealistic, professional e-commerce catalog style`,
+  },
 };
 
 export default function ThumbGeneratorModal({
@@ -52,19 +117,11 @@ export default function ThumbGeneratorModal({
   const [generatedUrls, setGeneratedUrls] = useState<string[]>([]);
   const [selectedGeneratedIdx, setSelectedGeneratedIdx] = useState<number | null>(null);
 
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showManageDialog, setShowManageDialog] = useState(false);
-  const [editingAccount, setEditingAccount] = useState<{
-    id: number; label: string; email: string; chromeProfileName: string; notes: string;
-  } | null>(null);
-  const [deleteAccountId, setDeleteAccountId] = useState<number | null>(null);
-  const [newAccount, setNewAccount] = useState({
-    label: "", email: "", chromeProfileName: "", notes: "",
-  });
-  const [revealedCredentials, setRevealedCredentials] = useState<{
-    email: string; chromeProfileName: string; label: string;
-  } | null>(null);
+  const [selectedStyle, setSelectedStyle] = useState<"promocional" | "premium" | "comparativo" | null>(null);
+  const [generatedPromptText, setGeneratedPromptText] = useState<string>("");
+  const [pasteDropActive, setPasteDropActive] = useState(false);
+  const [uploadingThumb, setUploadingThumb] = useState(false);
+  const thumbFileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset states quando modal abre
   useEffect(() => {
@@ -146,85 +203,115 @@ export default function ThumbGeneratorModal({
     generateCollageMutation.mutate({ imageUrls: selected });
   }
 
-  const accountsQuery = trpc.chatgpt.list.useQuery();
-  const accounts = accountsQuery.data ?? [];
-
-  const createAccountMutation = trpc.chatgpt.create.useMutation({
+  const uploadThumbFileMutation = trpc.multiProduct.uploadThumbFile.useMutation({
     onSuccess: () => {
-      toast.success("Conta cadastrada!");
-      accountsQuery.refetch();
-      setShowAddDialog(false);
-      setNewAccount({ label: "", email: "", chromeProfileName: "", notes: "" });
+      toast.success("Thumb enviada!");
+      if (onThumbGenerated) onThumbGenerated(""); // refresh do parent
+      setUploadingThumb(false);
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => {
+      toast.error(e.message);
+      setUploadingThumb(false);
+    },
   });
 
-  const updateAccountMutation = trpc.chatgpt.update.useMutation({
-    onSuccess: () => {
-      toast.success("Conta atualizada!");
-      accountsQuery.refetch();
-      setEditingAccount(null);
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const deleteAccountMutation = trpc.chatgpt.delete.useMutation({
-    onSuccess: () => {
-      toast.success("Conta removida.");
-      accountsQuery.refetch();
-      if (selectedAccountId === deleteAccountId) setSelectedAccountId(null);
-      setDeleteAccountId(null);
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const revealAccountMutation = trpc.chatgpt.reveal.useMutation({
-    onSuccess: async (data) => {
-      try {
-        await navigator.clipboard.writeText(data.chromeProfileName);
-        toast.success(`Nome do perfil copiado: "${data.chromeProfileName}"`);
-      } catch {
-        // ignora silenciosamente — popup vai mostrar mesmo assim
-      }
-      window.open("https://chatgpt.com/", "_blank");
-      setRevealedCredentials({
-        email: data.email,
-        chromeProfileName: data.chromeProfileName,
-        label: data.label,
-      });
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  function timeAgo(date: Date | string | null): string {
-    if (!date) return "nunca usada";
-    const d = typeof date === "string" ? new Date(date) : date;
-    const diff = Date.now() - d.getTime();
-    const minutes = Math.floor(diff / 60000);
-    if (minutes < 1) return "agora";
-    if (minutes < 60) return `há ${minutes}min`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `há ${hours}h`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `há ${days}d`;
-    return d.toLocaleDateString("pt-BR");
-  }
-
-  function handleOpenChatgpt() {
-    if (!selectedAccountId) {
-      toast.error("Selecione uma conta ChatGPT.");
+  function handleUploadThumbFromPC(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB. Reduza antes de enviar.");
       return;
     }
-    revealAccountMutation.mutate({ id: selectedAccountId });
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Formato inválido. Use JPG, PNG ou WEBP.");
+      return;
+    }
+    setUploadingThumb(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64Data = dataUrl.split(",")[1];
+      uploadThumbFileMutation.mutate({
+        id: listingId,
+        contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
+        base64Data,
+      });
+    };
+    reader.onerror = () => {
+      toast.error("Erro ao ler arquivo.");
+      setUploadingThumb(false);
+    };
+    reader.readAsDataURL(file);
   }
 
-  async function handleCopyProfileName() {
-    if (!revealedCredentials) return;
+  function generatePromptFromTemplate(style: "promocional" | "premium" | "comparativo") {
+    const template = PROMPT_TEMPLATES[style];
+
+    const productInfo = [
+      `- ${selected.length} reference photos provided (use as visual guidance)`,
+    ].filter(Boolean).join("\n");
+
+    const finalPrompt = template.template.replace("{{PRODUCT_INFO}}", productInfo);
+
+    setSelectedStyle(style);
+    setGeneratedPromptText(finalPrompt);
+    toast.success(`Prompt ${template.label} gerado!`);
+  }
+
+  async function handleCopyPrompt() {
+    if (!generatedPromptText) {
+      toast.error("Gere um prompt primeiro.");
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(revealedCredentials.chromeProfileName);
-      toast.success("Nome do perfil copiado!");
+      await navigator.clipboard.writeText(generatedPromptText);
+      toast.success("Prompt copiado! Cole no ChatGPT ou Gemini.");
     } catch {
       toast.error("Falha ao copiar.");
+    }
+  }
+
+  async function handlePasteImageFromClipboard() {
+    setPasteDropActive(true);
+    try {
+      const items = await navigator.clipboard.read();
+
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"));
+        if (!imageType) continue;
+
+        const blob = await item.getType(imageType);
+
+        if (blob.size > 5 * 1024 * 1024) {
+          toast.error("Imagem maior que 5MB.");
+          setPasteDropActive(false);
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64Data = dataUrl.split(",")[1];
+
+          uploadThumbFileMutation.mutate({
+            id: listingId,
+            contentType: imageType as "image/jpeg" | "image/png" | "image/webp",
+            base64Data,
+          });
+          setPasteDropActive(false);
+        };
+        reader.onerror = () => {
+          toast.error("Erro ao processar imagem.");
+          setPasteDropActive(false);
+        };
+        reader.readAsDataURL(blob);
+        return;
+      }
+
+      toast.error("Nenhuma imagem no clipboard. Copie a imagem do ChatGPT primeiro.");
+      setPasteDropActive(false);
+    } catch (e: any) {
+      console.error("Paste error:", e);
+      toast.error("Falha ao acessar clipboard. Permita acesso e tente de novo.");
+      setPasteDropActive(false);
     }
   }
 
@@ -545,74 +632,123 @@ export default function ThumbGeneratorModal({
                 </Button>
 
                 <div className="border-t pt-3 mt-3 space-y-2">
-                  <Label className="text-xs font-semibold flex items-center gap-1">
-                    <Bot className="h-3 w-3" /> Sessão ChatGPT
-                  </Label>
+                  <Label className="text-xs font-semibold">📝 Escolher estilo do prompt</Label>
 
-                  {accountsQuery.isLoading ? (
-                    <div className="text-xs text-muted-foreground italic">Carregando contas...</div>
-                  ) : accounts.length === 0 ? (
+                  <div className="grid grid-cols-3 gap-1">
+                    {(Object.keys(PROMPT_TEMPLATES) as Array<keyof typeof PROMPT_TEMPLATES>).map((key) => {
+                      const tpl = PROMPT_TEMPLATES[key];
+                      const isActive = selectedStyle === key;
+                      return (
+                        <Button
+                          key={key}
+                          type="button"
+                          variant={isActive ? "default" : "outline"}
+                          size="sm"
+                          className="text-xs h-auto py-2"
+                          onClick={() => generatePromptFromTemplate(key)}
+                        >
+                          {tpl.label}
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  {generatedPromptText && (
+                    <>
+                      <Textarea
+                        value={generatedPromptText}
+                        onChange={(e) => setGeneratedPromptText(e.target.value)}
+                        rows={5}
+                        className="text-xs font-mono"
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="w-full"
+                        onClick={handleCopyPrompt}
+                      >
+                        <Copy className="h-4 w-4 mr-2" /> Copiar prompt
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                <div className="border-t pt-3 mt-3 space-y-2">
+                  <Label className="text-xs font-semibold">🚀 Abrir gerador de imagem</Label>
+                  <div className="grid grid-cols-2 gap-2">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       className="w-full"
-                      onClick={() => setShowAddDialog(true)}
+                      onClick={() => window.open("https://chatgpt.com/", "_blank")}
                     >
-                      <Plus className="h-4 w-4 mr-2" /> Cadastrar primeira conta ChatGPT
+                      🤖 ChatGPT
                     </Button>
-                  ) : (
-                    <>
-                      <select
-                        value={selectedAccountId ?? ""}
-                        onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
-                        className="w-full text-sm border rounded-md px-2 py-1.5 bg-background"
-                      >
-                        <option value="">Selecione uma conta...</option>
-                        {accounts.map((acc) => (
-                          <option key={acc.id} value={acc.id}>
-                            {acc.label} — {acc.email} ({timeAgo(acc.lastUsedAt)})
-                          </option>
-                        ))}
-                      </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => window.open("https://gemini.google.com/", "_blank")}
+                    >
+                      💎 Gemini
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground italic">
+                    Cola o prompt + anexa o collage e gera a thumb
+                  </p>
+                </div>
 
-                      <Button
-                        type="button"
-                        variant="default"
-                        size="sm"
-                        className="w-full"
-                        disabled={!selectedAccountId || revealAccountMutation.isPending}
-                        onClick={handleOpenChatgpt}
-                      >
-                        {revealAccountMutation.isPending ? (
-                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Abrindo...</>
-                        ) : (
-                          <><ExternalLink className="h-4 w-4 mr-2" /> Abrir ChatGPT com esta conta</>
-                        )}
-                      </Button>
+                <div className="border-t pt-3 mt-3 space-y-2">
+                  <Label className="text-xs font-semibold">📤 Mandar thumb pro sistema</Label>
 
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => setShowAddDialog(true)}
-                        >
-                          <Plus className="h-3 w-3 mr-1" /> Nova
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => setShowManageDialog(true)}
-                        >
-                          <Settings className="h-3 w-3 mr-1" /> Gerenciar
-                        </Button>
-                      </div>
-                    </>
-                  )}
+                  <input
+                    ref={thumbFileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleUploadThumbFromPC(f);
+                      e.target.value = "";
+                    }}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    disabled={uploadingThumb}
+                    onClick={() => thumbFileInputRef.current?.click()}
+                  >
+                    {uploadingThumb ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Enviando...</>
+                    ) : (
+                      <><Upload className="h-4 w-4 mr-2" /> Enviar arquivo do computador</>
+                    )}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    disabled={uploadingThumb || pasteDropActive}
+                    onClick={handlePasteImageFromClipboard}
+                  >
+                    {pasteDropActive ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Lendo clipboard...</>
+                    ) : (
+                      <><Clipboard className="h-4 w-4 mr-2" /> Colar imagem (Ctrl+V do ChatGPT)</>
+                    )}
+                  </Button>
+
+                  <p className="text-xs text-muted-foreground italic">
+                    💡 No ChatGPT: botão direito na imagem → "Copiar imagem". Aí clica em "Colar imagem" aqui.
+                  </p>
                 </div>
               </div>
 
@@ -761,277 +897,6 @@ export default function ThumbGeneratorModal({
           </DialogContent>
         </Dialog>
       )}
-
-      <Dialog
-        open={showAddDialog || editingAccount !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowAddDialog(false);
-            setEditingAccount(null);
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingAccount ? "Editar conta ChatGPT" : "Adicionar conta ChatGPT"}
-            </DialogTitle>
-            <DialogDescription>
-              Suas credenciais ficam criptografadas no banco. Apenas você pode descriptografá-las.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <div>
-              <Label htmlFor="acc-label">Nome amigável</Label>
-              <Input
-                id="acc-label"
-                placeholder="Ex: Conta Principal, Conta Comercial..."
-                value={editingAccount ? editingAccount.label : newAccount.label}
-                onChange={(e) =>
-                  editingAccount
-                    ? setEditingAccount({ ...editingAccount, label: e.target.value })
-                    : setNewAccount({ ...newAccount, label: e.target.value })
-                }
-                maxLength={100}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="acc-email">Email do ChatGPT</Label>
-              <Input
-                id="acc-email"
-                type="email"
-                placeholder="email@exemplo.com"
-                value={editingAccount ? editingAccount.email : newAccount.email}
-                onChange={(e) =>
-                  editingAccount
-                    ? setEditingAccount({ ...editingAccount, email: e.target.value })
-                    : setNewAccount({ ...newAccount, email: e.target.value })
-                }
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="acc-profile">Nome do perfil Chrome</Label>
-              <Input
-                id="acc-profile"
-                placeholder="Ex: Douglas (higipack.com.br), Profile 8..."
-                value={editingAccount ? editingAccount.chromeProfileName : newAccount.chromeProfileName}
-                onChange={(e) =>
-                  editingAccount
-                    ? setEditingAccount({ ...editingAccount, chromeProfileName: e.target.value })
-                    : setNewAccount({ ...newAccount, chromeProfileName: e.target.value })
-                }
-                maxLength={200}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                💡 Clica no avatar do Chrome (canto superior direito) → veja o nome exato do perfil
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="acc-notes">Notas (opcional)</Label>
-              <Input
-                id="acc-notes"
-                placeholder="Ex: Conta com Plus, limite mensal X..."
-                value={editingAccount ? (editingAccount.notes || "") : (newAccount.notes || "")}
-                onChange={(e) =>
-                  editingAccount
-                    ? setEditingAccount({ ...editingAccount, notes: e.target.value })
-                    : setNewAccount({ ...newAccount, notes: e.target.value })
-                }
-                maxLength={2000}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setShowAddDialog(false);
-              setEditingAccount(null);
-            }}>
-              Cancelar
-            </Button>
-            <Button
-              disabled={createAccountMutation.isPending || updateAccountMutation.isPending}
-              onClick={() => {
-                if (editingAccount) {
-                  const payload: any = { id: editingAccount.id };
-                  if (editingAccount.label.trim()) payload.label = editingAccount.label.trim();
-                  if (editingAccount.email.trim()) payload.email = editingAccount.email.trim();
-                  if (editingAccount.chromeProfileName.trim()) payload.chromeProfileName = editingAccount.chromeProfileName.trim();
-                  payload.notes = editingAccount.notes?.trim() || "";
-                  updateAccountMutation.mutate(payload);
-                } else {
-                  if (!newAccount.label.trim() || !newAccount.email.trim() || !newAccount.chromeProfileName.trim()) {
-                    toast.error("Preencha nome, email e nome do perfil Chrome.");
-                    return;
-                  }
-                  createAccountMutation.mutate({
-                    label: newAccount.label.trim(),
-                    email: newAccount.email.trim(),
-                    chromeProfileName: newAccount.chromeProfileName.trim(),
-                    notes: newAccount.notes?.trim() || undefined,
-                  });
-                }
-              }}
-            >
-              {(createAccountMutation.isPending || updateAccountMutation.isPending) ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
-              ) : editingAccount ? "Salvar" : "Cadastrar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Gerenciar contas ChatGPT</DialogTitle>
-            <DialogDescription>
-              Edite ou remova suas contas cadastradas.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {accounts.length === 0 ? (
-              <p className="text-sm text-muted-foreground italic text-center py-8">
-                Nenhuma conta cadastrada ainda.
-              </p>
-            ) : (
-              accounts.map((acc) => (
-                <div key={acc.id} className="border rounded-lg p-3 flex items-center justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm">{acc.label}</div>
-                    <div className="text-xs text-muted-foreground truncate">{acc.email}</div>
-                    <div className="text-xs text-muted-foreground">
-                      Última uso: {timeAgo(acc.lastUsedAt)}
-                    </div>
-                    {acc.notes && (
-                      <div className="text-xs text-muted-foreground italic mt-1 truncate">
-                        {acc.notes}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingAccount({
-                          id: acc.id,
-                          label: acc.label,
-                          email: acc.email,
-                          chromeProfileName: acc.chromeProfileName,
-                          notes: acc.notes || "",
-                        });
-                        setShowManageDialog(false);
-                      }}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeleteAccountId(acc.id)}
-                    >
-                      <Trash2 className="h-4 w-4 text-rose-600" />
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setShowManageDialog(false);
-              setShowAddDialog(true);
-            }}>
-              <Plus className="h-4 w-4 mr-2" /> Adicionar nova
-            </Button>
-            <Button onClick={() => setShowManageDialog(false)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={deleteAccountId !== null} onOpenChange={(open) => !open && setDeleteAccountId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir conta?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. A conta será removida permanentemente das suas credenciais salvas.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-rose-600 hover:bg-rose-700"
-              onClick={() => deleteAccountId && deleteAccountMutation.mutate({ id: deleteAccountId })}
-            >
-              {deleteAccountMutation.isPending ? "Excluindo..." : "Excluir"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <Dialog
-        open={revealedCredentials !== null}
-        onOpenChange={(open) => {
-          if (!open) setRevealedCredentials(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>📋 Use o perfil: {revealedCredentials?.label}</DialogTitle>
-            <DialogDescription>
-              ChatGPT abriu em nova aba no perfil ATUAL. Pra usar a conta certa, troque o perfil do Chrome.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 text-center">
-              <p className="text-xs text-muted-foreground mb-1">Nome do perfil Chrome:</p>
-              <p className="text-lg font-bold text-blue-900 break-words">
-                {revealedCredentials?.chromeProfileName}
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={handleCopyProfileName}
-              >
-                <Copy className="h-3 w-3 mr-1" /> Copiar nome
-              </Button>
-            </div>
-
-            <div className="bg-muted/30 rounded-lg p-3">
-              <p className="text-xs text-muted-foreground">Email da conta Google:</p>
-              <p className="text-sm font-mono">{revealedCredentials?.email}</p>
-            </div>
-
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm space-y-1">
-              <p className="font-semibold mb-2">🎯 Como trocar de perfil:</p>
-              <ol className="list-decimal list-inside space-y-1 text-xs">
-                <li>Olha no canto superior <strong>DIREITO</strong> do Chrome</li>
-                <li>Clica no <strong>avatar/inicial</strong> do perfil atual</li>
-                <li>Escolhe o perfil <strong>"{revealedCredentials?.chromeProfileName}"</strong></li>
-                <li>Vai abrir nova janela no perfil correto</li>
-                <li>Digita <strong>chatgpt.com</strong> e tá logado!</li>
-              </ol>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button onClick={() => setRevealedCredentials(null)}>
-              Entendi
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

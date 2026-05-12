@@ -711,17 +711,3 @@ export const videoBank = mysqlTable("video_bank", {
 export type VideoBank = typeof videoBank.$inferSelect;
 export type InsertVideoBank = typeof videoBank.$inferInsert;
 
-export const chatgptAccounts = mysqlTable("chatgpt_accounts", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("user_id").notNull(),
-  label: varchar("label", { length: 100 }).notNull(),
-  email: varchar("email", { length: 255 }).notNull(),
-  chromeProfileName: varchar("chrome_profile_name", { length: 200 }).notNull(),
-  notes: text("notes"),
-  lastUsedAt: timestamp("last_used_at"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
-});
-
-export type ChatgptAccount = typeof chatgptAccounts.$inferSelect;
-export type InsertChatgptAccount = typeof chatgptAccounts.$inferInsert;
