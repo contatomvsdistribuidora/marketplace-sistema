@@ -7,11 +7,26 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download } from "lucide-react";
+import {
+  Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download,
+  Bot, Plus, Settings, Eye, EyeOff, Copy, ExternalLink, Trash2, Pencil,
+} from "lucide-react";
 
 type Props = {
   isOpen: boolean;
@@ -36,6 +51,22 @@ export default function ThumbGeneratorModal({
   const [variationCount, setVariationCount] = useState<number>(2);
   const [generatedUrls, setGeneratedUrls] = useState<string[]>([]);
   const [selectedGeneratedIdx, setSelectedGeneratedIdx] = useState<number | null>(null);
+
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showManageDialog, setShowManageDialog] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<{
+    id: number; label: string; email: string; password: string; notes: string;
+  } | null>(null);
+  const [deleteAccountId, setDeleteAccountId] = useState<number | null>(null);
+  const [newAccount, setNewAccount] = useState({
+    label: "", email: "", password: "", notes: "",
+  });
+  const [showPasswordInForm, setShowPasswordInForm] = useState(false);
+  const [revealedCredentials, setRevealedCredentials] = useState<{
+    email: string; password: string; label: string;
+  } | null>(null);
+  const [showRevealedPassword, setShowRevealedPassword] = useState(false);
 
   // Reset states quando modal abre
   useEffect(() => {
@@ -115,6 +146,88 @@ export default function ThumbGeneratorModal({
       return;
     }
     generateCollageMutation.mutate({ imageUrls: selected });
+  }
+
+  const accountsQuery = trpc.chatgpt.list.useQuery();
+  const accounts = accountsQuery.data ?? [];
+
+  const createAccountMutation = trpc.chatgpt.create.useMutation({
+    onSuccess: () => {
+      toast.success("Conta cadastrada!");
+      accountsQuery.refetch();
+      setShowAddDialog(false);
+      setNewAccount({ label: "", email: "", password: "", notes: "" });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateAccountMutation = trpc.chatgpt.update.useMutation({
+    onSuccess: () => {
+      toast.success("Conta atualizada!");
+      accountsQuery.refetch();
+      setEditingAccount(null);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteAccountMutation = trpc.chatgpt.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Conta removida.");
+      accountsQuery.refetch();
+      if (selectedAccountId === deleteAccountId) setSelectedAccountId(null);
+      setDeleteAccountId(null);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const revealAccountMutation = trpc.chatgpt.reveal.useMutation({
+    onSuccess: async (data) => {
+      try {
+        await navigator.clipboard.writeText(data.email);
+        toast.success("Email copiado! Cole no ChatGPT.");
+      } catch {
+        toast.error("Falha ao copiar email. Use o botão Copiar abaixo.");
+      }
+      window.open("https://chatgpt.com/", "_blank");
+      setRevealedCredentials({
+        email: data.email,
+        password: data.password,
+        label: data.label,
+      });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  function timeAgo(date: Date | string | null): string {
+    if (!date) return "nunca usada";
+    const d = typeof date === "string" ? new Date(date) : date;
+    const diff = Date.now() - d.getTime();
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return "agora";
+    if (minutes < 60) return `há ${minutes}min`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `há ${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `há ${days}d`;
+    return d.toLocaleDateString("pt-BR");
+  }
+
+  function handleOpenChatgpt() {
+    if (!selectedAccountId) {
+      toast.error("Selecione uma conta ChatGPT.");
+      return;
+    }
+    revealAccountMutation.mutate({ id: selectedAccountId });
+  }
+
+  async function handleCopyPassword() {
+    if (!revealedCredentials) return;
+    try {
+      await navigator.clipboard.writeText(revealedCredentials.password);
+      toast.success("Senha copiada! Cole no ChatGPT.");
+    } catch {
+      toast.error("Falha ao copiar.");
+    }
   }
 
   function toggleImage(url: string) {
@@ -432,6 +545,77 @@ export default function ThumbGeneratorModal({
                     <><Download className="h-4 w-4 mr-2" /> Baixar imagem das {selected.length} fotos (pra ChatGPT)</>
                   )}
                 </Button>
+
+                <div className="border-t pt-3 mt-3 space-y-2">
+                  <Label className="text-xs font-semibold flex items-center gap-1">
+                    <Bot className="h-3 w-3" /> Sessão ChatGPT
+                  </Label>
+
+                  {accountsQuery.isLoading ? (
+                    <div className="text-xs text-muted-foreground italic">Carregando contas...</div>
+                  ) : accounts.length === 0 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setShowAddDialog(true)}
+                    >
+                      <Plus className="h-4 w-4 mr-2" /> Cadastrar primeira conta ChatGPT
+                    </Button>
+                  ) : (
+                    <>
+                      <select
+                        value={selectedAccountId ?? ""}
+                        onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
+                        className="w-full text-sm border rounded-md px-2 py-1.5 bg-background"
+                      >
+                        <option value="">Selecione uma conta...</option>
+                        {accounts.map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.label} — {acc.email} ({timeAgo(acc.lastUsedAt)})
+                          </option>
+                        ))}
+                      </select>
+
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        className="w-full"
+                        disabled={!selectedAccountId || revealAccountMutation.isPending}
+                        onClick={handleOpenChatgpt}
+                      >
+                        {revealAccountMutation.isPending ? (
+                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Abrindo...</>
+                        ) : (
+                          <><ExternalLink className="h-4 w-4 mr-2" /> Abrir ChatGPT com esta conta</>
+                        )}
+                      </Button>
+
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => setShowAddDialog(true)}
+                        >
+                          <Plus className="h-3 w-3 mr-1" /> Nova
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => setShowManageDialog(true)}
+                        >
+                          <Settings className="h-3 w-3 mr-1" /> Gerenciar
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* COLUNA 3 — PREVIEW */}
@@ -579,6 +763,309 @@ export default function ThumbGeneratorModal({
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog
+        open={showAddDialog || editingAccount !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowAddDialog(false);
+            setEditingAccount(null);
+            setShowPasswordInForm(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingAccount ? "Editar conta ChatGPT" : "Adicionar conta ChatGPT"}
+            </DialogTitle>
+            <DialogDescription>
+              Suas credenciais ficam criptografadas no banco. Apenas você pode descriptografá-las.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="acc-label">Nome amigável</Label>
+              <Input
+                id="acc-label"
+                placeholder="Ex: Conta Principal, Conta Comercial..."
+                value={editingAccount ? editingAccount.label : newAccount.label}
+                onChange={(e) =>
+                  editingAccount
+                    ? setEditingAccount({ ...editingAccount, label: e.target.value })
+                    : setNewAccount({ ...newAccount, label: e.target.value })
+                }
+                maxLength={100}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="acc-email">Email do ChatGPT</Label>
+              <Input
+                id="acc-email"
+                type="email"
+                placeholder="email@exemplo.com"
+                value={editingAccount ? editingAccount.email : newAccount.email}
+                onChange={(e) =>
+                  editingAccount
+                    ? setEditingAccount({ ...editingAccount, email: e.target.value })
+                    : setNewAccount({ ...newAccount, email: e.target.value })
+                }
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="acc-password">
+                Senha {editingAccount && "(deixe vazio pra manter atual)"}
+              </Label>
+              <div className="relative">
+                <Input
+                  id="acc-password"
+                  type={showPasswordInForm ? "text" : "password"}
+                  placeholder={editingAccount ? "Nova senha (opcional)" : "Senha"}
+                  value={editingAccount ? editingAccount.password : newAccount.password}
+                  onChange={(e) =>
+                    editingAccount
+                      ? setEditingAccount({ ...editingAccount, password: e.target.value })
+                      : setNewAccount({ ...newAccount, password: e.target.value })
+                  }
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  onClick={() => setShowPasswordInForm(!showPasswordInForm)}
+                >
+                  {showPasswordInForm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="acc-notes">Notas (opcional)</Label>
+              <Input
+                id="acc-notes"
+                placeholder="Ex: Conta com Plus, limite mensal X..."
+                value={editingAccount ? (editingAccount.notes || "") : (newAccount.notes || "")}
+                onChange={(e) =>
+                  editingAccount
+                    ? setEditingAccount({ ...editingAccount, notes: e.target.value })
+                    : setNewAccount({ ...newAccount, notes: e.target.value })
+                }
+                maxLength={2000}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setShowAddDialog(false);
+              setEditingAccount(null);
+            }}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={createAccountMutation.isPending || updateAccountMutation.isPending}
+              onClick={() => {
+                if (editingAccount) {
+                  const payload: any = { id: editingAccount.id };
+                  if (editingAccount.label.trim()) payload.label = editingAccount.label.trim();
+                  if (editingAccount.email.trim()) payload.email = editingAccount.email.trim();
+                  if (editingAccount.password.trim()) payload.password = editingAccount.password.trim();
+                  payload.notes = editingAccount.notes?.trim() || "";
+                  updateAccountMutation.mutate(payload);
+                } else {
+                  if (!newAccount.label.trim() || !newAccount.email.trim() || !newAccount.password.trim()) {
+                    toast.error("Preencha nome, email e senha.");
+                    return;
+                  }
+                  createAccountMutation.mutate({
+                    label: newAccount.label.trim(),
+                    email: newAccount.email.trim(),
+                    password: newAccount.password.trim(),
+                    notes: newAccount.notes?.trim() || undefined,
+                  });
+                }
+              }}
+            >
+              {(createAccountMutation.isPending || updateAccountMutation.isPending) ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
+              ) : editingAccount ? "Salvar" : "Cadastrar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Gerenciar contas ChatGPT</DialogTitle>
+            <DialogDescription>
+              Edite ou remova suas contas cadastradas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {accounts.length === 0 ? (
+              <p className="text-sm text-muted-foreground italic text-center py-8">
+                Nenhuma conta cadastrada ainda.
+              </p>
+            ) : (
+              accounts.map((acc) => (
+                <div key={acc.id} className="border rounded-lg p-3 flex items-center justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm">{acc.label}</div>
+                    <div className="text-xs text-muted-foreground truncate">{acc.email}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Última uso: {timeAgo(acc.lastUsedAt)}
+                    </div>
+                    {acc.notes && (
+                      <div className="text-xs text-muted-foreground italic mt-1 truncate">
+                        {acc.notes}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingAccount({
+                          id: acc.id,
+                          label: acc.label,
+                          email: acc.email,
+                          password: "",
+                          notes: acc.notes || "",
+                        });
+                        setShowManageDialog(false);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeleteAccountId(acc.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-rose-600" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setShowManageDialog(false);
+              setShowAddDialog(true);
+            }}>
+              <Plus className="h-4 w-4 mr-2" /> Adicionar nova
+            </Button>
+            <Button onClick={() => setShowManageDialog(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteAccountId !== null} onOpenChange={(open) => !open && setDeleteAccountId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir conta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. A conta será removida permanentemente das suas credenciais salvas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-600 hover:bg-rose-700"
+              onClick={() => deleteAccountId && deleteAccountMutation.mutate({ id: deleteAccountId })}
+            >
+              {deleteAccountMutation.isPending ? "Excluindo..." : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={revealedCredentials !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRevealedCredentials(null);
+            setShowRevealedPassword(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Credenciais — {revealedCredentials?.label}</DialogTitle>
+            <DialogDescription>
+              Email já foi copiado pra área de transferência. ChatGPT abriu em nova aba. Cole o email lá, volte aqui e copie a senha.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Email</Label>
+              <div className="flex gap-2">
+                <Input value={revealedCredentials?.email ?? ""} readOnly className="font-mono text-sm" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    if (!revealedCredentials) return;
+                    await navigator.clipboard.writeText(revealedCredentials.email);
+                    toast.success("Email copiado!");
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs">Senha</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={revealedCredentials?.password ?? ""}
+                  readOnly
+                  type={showRevealedPassword ? "text" : "password"}
+                  className="font-mono text-sm"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowRevealedPassword(!showRevealedPassword)}
+                >
+                  {showRevealedPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyPassword}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded p-2">
+              🔒 Por segurança, este popup fecha sozinho ao trocar de conta ou fechar o modal.
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => {
+              setRevealedCredentials(null);
+              setShowRevealedPassword(false);
+            }}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
