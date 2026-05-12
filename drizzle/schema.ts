@@ -403,6 +403,20 @@ export const amazonListings = mysqlTable("amazon_listings", {
 export type AmazonListing = typeof amazonListings.$inferSelect;
 export type InsertAmazonListing = typeof amazonListings.$inferInsert;
 
+/** Shopee Open Platform partner apps (credenciais multi-partner) */
+export const shopeePartners = mysqlTable("shopee_partners", {
+  id: int("id").autoincrement().primaryKey(),
+  partnerId: bigint("partner_id", { mode: "number" }).notNull().unique(),
+  partnerKey: varchar("partner_key", { length: 256 }).notNull(),
+  label: varchar("label", { length: 100 }).notNull(),
+  isActive: int("is_active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeePartner = typeof shopeePartners.$inferSelect;
+export type InsertShopeePartner = typeof shopeePartners.$inferInsert;
+
 /** Connected Shopee accounts via OAuth */
 export const shopeeAccounts = mysqlTable("shopee_accounts", {
   id: int("id").autoincrement().primaryKey(),
