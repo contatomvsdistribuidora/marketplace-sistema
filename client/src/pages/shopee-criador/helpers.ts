@@ -34,7 +34,7 @@ export function suggestNewName(original: string): string {
   return base.slice(0, maxBase).trimEnd() + suffix;
 }
 
-// Abrevia nomes longos de variação para caber em 20 chars
+// Abrevia nomes longos de variação para caber em 30 chars
 export function truncateVariationName(name: string): string {
   const abbrevs: [RegExp, string][] = [
     [/\bUnidades\b/gi, "Un."],
@@ -54,5 +54,5 @@ export function truncateVariationName(name: string): string {
   let r = name;
   for (const [pat, rep] of abbrevs) r = r.replace(pat, rep);
   r = r.replace(/\s+/g, " ").trim();
-  return r.slice(0, 20);
+  return r.slice(0, 30);
 }

@@ -427,17 +427,17 @@ export async function publishMultiProductListing(
     // ============ Variacoes 2D reais ============
     const hasOptions = optionLabels.length > 0;
 
-    // Trunca pra 20 chars, mas garante unicidade (Shopee rejeita duplicatas)
+    // Trunca pra 30 chars (limite Shopee tier_variation option), mas garante unicidade (Shopee rejeita duplicatas)
     const productOptions: string[] = (() => {
       const result: string[] = [];
       const seen = new Set<string>();
       resolved.forEach((p, idx) => {
         const fullLabel = ws.productNameOverrides?.[String(idx)] ?? p.name ?? `Produto ${idx + 1}`;
-        let label = String(fullLabel).slice(0, 20);
+        let label = String(fullLabel).slice(0, 30);
         if (seen.has(label)) {
           let suffix = 2;
-          while (seen.has(`${label.slice(0, 17)} #${suffix}`)) suffix++;
-          label = `${label.slice(0, 17)} #${suffix}`;
+          while (seen.has(`${label.slice(0, 27)} #${suffix}`)) suffix++;
+          label = `${label.slice(0, 27)} #${suffix}`;
         }
         seen.add(label);
         result.push(label);
@@ -450,11 +450,11 @@ export async function publishMultiProductListing(
       const result: string[] = [];
       const seen = new Set<string>();
       optionLabels.forEach((l: string) => {
-        let label = String(l).slice(0, 20);
+        let label = String(l).slice(0, 30);
         if (seen.has(label)) {
           let suffix = 2;
-          while (seen.has(`${label.slice(0, 17)} #${suffix}`)) suffix++;
-          label = `${label.slice(0, 17)} #${suffix}`;
+          while (seen.has(`${label.slice(0, 27)} #${suffix}`)) suffix++;
+          label = `${label.slice(0, 27)} #${suffix}`;
         }
         seen.add(label);
         result.push(label);
@@ -522,7 +522,7 @@ export async function publishMultiProductListing(
         ? productOptions.flatMap((pLabel, pIdx) =>
             optionLabelsTrimmed.map((oLabel, oIdx) => {
               const flatIdx = pIdx * optionLabels.length + oIdx;
-              const flatLabel = `${pLabel.slice(0, 12)} | ${oLabel.slice(0, 6)}`.slice(0, 20);
+              const flatLabel = `${pLabel.slice(0, 18)} | ${oLabel.slice(0, 9)}`.slice(0, 30);
               return {
                 label: flatLabel,
                 price: models[flatIdx].price,

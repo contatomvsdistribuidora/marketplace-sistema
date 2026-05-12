@@ -3703,7 +3703,7 @@ export const appRouter = router({
         sourceProductId: z.number(),
         variationTypeName: z.string(),
         variations: z.array(z.object({
-          label: z.string().max(20),
+          label: z.string().max(30),
           price: z.number().positive(),
           stock: z.number().int().min(0),
           weight: z.number().positive(),
@@ -3876,7 +3876,7 @@ export const appRouter = router({
         sourceProductId: z.number(),
         variationTypeName: z.string(),
         variations: z.array(z.object({
-          label: z.string().max(20),
+          label: z.string().max(30),
           price: z.number().positive(),
           stock: z.number().int().min(0),
           weight: z.number().positive(),

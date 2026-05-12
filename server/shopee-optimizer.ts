@@ -1012,7 +1012,7 @@ export interface AllContent {
  *
  * Shopee hard limits enforced by the prompt:
  *  - title ≤ 120 chars (item_name)
- *  - generatedName ≤ 20 chars (tier_variation option)
+ *  - generatedName ≤ 30 chars (tier_variation option)
  */
 export async function generateAllContent(params: {
   productName: string;
@@ -1077,14 +1077,14 @@ RETORNE APENAS ESTE JSON, SEM TEXTO ADICIONAL, SEM MARKDOWN:
   "title": "(título até 120 chars, pt-BR, profissional, inclui marca se houver)",
   "description": "(300-800 chars, pt-BR, 3-5 bullet points com marcador •, fecha com call-to-action curta, sem emojis excessivos)",
   "variationNames": [
-    ${params.variations.map((v) => `{ "originalLabel": ${JSON.stringify(v.label)}, "generatedName": "(≤20 chars)" }`).join(",\n    ")}
+    ${params.variations.map((v) => `{ "originalLabel": ${JSON.stringify(v.label)}, "generatedName": "(≤30 chars)" }`).join(",\n    ")}
   ]
 }
 
 REGRAS DURAS:
 - title.length ≤ 120 (conte antes de responder)
 - description.length entre 300 e 800
-- cada generatedName.length ≤ 20 (conte antes de responder)
+- cada generatedName.length ≤ 30 (conte antes de responder)
 - variationNames DEVE ter exatamente ${params.variations.length} itens, na mesma ordem das variações listadas acima, e cada originalLabel DEVE coincidir byte-a-byte com o rótulo de origem
 - não use markdown, não use \`\`\`json, não adicione comentários ou explicações fora do JSON`,
       },
@@ -1157,7 +1157,7 @@ function normalizeAllContent(
       consumed.add(modelIdx);
       names[i] = {
         originalLabel: src.label,
-        generatedName: String(parsed.variationNames[modelIdx].generatedName ?? src.label).slice(0, 20).trim(),
+        generatedName: String(parsed.variationNames[modelIdx].generatedName ?? src.label).slice(0, 30).trim(),
       };
     }
   });
@@ -1170,10 +1170,10 @@ function normalizeAllContent(
       consumed.add(nextIdx);
       names[i] = {
         originalLabel: src.label,
-        generatedName: String(parsed.variationNames[nextIdx]?.generatedName ?? src.label).slice(0, 20).trim(),
+        generatedName: String(parsed.variationNames[nextIdx]?.generatedName ?? src.label).slice(0, 30).trim(),
       };
     } else {
-      names[i] = { originalLabel: src.label, generatedName: src.label.slice(0, 20) };
+      names[i] = { originalLabel: src.label, generatedName: src.label.slice(0, 30) };
     }
   });
 

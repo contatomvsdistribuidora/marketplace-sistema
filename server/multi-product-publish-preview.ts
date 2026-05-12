@@ -185,7 +185,7 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
   const variation1Name = "Modelo";
   const variation1Options = resolved.map((r, idx) => {
     const productLabel = ws.productNameOverrides?.[String(idx)] ?? r.name ?? `Produto ${idx + 1}`;
-    return { option: String(productLabel).slice(0, 20) };
+    return { option: String(productLabel).slice(0, 30) };
   });
   if (variation1Options.length > 0) {
     tierVariations.push({ name: variation1Name.slice(0, 20), option_list: variation1Options });
@@ -195,7 +195,7 @@ export async function previewMultiProductPublish(listingId: number, userId: numb
   // Preferir texto rico de optionDetailsMatrix sobre optionLabels cru
   // (mesmo fix aplicado em multi-product-publish.ts pro Tier 2 nao sair so como numero).
   const variation2Options = getRichOptionLabels(ws)
-    .map((label: string) => ({ option: String(label).slice(0, 20) }));
+    .map((label: string) => ({ option: String(label).slice(0, 30) }));
   if (variation2Options.length > 0) {
     tierVariations.push({ name: variation2Name.slice(0, 20), option_list: variation2Options });
   }

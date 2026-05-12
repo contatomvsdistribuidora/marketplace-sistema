@@ -1669,7 +1669,7 @@ function VariationWizard({
   const dim = (v: string | number | undefined) => String(Math.round(Number(v) || 0));
 
   // "Gerar tudo com IA" — single LLM call that yields title, description, and
-  // a short (≤20ch) name for each local variation. Captures an undo snapshot
+  // a short (≤30ch) name for each local variation. Captures an undo snapshot
   // first so the user can restore manually-edited content within 10s.
   async function handleGenerateAll() {
     if (optionDetails.length === 0) return;
@@ -1741,14 +1741,14 @@ function VariationWizard({
           });
       setAdTab("titulo");
 
-      // Apply generated variation names. Server already trims to 20 chars but
+      // Apply generated variation names. Server already trims to 30 chars but
       // we respect the same limit here to be defensive.
       const byLabel = new Map<string, string>();
       for (const v of result.variationNames) byLabel.set(v.originalLabel, v.generatedName);
       setOptionDetails((opts) =>
         opts.map((o) => {
           const name = byLabel.get(o.label);
-          return name ? { ...o, label: name.slice(0, 20) } : o;
+          return name ? { ...o, label: name.slice(0, 30) } : o;
         }),
       );
 
@@ -2663,7 +2663,7 @@ function VariationWizard({
                           type="text"
                           value={opt.label}
                           onChange={e => {
-                            const val = e.target.value.slice(0, 20);
+                            const val = e.target.value.slice(0, 30);
                             updateOptionLabel(opt.id, val);
                             if (idx > 0) {
                               setManuallyEdited(s => new Set(s).add(opt.id));
@@ -2986,9 +2986,9 @@ function VariationWizard({
                               <div className="flex items-center gap-1">
                                 <span className="text-orange-500 text-sm font-bold flex-shrink-0">{idx + 1}.</span>
                                 <input
-                                  type="text" maxLength={20}
+                                  type="text" maxLength={30}
                                   value={inlineLabelEdits[opt.id]}
-                                  onChange={e => setInlineLabelEdits(p => ({ ...p, [opt.id]: e.target.value.slice(0, 20) }))}
+                                  onChange={e => setInlineLabelEdits(p => ({ ...p, [opt.id]: e.target.value.slice(0, 30) }))}
                                   onBlur={() => {
                                     const v = inlineLabelEdits[opt.id].trim();
                                     if (v) setOptionDetails(opts => opts.map(o => o.id === opt.id ? { ...o, label: v } : o));
