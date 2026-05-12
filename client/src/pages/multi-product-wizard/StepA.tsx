@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Loader2, ArrowUp, ArrowDown, Pencil, Trash2, Plus, Star, Package, Store,
-  ChevronDown, ChevronRight, Settings2,
+  Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -438,7 +438,6 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
     }
   }, [listing.wizardStateJson]);
 
-  const [expandedId, setExpandedId] = useState<number | null>(null);
   const accounts = accountsQuery.data ?? [];
   const publications = publicationsQuery.data ?? [];
   const pubsByAccountId = new Map(publications.map((p) => [p.shopeeAccountId, p]));
@@ -453,7 +452,6 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
       toast.error("Selecione pelo menos 1 conta.");
       return;
     }
-    if (!checked && expandedId === accountId) setExpandedId(null);
     saveMutation.mutate({
       listingId: listing.id,
       accountIds: Array.from(next),
@@ -493,7 +491,6 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
               const checked = selectedIds.has(acc.id);
               const isPrincipal = acc.id === listing.shopeeAccountId;
               const pub = pubsByAccountId.get(acc.id);
-              const isExpanded = expandedId === acc.id;
               const hasOverride = pub && (pub.priceMultiplier != null || pub.minMarginPct != null);
               return (
                 <div key={acc.id} className="rounded border border-gray-200">
@@ -519,18 +516,8 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
                         {pub.minMarginPct != null && `${Number(pub.minMarginPct)}%`}
                       </Badge>
                     )}
-                    {checked && pub && (
-                      <button
-                        type="button"
-                        onClick={() => setExpandedId(isExpanded ? null : acc.id)}
-                        className="text-xs text-orange-600 hover:text-orange-700 flex items-center gap-0.5"
-                      >
-                        {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                        pricing
-                      </button>
-                    )}
                   </div>
-                  {checked && pub && isExpanded && (
+                  {checked && pub && (
                     <PublicationPricingPanel
                       publication={pub}
                       defaults={wizardDefaults}
