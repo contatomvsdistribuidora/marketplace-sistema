@@ -35,6 +35,7 @@ import {
   shopeeAccounts,
   productCache,
   shopeeProducts,
+  chatgptAccounts,
 } from "../drizzle/schema";
 
 /**
@@ -5178,6 +5179,185 @@ export const appRouter = router({
       .query(async () => {
         const { selfTest } = await import("./_core/crypto");
         return selfTest();
+      }),
+
+    list: protectedProcedure
+      .query(async ({ ctx }) => {
+        const rows = await sharedDb
+          .select({
+            id: chatgptAccounts.id,
+            label: chatgptAccounts.label,
+            email: chatgptAccounts.email,
+            notes: chatgptAccounts.notes,
+            lastUsedAt: chatgptAccounts.lastUsedAt,
+            createdAt: chatgptAccounts.createdAt,
+            updatedAt: chatgptAccounts.updatedAt,
+          })
+          .from(chatgptAccounts)
+          .where(eq(chatgptAccounts.userId, ctx.user.id))
+          .orderBy(desc(chatgptAccounts.lastUsedAt), desc(chatgptAccounts.createdAt));
+
+        return rows;
+      }),
+
+    create: protectedProcedure
+      .input(z.object({
+        label: z.string().min(1).max(100),
+        email: z.string().email().max(255),
+        password: z.string().min(1).max(500),
+        notes: z.string().max(2000).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { encrypt } = await import("./_core/crypto");
+
+        const encryptedPassword = encrypt(input.password);
+
+        const [result] = await sharedDb.insert(chatgptAccounts).values({
+          userId: ctx.user.id,
+          label: input.label.trim(),
+          email: input.email.trim().toLowerCase(),
+          encryptedPassword,
+          notes: input.notes?.trim() || null,
+        });
+
+        console.log(`[chatgpt.create] User ${ctx.user.id} criou conta ${input.label} (${input.email})`);
+
+        return { id: result.insertId, label: input.label };
+      }),
+
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        label: z.string().min(1).max(100).optional(),
+        email: z.string().email().max(255).optional(),
+        password: z.string().min(1).max(500).optional(),
+        notes: z.string().max(2000).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [existing] = await sharedDb
+          .select()
+          .from(chatgptAccounts)
+          .where(and(
+            eq(chatgptAccounts.id, input.id),
+            eq(chatgptAccounts.userId, ctx.user.id),
+          ))
+          .limit(1);
+
+        if (!existing) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Conta não encontrada.",
+          });
+        }
+
+        const updates: any = {};
+
+        if (input.label !== undefined) updates.label = input.label.trim();
+        if (input.email !== undefined) updates.email = input.email.trim().toLowerCase();
+        if (input.notes !== undefined) updates.notes = input.notes.trim() || null;
+
+        if (input.password !== undefined) {
+          const { encrypt } = await import("./_core/crypto");
+          updates.encryptedPassword = encrypt(input.password);
+        }
+
+        if (Object.keys(updates).length === 0) {
+          return { updated: false };
+        }
+
+        await sharedDb
+          .update(chatgptAccounts)
+          .set(updates)
+          .where(and(
+            eq(chatgptAccounts.id, input.id),
+            eq(chatgptAccounts.userId, ctx.user.id),
+          ));
+
+        console.log(`[chatgpt.update] User ${ctx.user.id} atualizou conta ${input.id}`);
+
+        return { updated: true };
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [existing] = await sharedDb
+          .select({ id: chatgptAccounts.id, label: chatgptAccounts.label })
+          .from(chatgptAccounts)
+          .where(and(
+            eq(chatgptAccounts.id, input.id),
+            eq(chatgptAccounts.userId, ctx.user.id),
+          ))
+          .limit(1);
+
+        if (!existing) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Conta não encontrada.",
+          });
+        }
+
+        await sharedDb
+          .delete(chatgptAccounts)
+          .where(and(
+            eq(chatgptAccounts.id, input.id),
+            eq(chatgptAccounts.userId, ctx.user.id),
+          ));
+
+        console.log(`[chatgpt.delete] User ${ctx.user.id} deletou conta ${input.id} (${existing.label})`);
+
+        return { deleted: true };
+      }),
+
+    reveal: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [account] = await sharedDb
+          .select()
+          .from(chatgptAccounts)
+          .where(and(
+            eq(chatgptAccounts.id, input.id),
+            eq(chatgptAccounts.userId, ctx.user.id),
+          ))
+          .limit(1);
+
+        if (!account) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Conta não encontrada.",
+          });
+        }
+
+        const { decrypt } = await import("./_core/crypto");
+
+        let password: string;
+        try {
+          password = decrypt(account.encryptedPassword);
+        } catch (e: any) {
+          console.error(`[chatgpt.reveal] Falha ao descriptografar conta ${input.id}:`, e?.message);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Erro ao descriptografar senha. Chave de criptografia pode ter mudado.",
+          });
+        }
+
+        await sharedDb
+          .update(chatgptAccounts)
+          .set({ lastUsedAt: new Date() })
+          .where(eq(chatgptAccounts.id, input.id));
+
+        console.log(`[chatgpt.reveal] User ${ctx.user.id} revelou credenciais conta ${input.id}`);
+
+        return {
+          id: account.id,
+          label: account.label,
+          email: account.email,
+          password,
+        };
       }),
   }),
 });
