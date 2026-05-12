@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
   Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download,
@@ -22,6 +23,27 @@ type Props = {
   listingId: number;
   initialThumbUrl?: string | null;
   onThumbGenerated?: (url: string) => void;
+  /**
+   * Modo de operação (Fase 5.1.B multi-store):
+   * - "listing" (default): escreve em listing.thumbUrl. Step 4 global.
+   * - "publication-batch": gera N variantes SEM escrever no listing.
+   *   Operador atribui cada variante a uma publication via dropdown.
+   */
+  mode?: "listing" | "publication-batch";
+  /**
+   * Lista de publicações marcadas pelo operador. Obrigatório quando
+   * mode='publication-batch'. Cada uma vira uma row na tabela de atribuição.
+   * customVideoId atual é necessário pra preservar override de vídeo durante
+   * o save (updatePublicationMedia exige ambos os campos).
+   */
+  publications?: Array<{
+    id: number;
+    label: string;
+    isPrincipal: boolean;
+    customVideoId: number | null;
+  }>;
+  /** Callback chamado após salvar atribuições (refresh do parent). */
+  onPublicationAssignmentsSaved?: () => void;
 };
 
 const PROMPT_TEMPLATES = {
@@ -107,7 +129,12 @@ export default function ThumbGeneratorModal({
   listingId,
   initialThumbUrl,
   onThumbGenerated,
+  mode = "listing",
+  publications,
+  onPublicationAssignmentsSaved,
 }: Props) {
+  const isPublicationBatch = mode === "publication-batch";
+
   const [selected, setSelected] = useState<string[]>([]);
   const [customPromptText, setCustomPromptText] = useState<string>("");
   const [creativeMode, setCreativeMode] = useState<boolean>(true);
@@ -123,6 +150,12 @@ export default function ThumbGeneratorModal({
   const [uploadingThumb, setUploadingThumb] = useState(false);
   const thumbFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Atribuição multi-store (só usado em mode='publication-batch'):
+  // assignments[publicationId] = variantIdx (0..3) ou null = não atribuir.
+  const [assignments, setAssignments] = useState<Record<number, number | null>>({});
+  const [savingAssignments, setSavingAssignments] = useState(false);
+  const [assignResult, setAssignResult] = useState<{ savedIds: number[]; failedIds: number[] } | null>(null);
+
   // Reset states quando modal abre
   useEffect(() => {
     if (!isOpen) return;
@@ -131,10 +164,12 @@ export default function ThumbGeneratorModal({
     setCreativeMode(true);
     setGeneratedUrl(initialThumbUrl || null);
     setZoomOpen(null);
-    setVariationCount(2);
+    setVariationCount(isPublicationBatch ? Math.min(4, Math.max(1, publications?.length ?? 2)) : 2);
     setGeneratedUrls([]);
     setSelectedGeneratedIdx(null);
-  }, [isOpen, initialThumbUrl]);
+    setAssignments({});
+    setAssignResult(null);
+  }, [isOpen, initialThumbUrl, isPublicationBatch, publications?.length]);
 
   // Busca fotos agrupadas por produto
   const imagesQuery = trpc.multiProduct.getAvailableThumbImages.useQuery(
@@ -177,9 +212,22 @@ export default function ThumbGeneratorModal({
         } else {
           toast.success(`${urls.length} thumb(s) gerada(s)!`);
         }
+
+        // Em modo publication-batch, pre-popula atribuições com mapeamento
+        // 1:1 (publication[i] → variante[i]) quando count >= publications.length.
+        if (isPublicationBatch && publications && publications.length > 0) {
+          const initial: Record<number, number | null> = {};
+          publications.forEach((p, idx) => {
+            initial[p.id] = idx < urls.length ? idx : null;
+          });
+          setAssignments(initial);
+        }
       },
       onError: (e) => toast.error(e.message),
     });
+
+  // Mutation: atribui thumb a uma publication (Fase 5.1.B)
+  const updatePublicationMediaMut = trpc.multiProduct.updatePublicationMedia.useMutation();
 
   const generateCollageMutation = trpc.multiProduct.generateCollage.useMutation({
     onSuccess: (data) => {
@@ -358,6 +406,8 @@ export default function ThumbGeneratorModal({
 
     setGeneratedUrls([]);
     setSelectedGeneratedIdx(null);
+    setAssignments({});
+    setAssignResult(null);
 
     generateBatchMutation.mutate({
       id: listingId,
@@ -365,7 +415,64 @@ export default function ThumbGeneratorModal({
       selectedImageUrls: creativeMode ? [] : selected,
       customPrompt: customPromptText.trim(),
       creativeMode,
+      // Fase 5.1.B: modo publication-batch gera SEM escrever em listing.thumbUrl
+      skipListingUpdate: isPublicationBatch,
     });
+  }
+
+  // Salva atribuições em série pra cada publication que tem variant escolhida.
+  // Updates paralelos no mesmo listing poderiam confundir o operador em caso
+  // de falha parcial; série + status por id facilita o report.
+  async function handleSaveAssignments() {
+    if (!isPublicationBatch || !publications) return;
+    const entries = Object.entries(assignments)
+      .map(([id, idx]) => ({ pubId: Number(id), idx }))
+      .filter((e) => e.idx !== null && e.idx !== undefined);
+
+    if (entries.length === 0) {
+      toast.error("Nenhuma atribuição selecionada.");
+      return;
+    }
+    if (generatedUrls.length === 0) {
+      toast.error("Gere as variantes antes de atribuir.");
+      return;
+    }
+
+    setSavingAssignments(true);
+    const savedIds: number[] = [];
+    const failedIds: number[] = [];
+
+    // Map id → customVideoId atual, pra preservar overrides de vídeo no save
+    // (updatePublicationMedia exige ambos os campos no payload).
+    const videoByPubId = new Map(publications.map((p) => [p.id, p.customVideoId]));
+
+    for (const { pubId, idx } of entries) {
+      const url = generatedUrls[idx!];
+      if (!url) {
+        failedIds.push(pubId);
+        continue;
+      }
+      try {
+        await updatePublicationMediaMut.mutateAsync({
+          publicationId: pubId,
+          customThumbUrl: url,
+          customVideoId: videoByPubId.get(pubId) ?? null,
+        });
+        savedIds.push(pubId);
+      } catch {
+        failedIds.push(pubId);
+      }
+    }
+
+    setSavingAssignments(false);
+    setAssignResult({ savedIds, failedIds });
+
+    if (failedIds.length === 0) {
+      toast.success(`${savedIds.length} atribuição(ões) salva(s).`);
+    } else {
+      toast.warning(`${savedIds.length} salvas, ${failedIds.length} falharam.`);
+    }
+    if (onPublicationAssignmentsSaved) onPublicationAssignmentsSaved();
   }
 
   const products = imagesQuery.data || [];
@@ -841,10 +948,65 @@ export default function ThumbGeneratorModal({
             </div>
           </div>
 
+          {/* Painel de atribuição multi-store (Fase 5.1.B) */}
+          {isPublicationBatch && publications && generatedUrls.length > 0 && (
+            <div className="border-t bg-orange-50/30 px-6 py-3 shrink-0 max-h-[35vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="text-sm font-semibold">Atribuir variantes às contas</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Escolha qual variante (A/B/C/D) cada conta vai usar. Pode reusar a mesma variante em N contas.
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[10px]">
+                  {Object.values(assignments).filter((v) => v !== null).length}/{publications.length} atribuídas
+                </Badge>
+              </div>
+              <div className="space-y-1.5">
+                {publications.map((pub) => {
+                  const current = assignments[pub.id];
+                  const wasSaved = assignResult?.savedIds.includes(pub.id);
+                  const wasFailed = assignResult?.failedIds.includes(pub.id);
+                  return (
+                    <div key={pub.id} className="flex items-center gap-3 bg-white rounded border border-gray-200 px-3 py-1.5">
+                      <span className="text-sm font-medium flex-1 line-clamp-1">{pub.label}</span>
+                      {pub.isPrincipal && (
+                        <Badge variant="outline" className="text-[9px] border-yellow-300 bg-yellow-50 text-yellow-700">
+                          principal
+                        </Badge>
+                      )}
+                      <select
+                        value={current === null || current === undefined ? "" : String(current)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setAssignments((prev) => ({
+                            ...prev,
+                            [pub.id]: v === "" ? null : Number(v),
+                          }));
+                        }}
+                        disabled={savingAssignments}
+                        className="h-7 text-xs rounded border border-gray-300 px-2 bg-white"
+                      >
+                        <option value="">— Não atribuir —</option>
+                        {generatedUrls.map((_, idx) => (
+                          <option key={idx} value={idx}>
+                            Variante {String.fromCharCode(65 + idx)}
+                          </option>
+                        ))}
+                      </select>
+                      {wasSaved && <Check className="h-4 w-4 text-green-600" />}
+                      {wasFailed && <span className="text-[10px] text-red-600">falhou</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Footer */}
           <DialogFooter className="flex justify-between gap-2 px-6 py-4 border-t shrink-0 bg-white">
             <Button variant="outline" onClick={onClose}>
-              Cancelar
+              {isPublicationBatch ? "Fechar" : "Cancelar"}
             </Button>
             <div className="flex gap-2">
               <Button
@@ -865,11 +1027,12 @@ export default function ThumbGeneratorModal({
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4 mr-2" />
-                    Gerar Thumb
+                    {isPublicationBatch ? `Gerar ${variationCount} variante(s)` : "Gerar Thumb"}
                   </>
                 )}
               </Button>
-              {generatedUrl && (
+              {/* Modo listing: botão "Usar esta thumb" tradicional */}
+              {!isPublicationBatch && generatedUrl && (
                 <Button
                   onClick={() => {
                     if (onThumbGenerated) onThumbGenerated(generatedUrl);
@@ -878,6 +1041,23 @@ export default function ThumbGeneratorModal({
                   className="bg-green-600 hover:bg-green-700"
                 >
                   ✓ Usar esta thumb
+                </Button>
+              )}
+              {/* Modo publication-batch: salvar atribuições */}
+              {isPublicationBatch && generatedUrls.length > 0 && (
+                <Button
+                  onClick={handleSaveAssignments}
+                  disabled={
+                    savingAssignments ||
+                    Object.values(assignments).filter((v) => v !== null && v !== undefined).length === 0
+                  }
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {savingAssignments ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
+                  ) : (
+                    <><Check className="h-4 w-4 mr-2" /> Salvar atribuições</>
+                  )}
                 </Button>
               )}
             </div>

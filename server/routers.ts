@@ -5358,6 +5358,9 @@ export const appRouter = router({
         ])).optional(),
         customPrompt: z.string().max(5000).optional(),
         creativeMode: z.boolean().optional(),
+        // Fase 5.1.B (multi-store): caller publication-batch passa true pra
+        // NÃO escrever em listing.thumbUrl — atribuição fica per-publication.
+        skipListingUpdate: z.boolean().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const result = await multiProductAi.generateMultiProductThumbBatch(
@@ -5376,6 +5379,7 @@ export const appRouter = router({
           input.enfase,
           input.customPrompt,
           input.creativeMode,
+          input.skipListingUpdate,
         );
         return result;
       }),

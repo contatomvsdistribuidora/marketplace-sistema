@@ -911,6 +911,7 @@ function PerAccountMediaCard({
     { listingId: listing.id },
   );
   const utils = trpc.useUtils();
+  const [thumbBatchModalOpen, setThumbBatchModalOpen] = useState(false);
 
   const accounts = accountsQuery.data ?? [];
   const publications = publicationsQuery.data ?? [];
@@ -919,17 +920,44 @@ function PerAccountMediaCard({
   const onSaved = () => utils.multiProduct.listPublications.invalidate({ listingId: listing.id });
   const isLoading = accountsQuery.isLoading || publicationsQuery.isLoading;
 
+  // Lista pra passar ao modal completo de thumb (mode='publication-batch').
+  // Inclui customVideoId pra preservar override de vídeo no save.
+  const thumbBatchPublications = publications.map((pub) => {
+    const acc = accountById.get(pub.shopeeAccountId);
+    return {
+      id: pub.id,
+      label: acc?.shopName ?? `Conta #${acc?.shopId ?? pub.shopeeAccountId}`,
+      isPrincipal: pub.shopeeAccountId === listing.shopeeAccountId,
+      customVideoId: pub.customVideoId,
+    };
+  });
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg flex items-center gap-2">
-          <Store className="h-4 w-4 text-muted-foreground" />
-          Mídia por conta
-        </CardTitle>
-        <CardDescription>
-          Cada conta Shopee pode ter thumb e vídeo próprios. Vazio = herda do template acima.
-          Shopee penaliza thumbs idênticas entre lojas — varie pelo menos um pouco.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Store className="h-4 w-4 text-muted-foreground" />
+              Mídia por conta
+            </CardTitle>
+            <CardDescription>
+              Cada conta Shopee pode ter thumb e vídeo próprios. Vazio = herda do template acima.
+              Shopee penaliza thumbs idênticas entre lojas — varie pelo menos um pouco.
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setThumbBatchModalOpen(true)}
+            disabled={isLoading || publications.length === 0}
+            className="h-8 gap-1 flex-shrink-0"
+            title="Abre o editor IA completo: gera N variantes e atribui cada uma a uma conta"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Editor completo
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -969,6 +997,15 @@ function PerAccountMediaCard({
           </div>
         )}
       </CardContent>
+
+      <ThumbGeneratorModal
+        listingId={listing.id}
+        isOpen={thumbBatchModalOpen}
+        onClose={() => setThumbBatchModalOpen(false)}
+        mode="publication-batch"
+        publications={thumbBatchPublications}
+        onPublicationAssignmentsSaved={onSaved}
+      />
     </Card>
   );
 }

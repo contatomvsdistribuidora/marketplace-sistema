@@ -821,6 +821,10 @@ export async function generateMultiProductThumbBatch(
   enfase?: ThumbToggleEnfase[],
   customPrompt?: string,
   creativeMode?: boolean,
+  // Fase 5.1.B: caller multi-store (publication-batch) precisa que NENHUMA
+  // das variantes escreva em listing.thumbUrl — a atribuição vai pra
+  // publications.custom_thumb_url depois via updatePublicationMedia.
+  skipListingUpdate?: boolean,
 ): Promise<{
   results: Array<{ thumbUrl: string; promptUsed: string; promptEnUsed: string; variantIndex: number }>;
   errors: Array<{ variantIndex: number; error: string }>;
@@ -857,6 +861,7 @@ export async function generateMultiProductThumbBatch(
       enfase,
       variantPrompt || customPrompt,
       creativeMode,
+      skipListingUpdate,
     ).then((result) => ({ ...result, variantIndex: idx }))
       .catch((err) => {
         console.error(`[generateThumbBatch] Erro variante ${idx}:`, err?.message);
