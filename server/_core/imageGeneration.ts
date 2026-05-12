@@ -85,7 +85,8 @@ async function fetchUrlAsBuffer(url: string): Promise<Buffer> {
 }
 
 async function resizeToRefLimit(buf: Buffer): Promise<Buffer> {
-  return sharp(buf)
+  const inputMeta = await sharp(buf).metadata();
+  const result = await sharp(buf)
     .resize({
       width: REF_MAX_DIM,
       height: REF_MAX_DIM,
@@ -94,6 +95,11 @@ async function resizeToRefLimit(buf: Buffer): Promise<Buffer> {
     })
     .jpeg({ quality: 95, mozjpeg: true })
     .toBuffer();
+  const outputMeta = await sharp(result).metadata();
+  console.log(
+    `[AUDIT-RESIZE] Input: ${inputMeta.width}x${inputMeta.height} ${(buf.length / 1024).toFixed(0)}KB → Output: ${outputMeta.width}x${outputMeta.height} ${(result.length / 1024).toFixed(0)}KB`,
+  );
+  return result;
 }
 
 async function buildRefBuffer(
@@ -189,8 +195,15 @@ async function generateViaOpenAI(
   cfg: Extract<ModelConfig, { provider: "openai" }>
 ): Promise<GenerateImageResponse> {
   const client = getOpenAIClient();
+  const tStart = Date.now();
 
   const refs = (originalImages ?? []).slice(0, MAX_REF_IMAGES);
+  console.log("[AUDIT-IMAGE] ============================");
+  console.log("[AUDIT-IMAGE] Modelo:", cfg.slug);
+  console.log("[AUDIT-IMAGE] Quality config:", cfg.quality);
+  console.log("[AUDIT-IMAGE] Refs solicitadas:", refs.length, "(max:", MAX_REF_IMAGES, ")");
+  console.log("[AUDIT-IMAGE] REF_MAX_DIM:", REF_MAX_DIM);
+  console.log("[AUDIT-IMAGE] Output size:", OUTPUT_W, "x", OUTPUT_H);
   const refBuffers: Buffer[] = [];
   for (const ref of refs) {
     try {
@@ -212,6 +225,16 @@ async function generateViaOpenAI(
     console.log(
       `[imageGeneration] OpenAI images.edit com ${uploadables.length} ref(s), model=${cfg.slug}, quality=${cfg.quality}`,
     );
+    console.log("[AUDIT-OPENAI-EDIT] Params:", {
+      model: cfg.slug,
+      imageCount: uploadables.length,
+      promptLength: prompt.length,
+      size: `${OUTPUT_W}x${OUTPUT_H}`,
+      quality: "high",
+      input_fidelity: "low",
+      background: "auto",
+      output_format: "png",
+    });
     try {
       response = await client.images.edit({
         model: cfg.slug,
@@ -246,6 +269,15 @@ async function generateViaOpenAI(
     console.log(
       `[imageGeneration] OpenAI images.generate sem refs, model=${cfg.slug}, quality=${cfg.quality}`,
     );
+    console.log("[AUDIT-OPENAI-GENERATE] Params:", {
+      model: cfg.slug,
+      promptLength: prompt.length,
+      size: `${OUTPUT_W}x${OUTPUT_H}`,
+      quality: "high",
+      background: "auto",
+      output_format: "png",
+      moderation: "low",
+    });
     response = await client.images.generate({
       model: cfg.slug,
       prompt,
@@ -257,6 +289,9 @@ async function generateViaOpenAI(
       moderation: "low",
     });
   }
+
+  const tEnd = Date.now();
+  console.log(`[AUDIT-OPENAI-RESPONSE] Buffer recebido em ${tEnd - tStart}ms`);
 
   const b64 = response.data?.[0]?.b64_json;
   if (!b64) {

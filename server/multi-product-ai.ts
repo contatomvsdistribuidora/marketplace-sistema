@@ -343,7 +343,11 @@ English output: "Create a professional Shopee e-commerce thumbnail in Brazilian 
       return promptPtBr;
     }
 
-    console.log(`[translatePrompt] PT-BR (${promptPtBr.length} chars) → EN (${translated.length} chars)`);
+    console.log("[AUDIT-TRANSLATE] ============================");
+    console.log("[AUDIT-TRANSLATE] PT-BR prévia (200 chars):", promptPtBr.slice(0, 200).replace(/\n/g, " "));
+    console.log("[AUDIT-TRANSLATE] PT-BR length:", promptPtBr.length);
+    console.log("[AUDIT-TRANSLATE] EN prévia (200 chars):", translated.slice(0, 200).replace(/\n/g, " "));
+    console.log("[AUDIT-TRANSLATE] EN length:", translated.length);
     return translated;
   } catch (e: any) {
     console.error("[translatePrompt] Erro:", e?.message);
@@ -752,9 +756,11 @@ ${styleSection}${narrativeSection}
 CONTEXTO:
 Produto Principal: ${principalName}${extraInstructions}`;
 
-  if (creativeMode) {
-    console.log("[generateThumb] CREATIVE MODE — usando images.generate() (sem fotos de referência)");
-  }
+  console.log("[AUDIT-THUMB-START] ============================");
+  console.log("[AUDIT-THUMB-START] listingId:", listingId, "userId:", userId);
+  console.log("[AUDIT-THUMB-START] creativeMode:", creativeMode);
+  console.log("[AUDIT-THUMB-START] referenceImages count:", referenceImages.length);
+  console.log("[AUDIT-THUMB-START] referenceImages será enviado?:", creativeMode ? "NÃO (modo criativo)" : "SIM");
 
   console.log("[generateThumb] Traduzindo prompt PT-BR → EN...");
   const promptEn = await translatePromptToEnglish(prompt);
