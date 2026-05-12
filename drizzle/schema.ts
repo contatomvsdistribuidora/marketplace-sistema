@@ -680,6 +680,40 @@ export type MultiProductListing = typeof multiProductListings.$inferSelect;
 export type InsertMultiProductListing = typeof multiProductListings.$inferInsert;
 
 /**
+ * Multi-store publish (fase 1): cada linha representa uma publicação de um
+ * multi_product_listing em UMA conta Shopee. 1 listing pode ter N rows aqui
+ * (1 por conta marcada pelo operador), cada uma com overrides próprios de
+ * multiplicador, título, descrição, thumb e vídeo.
+ *
+ * Status individual por conta (não confundir com listing.status, que continua
+ * sendo o status agregado / da publicação principal legada).
+ *
+ * UNIQUE(listing_id, shopee_account_id) garante 1 publicação por listing/conta.
+ * Sem FK formal — segue padrão do schema do projeto.
+ *
+ * Spec completa: docs/multi-store-publish.md
+ */
+export const shopeeListingPublications = mysqlTable("shopee_listing_publications", {
+  id: int("id").autoincrement().primaryKey(),
+  listingId: bigint("listing_id", { mode: "number" }).notNull(),
+  shopeeAccountId: bigint("shopee_account_id", { mode: "number" }).notNull(),
+  multiplier: decimal("multiplier", { precision: 8, scale: 4 }),
+  customTitle: varchar("custom_title", { length: 120 }),
+  customDescription: text("custom_description"),
+  customThumbUrl: varchar("custom_thumb_url", { length: 500 }),
+  customVideoId: bigint("custom_video_id", { mode: "number" }),
+  shopeeItemId: bigint("shopee_item_id", { mode: "number" }),
+  publishStatus: mysqlEnum("publish_status", ["pending", "publishing", "published", "failed"]).default("pending").notNull(),
+  publishError: text("publish_error"),
+  publishedAt: timestamp("published_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShopeeListingPublication = typeof shopeeListingPublications.$inferSelect;
+export type InsertShopeeListingPublication = typeof shopeeListingPublications.$inferInsert;
+
+/**
  * Itens (variações) de um multiProductListing. Cada linha é uma variação
  * dentro do anúncio combinado, herdando campos do produto de origem.
  *
