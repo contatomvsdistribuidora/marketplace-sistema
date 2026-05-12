@@ -86,9 +86,16 @@ export function StepD({
   });
 
   const isPrincipalShopee = listing.mainProductSource === "shopee";
+  const wsCategoryId = (() => {
+    try {
+      const ws = listing.wizardStateJson ? JSON.parse(listing.wizardStateJson) : null;
+      return ws?.categoryId ? Number(ws.categoryId) : null;
+    } catch { return null; }
+  })();
 
   const blockingPublishReason: string | null = (() => {
-    if (!isPrincipalShopee) return "Marque um produto Shopee como ⭐ principal no Step A.";
+    if (!isPrincipalShopee && !wsCategoryId)
+      return "Marque um produto Shopee como ⭐ principal no Step A OU escolha a categoria Shopee no Step C.";
     if (!listing.title || listing.title.trim().length < 10)
       return "Título precisa ter pelo menos 10 caracteres (Step B).";
     if (!listing.description || listing.description.trim().length < 30)

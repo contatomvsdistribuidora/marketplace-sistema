@@ -97,11 +97,16 @@ export async function publishMultiProductListing(
     throw new PublishMultiProductError("ALREADY_PUBLISHING", "Publicação em andamento. Aguarde.");
   }
 
-  // ============ 2. Principal precisa ser Shopee
-  if (listing.mainProductSource !== "shopee") {
+  // ============ 2. Principal precisa ser Shopee OU wizard precisa ter categoryId
+  const wsState = listing.wizardStateJson
+    ? (() => { try { return JSON.parse(listing.wizardStateJson); } catch { return null; } })()
+    : null;
+  const wsCategoryId = wsState?.categoryId ? Number(wsState.categoryId) : null;
+
+  if (listing.mainProductSource !== "shopee" && !wsCategoryId) {
     throw new PublishMultiProductError(
-      "PRINCIPAL_NOT_SHOPEE",
-      "Para publicar, marque um produto Shopee como ⭐ principal no Step A.",
+      "CATEGORY_MISSING_BL_ONLY",
+      "Pra publicar anúncio só com produtos BaseLinker, escolha a categoria Shopee no Step B.",
     );
   }
 
@@ -203,23 +208,25 @@ export async function publishMultiProductListing(
         r.source === listing.mainProductSource &&
         r.sourceId === Number(listing.mainProductSourceId),
     );
-    if (!principal || principal.source !== "shopee") {
+    if (!principal) {
       throw new PublishMultiProductError(
         "PRINCIPAL_RESOLVE_FAILED",
-        "Principal não encontrado ou não é Shopee.",
+        "Produto principal não encontrado.",
       );
     }
 
-    const [principalData] = await sharedDb
-      .select()
-      .from(shopeeProducts)
-      .where(eq(shopeeProducts.itemId, principal.sourceId))
-      .limit(1);
+    const principalData = principal.source === "shopee"
+      ? (await sharedDb
+          .select()
+          .from(shopeeProducts)
+          .where(eq(shopeeProducts.itemId, principal.sourceId))
+          .limit(1))[0] ?? null
+      : null;
 
-    if (!principalData?.categoryId) {
+    if (!principalData?.categoryId && !wsCategoryId) {
       throw new PublishMultiProductError(
         "CATEGORY_MISSING",
-        "Produto principal sem categoria Shopee. Re-sincronize o produto.",
+        "Categoria Shopee não encontrada. Defina no Step B ou re-sincronize o produto principal.",
       );
     }
 
@@ -404,7 +411,7 @@ export async function publishMultiProductListing(
     const skuSuffix = String(Date.now()).slice(-6);
 
     // Categoria: prefere a do wizard
-    const finalCategoryId = Number(ws.categoryId ?? principalData.categoryId);
+    const finalCategoryId = Number(ws.categoryId ?? principalData?.categoryId);
 
     // Marca: prefere a do wizard
     // brandId=0 e' a sentinela Shopee pra "free-text": o nome digitado vai
@@ -556,7 +563,7 @@ export async function publishMultiProductListing(
         return out;
       };
 
-      let finalAttributes = convertAttributesToCreateInput(principalData.attributes);
+      let finalAttributes = convertAttributesToCreateInput(principalData?.attributes);
       if (ws.attributeValues && typeof ws.attributeValues === "object") {
         const fromWizard = Object.entries(ws.attributeValues)
           .map(([attrIdStr, val]: [string, any]) => {
@@ -572,6 +579,41 @@ export async function publishMultiProductListing(
           })
           .filter((a: any) => a !== null);
         if (fromWizard.length > 0) finalAttributes = fromWizard as any;
+      }
+
+      // Fallback de peso/dimensões quando principal é BL (principalData=null)
+      let fallbackWeight = 0;
+      let fallbackDimL = 0;
+      let fallbackDimW = 0;
+      let fallbackDimH = 0;
+
+      if (!principalData) {
+        const firstBlItem = items.find((it) => it.source === "baselinker");
+        if (firstBlItem) {
+          const [blRow] = await sharedDb
+            .select()
+            .from(productCache)
+            .where(eq(productCache.productId, Number(firstBlItem.sourceId)))
+            .limit(1);
+          fallbackWeight = blRow?.weight ? Number(blRow.weight) : 0;
+        }
+
+        const matrix = (ws as any)?.optionDetailsMatrix;
+        if (matrix && Array.isArray(matrix) && matrix[0] && Array.isArray(matrix[0])) {
+          const firstCell = matrix[0][0];
+          if (firstCell) {
+            fallbackDimL = Number(firstCell.length ?? firstCell.baseLength ?? 0);
+            fallbackDimW = Number(firstCell.width ?? firstCell.baseWidth ?? 0);
+            fallbackDimH = Number(firstCell.height ?? firstCell.baseHeight ?? 0);
+          }
+        }
+
+        if (fallbackWeight <= 0) fallbackWeight = 0.1;
+        if (fallbackDimL <= 0) fallbackDimL = 10;
+        if (fallbackDimW <= 0) fallbackDimW = 10;
+        if (fallbackDimH <= 0) fallbackDimH = 10;
+
+        console.log("[BL-ONLY] Fallback aplicado:", { fallbackWeight, fallbackDimL, fallbackDimW, fallbackDimH });
       }
 
       // Auto-retry com sufixo unico quando Shopee detecta duplicate
@@ -591,17 +633,23 @@ export async function publishMultiProductListing(
             // dos models como placeholder pra atender o schema do add_item.
             price: itemLevelPrice,
             stock: 0,
-            weight: Number(principalData.weight ?? 0),
+            weight: principalData
+              ? Number(principalData.weight ?? 0.1)
+              : fallbackWeight,
             imageIds: [thumbImageId, ...galleryImageIds].slice(0, 9),
             condition: "NEW",
             sku: `${listing.id}-${currentSuffix}-MAIN`,
-            dimension: principalData.dimensionLength
+            dimension: principalData?.dimensionLength
               ? {
                   packageLength: Math.round(Number(principalData.dimensionLength)),
                   packageWidth: Math.round(Number(principalData.dimensionWidth ?? 0)),
                   packageHeight: Math.round(Number(principalData.dimensionHeight ?? 0)),
                 }
-              : undefined,
+              : {
+                  packageLength: fallbackDimL,
+                  packageWidth: fallbackDimW,
+                  packageHeight: fallbackDimH,
+                },
             logisticIds: logisticIds.length > 0 ? logisticIds : undefined,
             attributes: finalAttributes,
             brand: finalBrand,
