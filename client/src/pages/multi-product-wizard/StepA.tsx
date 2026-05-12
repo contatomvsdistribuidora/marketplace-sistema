@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Loader2, ArrowUp, ArrowDown, Pencil, Trash2, Plus, Star, Package,
+  Loader2, ArrowUp, ArrowDown, Pencil, Trash2, Plus, Star, Package, Store,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -80,6 +81,8 @@ export function StepA({
 
   return (
     <div className="space-y-4">
+      <MultiStoreAccountPicker listing={listing} />
+
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold">Produtos do anúncio</h2>
@@ -391,5 +394,108 @@ function EditItemDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Multi-store: checkbox list das contas Shopee ativas do usuário. Marcar/
+ * desmarcar dispara savePublications imediatamente (autosave on-toggle).
+ *
+ * Hidratação: listPublications faz auto-seed pra listings antigos (cria 1 row
+ * com a conta principal se ainda não houver nenhuma).
+ *
+ * Esta fase só persiste a seleção em shopee_listing_publications. A publicação
+ * real continua usando listing.shopeeAccountId (a conta marcada como
+ * "principal"). Multi-loja publica de verdade na Fase 6.
+ */
+function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
+  const accountsQuery = trpc.shopee.listActiveAccounts.useQuery();
+  const publicationsQuery = trpc.multiProduct.listPublications.useQuery(
+    { listingId: listing.id },
+  );
+  const utils = trpc.useUtils();
+  const saveMutation = trpc.multiProduct.savePublications.useMutation({
+    onSuccess: () => {
+      utils.multiProduct.listPublications.invalidate({ listingId: listing.id });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const accounts = accountsQuery.data ?? [];
+  const publications = publicationsQuery.data ?? [];
+  const selectedIds = new Set(publications.map((p) => p.shopeeAccountId));
+
+  function toggle(accountId: number, checked: boolean) {
+    const next = new Set(selectedIds);
+    if (checked) next.add(accountId);
+    else next.delete(accountId);
+
+    if (next.size === 0) {
+      toast.error("Selecione pelo menos 1 conta.");
+      return;
+    }
+    saveMutation.mutate({
+      listingId: listing.id,
+      accountIds: Array.from(next),
+    });
+  }
+
+  const isLoading = accountsQuery.isLoading || publicationsQuery.isLoading;
+
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Store className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Contas Shopee</h3>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {selectedIds.size} {selectedIds.size === 1 ? "conta selecionada" : "contas selecionadas"}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Marque as contas onde este anúncio será publicado. A conta principal do anúncio fica
+          com badge ⭐ (publicação multi-loja real chega na Fase 6).
+        </p>
+
+        {isLoading ? (
+          <div className="flex justify-center py-4">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : accounts.length === 0 ? (
+          <div className="text-xs text-muted-foreground italic">
+            Nenhuma conta Shopee ativa.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {accounts.map((acc) => {
+              const checked = selectedIds.has(acc.id);
+              const isPrincipal = acc.id === listing.shopeeAccountId;
+              return (
+                <label
+                  key={acc.id}
+                  className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-muted"
+                >
+                  <Checkbox
+                    checked={checked}
+                    disabled={saveMutation.isPending}
+                    onCheckedChange={(v) => toggle(acc.id, v === true)}
+                  />
+                  <span className="text-sm font-medium">{acc.shopName ?? `Conta #${acc.shopId}`}</span>
+                  <span className="text-xs text-muted-foreground">#{acc.shopId}</span>
+                  {isPrincipal && (
+                    <Badge variant="outline" className="text-[10px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
+                      <Star className="h-3 w-3 fill-yellow-400" />
+                      principal
+                    </Badge>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

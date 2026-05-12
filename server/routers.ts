@@ -27,13 +27,14 @@ import * as multiProductPublishPreview from "./multi-product-publish-preview";
 import { storagePut } from "./storage";
 import * as videoStorage from "./storage-video";
 import { randomUUID } from "node:crypto";
-import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, asc, sql, inArray, ne, notInArray } from "drizzle-orm";
 import {
   multiProductListings,
   multiProductListingItems,
   videoBank,
   shopeeAccounts,
   shopeePartners,
+  shopeeListingPublications,
   productCache,
   shopeeProducts,
 } from "../drizzle/schema";
@@ -1920,6 +1921,26 @@ export const appRouter = router({
         .where(eq(shopeePartners.isActive, 1))
         .orderBy(asc(shopeePartners.label));
       return partners;
+    }),
+
+    // Lista contas Shopee ATIVAS do usuário (token válido) — usado pelo
+    // multi-store picker do wizard. Não expõe tokens.
+    listActiveAccounts: protectedProcedure.query(async ({ ctx }) => {
+      return sharedDb
+        .select({
+          id: shopeeAccounts.id,
+          shopId: shopeeAccounts.shopId,
+          shopName: shopeeAccounts.shopName,
+          region: shopeeAccounts.region,
+          partnerId: shopeeAccounts.partnerId,
+        })
+        .from(shopeeAccounts)
+        .where(and(
+          eq(shopeeAccounts.userId, ctx.user.id),
+          eq(shopeeAccounts.isActive, 1),
+          ne(shopeeAccounts.tokenStatus, "revoked"),
+        ))
+        .orderBy(asc(shopeeAccounts.shopName));
     }),
 
     // Get OAuth authorization URL
@@ -4379,6 +4400,105 @@ export const appRouter = router({
           .set(updateFields)
           .where(eq(multiProductListings.id, id));
         return { id, updated: true };
+      }),
+
+    // === Multi-store publish (fase 2) ===
+    // Lista as publicações de um listing (1 row por conta selecionada).
+    // Auto-seed: se vazio E o listing tem shopeeAccountId, cria 1 row com
+    // aquela conta como compat pra listings antigos.
+    listPublications: protectedProcedure
+      .input(z.object({ listingId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select({ id: multiProductListings.id, accountId: multiProductListings.shopeeAccountId })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.listingId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "Anúncio não encontrado." });
+
+        const rows = await sharedDb
+          .select()
+          .from(shopeeListingPublications)
+          .where(eq(shopeeListingPublications.listingId, input.listingId));
+
+        // Auto-seed: listings criados antes da Fase 2 não têm row. Cria a row
+        // referente à conta principal pra que o checkbox apareça pré-marcado.
+        if (rows.length === 0 && listing.accountId) {
+          await sharedDb.insert(shopeeListingPublications).values({
+            listingId: input.listingId,
+            shopeeAccountId: listing.accountId,
+          });
+          const seeded = await sharedDb
+            .select()
+            .from(shopeeListingPublications)
+            .where(eq(shopeeListingPublications.listingId, input.listingId));
+          return seeded;
+        }
+
+        return rows;
+      }),
+
+    // Sincroniza as publicações de um listing com a lista de contas marcadas
+    // no UI. Idempotente: DELETE WHERE listing AND account NOT IN (ids) +
+    // INSERT pras contas novas. Status='published' bloqueia delete (fase 6+).
+    // Por enquanto, todas são 'pending' então delete é seguro.
+    savePublications: protectedProcedure
+      .input(z.object({
+        listingId: z.number(),
+        accountIds: z.array(z.number().int().positive()).min(1),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select({ id: multiProductListings.id })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.listingId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "Anúncio não encontrado." });
+
+        // Valida que todas as contas pertencem ao usuário (evita inserir
+        // shopee_account_id de outro user via API direta).
+        const ownedAccounts = await sharedDb
+          .select({ id: shopeeAccounts.id })
+          .from(shopeeAccounts)
+          .where(and(
+            eq(shopeeAccounts.userId, ctx.user.id),
+            inArray(shopeeAccounts.id, input.accountIds),
+          ));
+        if (ownedAccounts.length !== input.accountIds.length) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Conta Shopee inválida." });
+        }
+
+        // Delete rows whose account_id não está mais na seleção
+        await sharedDb
+          .delete(shopeeListingPublications)
+          .where(and(
+            eq(shopeeListingPublications.listingId, input.listingId),
+            notInArray(shopeeListingPublications.shopeeAccountId, input.accountIds),
+          ));
+
+        // Insert rows que ainda não existem. UNIQUE(listing_id, account_id)
+        // garante idempotência — INSERT IGNORE seria mais limpo mas Drizzle
+        // não expõe nativamente; ON DUPLICATE KEY UPDATE com no-op tem mesmo
+        // efeito.
+        for (const accountId of input.accountIds) {
+          await sharedDb.execute(sql`
+            INSERT INTO shopee_listing_publications (listing_id, shopee_account_id)
+            VALUES (${input.listingId}, ${accountId})
+            ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP
+          `);
+        }
+
+        const final = await sharedDb
+          .select()
+          .from(shopeeListingPublications)
+          .where(eq(shopeeListingPublications.listingId, input.listingId));
+        return final;
       }),
 
     // Desvincula o item Shopee da listing — uso pra "item orfao" (publicou
