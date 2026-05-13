@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import ThumbGeneratorModal from "./ThumbGeneratorModal";
+import { ZoomableImage } from "./ZoomableImage";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
   SelectTrigger, SelectValue,
@@ -1174,14 +1175,19 @@ function MediaSection({
       <div>
         <Label className="text-[11px] text-muted-foreground">Thumb</Label>
         <div className="flex items-start gap-3 mt-1">
-          <div className="relative w-24 h-24 rounded border border-gray-200 bg-white overflow-hidden flex-shrink-0">
+          <div className="relative w-32 h-32 rounded border border-gray-200 bg-white overflow-hidden flex-shrink-0">
             {effectiveThumbUrl ? (
-              <img src={effectiveThumbUrl} alt="thumb" className="w-full h-full object-cover" />
+              <ZoomableImage
+                src={effectiveThumbUrl}
+                alt="thumb"
+                wrapperClassName="w-full h-full"
+                className="w-full h-full object-cover"
+              />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground">sem thumb</div>
             )}
             {isHerdadoThumb && effectiveThumbUrl && (
-              <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] text-center py-0.5">
+              <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] text-center py-0.5 pointer-events-none">
                 herdado
               </span>
             )}

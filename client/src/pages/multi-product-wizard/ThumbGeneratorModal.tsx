@@ -572,7 +572,7 @@ export default function ThumbGeneratorModal({
                           {allSelected ? "Desmarcar" : "Marcar"} todas
                         </button>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-2 gap-2">
                         {produto.imageUrls.map((url) => {
                           const isSelected = selected.includes(url);
                           return (
@@ -880,7 +880,7 @@ export default function ThumbGeneratorModal({
                         ? `✨ ${generatedUrls.length} variações geradas! Marque as contas embaixo de cada thumb:`
                         : `✨ ${generatedUrls.length} variações geradas! Clique na que quiser usar:`}
                     </p>
-                    <div className={`grid gap-4 ${generatedUrls.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+                    <div className={`grid gap-4 ${generatedUrls.length <= 2 ? "grid-cols-1" : "grid-cols-2"}`}>
                       {generatedUrls.map((url, idx) => {
                         const isSelected = selectedGeneratedIdx === idx;
                         return (
@@ -1085,14 +1085,15 @@ export default function ThumbGeneratorModal({
         </DialogContent>
       </Dialog>
 
-      {/* Modal de zoom */}
+      {/* Modal de zoom — Fase 5.1.E: lightbox grande (90vw × 90vh) com
+          object-contain pra preservar aspect ratio sem cortar nada. */}
       {zoomOpen && (
         <Dialog open={!!zoomOpen} onOpenChange={() => setZoomOpen(null)}>
-          <DialogContent className="max-w-4xl">
+          <DialogContent className="!max-w-[90vw] !w-[90vw] !max-h-[90vh] p-2 sm:p-4 flex items-center justify-center">
             <img
               src={zoomOpen}
               alt="Zoom"
-              className="w-full h-auto rounded"
+              className="max-w-full max-h-[85vh] object-contain rounded"
             />
           </DialogContent>
         </Dialog>
