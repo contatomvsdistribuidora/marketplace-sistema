@@ -11,6 +11,7 @@ import {
   solvePriceByMargin, solvePriceByMinProfit,
   extractQty,
 } from "@/lib/shopee-pricing";
+import { applyPricingAdjustment, describePricingAdjustment } from "./pricingAdjust";
 import { InfoBox } from "@/components/shopee/atoms/InfoBox";
 import type {
   VariationType, WizardStep, VariationOption, VariationGroup,
@@ -80,7 +81,7 @@ import {
   Loader2, Plus, Trash2, Sparkles, Hash, Ruler, Layers,
   Palette, PenLine, ArrowLeft, ArrowRight, Check,
   CheckCircle2, X, PlusCircle, AlertTriangle, TrendingUp,
-  ExternalLink, Settings,
+  ExternalLink, Settings, Store, Star,
 } from "lucide-react";
 
 const VARIATION_TYPES: { type: VariationType; label: string; icon: React.ReactNode; examples: string }[] = [
@@ -235,6 +236,23 @@ export function CombinedWizard({
   // Tabelas de frete pra calculo dinamico (peso cobravel + subsidio Shopee).
   const { data: freightTable } = trpc.settings.getFreightTable.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const { data: subsidyTable } = trpc.settings.getSubsidyTable.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
+
+  // ── Fase 6.1.C: publications + accounts pra render multi-loja no Step C ──
+  // Quando o listing tem >=2 publications, a tabela de variações duplica cada
+  // row por conta e mostra o preço efetivo (com priceMultiplier per-publication
+  // aplicado via applyPricingAdjustment — ESPELHO do backend).
+  // Single-conta (publications.length <= 1): render legacy intocado.
+  const { data: publicationsList } = trpc.multiProduct.listPublications.useQuery(
+    { listingId: multiListingId },
+    { enabled: multiListingId > 0 },
+  );
+  const { data: accountsList } = trpc.shopee.listActiveAccounts.useQuery();
+  const publications = publicationsList ?? [];
+  const isMultiStore = publications.length >= 2;
+  const accountById = useMemo(
+    () => new Map((accountsList ?? []).map((a) => [a.id, a])),
+    [accountsList],
+  );
 
   // ── Hidratacao automatica do BL (Custo + Estoque) ─────────────────────────
   // Custo (R$) vem de average_landed_cost da BL API on-demand. Estoque vem
@@ -2363,13 +2381,31 @@ export function CombinedWizard({
                 </div>
               )}
 
-              {/* ── TABELA UNICA com TODAS as combinacoes (Produto x Opcao) ── */}
+              {/* ── TABELA UNICA com TODAS as combinacoes (Produto x Opcao) ──
+                  Fase 6.1.C: em multi-loja (publications.length >= 2), cada
+                  variação duplica em N linhas (1 por conta). Campos compart-
+                  ilhados (peso/dim/SKU/estoque) usam rowSpan; só Conta + Preço
+                  efetivo + Lucro variam por linha. Legacy intocado.            */}
+              {isMultiStore && (
+                <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-xs text-blue-800">
+                  <Store className="h-3.5 w-3.5" />
+                  <span>
+                    Multi-loja: <b>{publications.length} contas</b>. Cada
+                    variação aparece {publications.length}x com o preço efetivo
+                    por conta. Edite campos compartilhados (peso/dim/SKU/estoque)
+                    uma vez — valem pra todas as contas.
+                  </span>
+                </div>
+              )}
               <div className="overflow-x-auto border border-gray-200 rounded-xl bg-white">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-2 py-2 text-left font-semibold text-gray-600 w-48">Produto</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-600">Variação</th>
+                      {isMultiStore && (
+                        <th className="px-2 py-2 text-left font-semibold text-gray-600">Conta</th>
+                      )}
                       <th className="px-2 py-2 text-left font-semibold text-gray-600">Peso (kg)</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-600">Comp (cm)</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-600">Larg (cm)</th>
@@ -2381,7 +2417,8 @@ export function CombinedWizard({
                     </tr>
                   </thead>
                   <tbody>
-                    {(() => {
+                    {/* Fase 6.1.C: legacy path (single-conta) — bit-for-bit intocado. */}
+                    {!isMultiStore && (() => {
                       const __validPrices = computedCells.map(c => c.pricing.price).filter(p => p > 0);
                       const __maxP = __validPrices.length ? Math.max(...__validPrices) : 0;
                       const __targetMin = __maxP > 0 ? __maxP / 4 : 0;
@@ -2580,6 +2617,318 @@ export function CombinedWizard({
                         );
                       });
                     }); })()}
+
+                    {/* Fase 6.1.C: multi-loja path — N rows × M contas com rowSpan
+                        em campos compartilhados (peso/dim/SKU/estoque) e preço
+                        efetivo por conta (applyPricingAdjustment ESPELHO backend). */}
+                    {isMultiStore && (() => {
+                      const __validPrices = computedCells.map(c => c.pricing.price).filter(p => p > 0);
+                      const __maxP = __validPrices.length ? Math.max(...__validPrices) : 0;
+                      const __targetMin = __maxP > 0 ? __maxP / 4 : 0;
+                      const pubsCount = publications.length;
+                      const listingMultiplier = pricing.marginMultiplier;
+                      const txFeeGlobal = (productIdx: number) =>
+                        parseFloat(pricingPerProduct[productIdx]?.transactionFee ?? "") || 0;
+                      const packagingGlobal = (productIdx: number) =>
+                        parseFloat(pricingPerProduct[productIdx]?.packagingCost ?? "") || 0;
+                      return optionDetailsMatrix.flatMap((row, productIdx) => {
+                        const product = products[productIdx];
+                        if (!product) return [];
+                        const pp = pricingPerProduct[productIdx];
+                        const hasPricingForRow = parseFloat(pp?.unitCost ?? "") > 0 || parseFloat(pp?.batchCost ?? "") > 0;
+                        const productRowCount = row.length * pubsCount;
+                        const txFee = txFeeGlobal(productIdx);
+                        const packaging = packagingGlobal(productIdx);
+                        return row.flatMap((opt, idx) => {
+                          const c = computePricing(opt, idx, productIdx);
+                          const cellLimitError = limitErrorByCell.get(`${productIdx}-${idx}`);
+                          const isSelected = selectedCell?.productIdx === productIdx && selectedCell?.optIdx === idx;
+                          const isFirstInProduct = idx === 0;
+                          const groupBorder = isFirstInProduct && productIdx > 0 ? "border-t-2 border-t-gray-300" : "";
+
+                          // Preço base do cliente — mesma lógica do backend
+                          // (multi-product-publish.ts:646-653).
+                          const manualNum = parseFloat(opt.price as any);
+                          const cellPriceWasManual = Number.isFinite(manualNum) && manualNum > 0;
+                          const clientPrice = cellPriceWasManual
+                            ? manualNum
+                            : (c.price > 0 ? c.price : Number(product.price ?? 0));
+
+                          return publications.map((pub, pubIdx) => {
+                            const isFirstPub = pubIdx === 0;
+                            const isFirstCellInProduct = isFirstInProduct && isFirstPub;
+                            const acc = accountById.get(pub.shopeeAccountId);
+                            const isPrincipal = pub.shopeeAccountId === accountId;
+
+                            const adjustedPrice = applyPricingAdjustment({
+                              clientPrice,
+                              cellPriceWasManual,
+                              listingMultiplier,
+                              publicationMultiplier: pub.priceMultiplier,
+                            });
+                            const adjDesc = describePricingAdjustment({
+                              cellPriceWasManual,
+                              listingMultiplier,
+                              publicationMultiplier: pub.priceMultiplier,
+                            });
+
+                            // Lucro recalculado com preço ajustado da conta.
+                            const { rate: commRate, fixed: commFixed } = shopeeCommission(adjustedPrice);
+                            const platformCost = adjustedPrice * (commRate + txFee / 100) + commFixed + packaging + (c.shipping ?? 0);
+                            const margin = adjustedPrice - c.totalProductCost - platformCost;
+                            const profitPct = adjustedPrice > 0 ? (margin / adjustedPrice) * 100 : 0;
+                            const isNegPub = margin < 0;
+                            const badge = profitBadge(profitPct);
+
+                            const belowMin4x = __targetMin > 0 && adjustedPrice > 0 && adjustedPrice < __targetMin;
+
+                            return (
+                              <tr
+                                key={`${opt.id}-pub${pub.id}`}
+                                onClick={() => setSelectedCell({ productIdx, optIdx: idx })}
+                                className={`border-b border-gray-100 cursor-pointer transition ${
+                                  isSelected
+                                    ? "bg-orange-50 ring-2 ring-orange-300"
+                                    : isNegPub
+                                    ? "bg-red-50"
+                                    : cellLimitError
+                                    ? "bg-amber-50 hover:bg-amber-100/60"
+                                    : isFirstPub
+                                    ? "hover:bg-gray-50/50"
+                                    : "bg-gray-50/30 hover:bg-gray-50/60"
+                                } ${groupBorder}`}
+                              >
+                                {/* Produto: rowSpan = todas as varias × todas as pubs do produto */}
+                                {isFirstCellInProduct ? (
+                                  <td rowSpan={productRowCount} className="px-2 py-2 align-top border-r border-gray-200 bg-gray-50/30">
+                                    <div className="flex items-start gap-2">
+                                      {product.imageUrl && (
+                                        <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                                      )}
+                                      <div className="min-w-0 flex-1">
+                                        <input
+                                          type="text"
+                                          maxLength={30}
+                                          value={productNameOverrides[productIdx] ?? (product.name ?? "").slice(0, 30)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          onChange={(e) => {
+                                            const v = e.target.value.slice(0, 30);
+                                            setProductNameOverrides(prev => ({ ...prev, [productIdx]: v }));
+                                          }}
+                                          className="w-full text-xs font-medium text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-orange-400 focus:outline-none px-0.5 py-0.5"
+                                          title="Editavel - max 30 chars (limite Shopee para nome de variacao 1)"
+                                        />
+                                        {product.sku && <p className="text-[10px] text-gray-500 font-mono mt-0.5">{product.sku}</p>}
+                                      </div>
+                                    </div>
+                                  </td>
+                                ) : null}
+
+                                {/* Variação (label) — rowSpan = pubsCount */}
+                                {isFirstPub ? (
+                                  <td rowSpan={pubsCount} className="px-2 py-1.5 align-top border-r border-gray-100">
+                                    <input
+                                      type="text"
+                                      value={opt.label}
+                                      maxLength={30}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={e => {
+                                        updateOptionLabel(opt.id, e.target.value.slice(0, 30), productIdx);
+                                        if (idx > 0) {
+                                          setManuallyEdited(s => new Set(s).add(opt.id));
+                                          setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
+                                        }
+                                      }}
+                                      className="w-full px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                    />
+                                  </td>
+                                ) : null}
+
+                                {/* Conta — per-row, com badges */}
+                                <td className="px-2 py-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <Store className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                                    <span className="text-xs font-medium text-gray-800 truncate max-w-[140px]" title={acc?.shopName ?? `Conta #${pub.shopeeAccountId}`}>
+                                      {acc?.shopName ?? `Conta #${pub.shopeeAccountId}`}
+                                    </span>
+                                    {isPrincipal && (
+                                      <span
+                                        className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold border border-yellow-300 bg-yellow-50 text-yellow-800"
+                                        title="Conta principal (⭐)"
+                                      >
+                                        <Star className="h-2.5 w-2.5 fill-yellow-400" />
+                                        principal
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* Peso/Comp/Larg/Alt — rowSpan = pubsCount */}
+                                {isFirstPub ? ([
+                                  { field: "weight" as const, ph: c.weight > 0 ? c.weight.toFixed(2) : "0.50", integer: false },
+                                  { field: "length" as const, ph: c.length > 0 ? String(Math.round(c.length)) : "20", integer: true },
+                                  { field: "width"  as const, ph: c.width  > 0 ? String(Math.round(c.width))  : "15", integer: true },
+                                  { field: "height" as const, ph: c.height > 0 ? String(Math.round(c.height)) : "10", integer: true },
+                                ]).map(({ field, ph, integer }) => {
+                                  const fieldError = cellLimitError?.errorsByField[field];
+                                  return (
+                                    <td key={field} rowSpan={pubsCount} className="px-1.5 py-1.5 align-top">
+                                      <input
+                                        type="number"
+                                        min={integer ? "1" : "0"}
+                                        step={integer ? "1" : "0.01"}
+                                        placeholder={ph}
+                                        value={(opt as any)[field]}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onKeyDown={integer ? (e) => { if (e.key === "." || e.key === ",") e.preventDefault(); } : undefined}
+                                        onChange={e => {
+                                          let v = e.target.value;
+                                          if (integer && v !== "") v = String(Math.floor(Number(v) || 0));
+                                          updateDetail(opt.id, field, v, productIdx);
+                                          if (idx > 0) {
+                                            setManuallyEdited(s => new Set(s).add(opt.id));
+                                            setAutoGenerated(s => { const n = new Set(s); n.delete(opt.id); return n; });
+                                          }
+                                        }}
+                                        title={fieldError ?? ""}
+                                        className={`w-16 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
+                                          fieldError ? "border-amber-500 bg-amber-50" : "border-gray-200"
+                                        }`}
+                                      />
+                                    </td>
+                                  );
+                                }) : null}
+
+                                {/* SKU — rowSpan = pubsCount */}
+                                {isFirstPub ? (
+                                  <td rowSpan={pubsCount} className="px-2 py-1.5 align-top">
+                                    <input
+                                      type="text"
+                                      maxLength={64}
+                                      placeholder={product.sku ? `${product.sku}-${idx + 1}` : "SKU"}
+                                      value={opt.sku}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => updateDetail(opt.id, "sku", e.target.value, productIdx)}
+                                      className="w-32 px-1.5 py-1 border border-gray-200 rounded text-xs font-mono focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                    />
+                                  </td>
+                                ) : null}
+
+                                {/* Preço — per-conta. Principal mantém input editável
+                                    (opt.price ou c.price); demais contas mostram
+                                    valor derivado (read-only) + badge do ajuste. */}
+                                <td className="px-2 py-1.5">
+                                  {isPrincipal ? (
+                                    <div className="flex flex-col gap-0.5">
+                                      <input
+                                        type="number"
+                                        min="0.01"
+                                        step="0.01"
+                                        placeholder="0.00"
+                                        value={opt.price || (c.price > 0 ? c.price.toFixed(2) : "")}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => updateDetail(opt.id, "price", e.target.value, productIdx)}
+                                        title={belowMin4x ? `Preco abaixo do minimo Shopee 4x (R$ ${__targetMin.toFixed(2)})` : ""}
+                                        className={`w-20 px-1.5 py-1 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 ${
+                                          isNegPub
+                                            ? "border-red-400"
+                                            : belowMin4x
+                                            ? "border-amber-400 bg-amber-50"
+                                            : "border-gray-200"
+                                        }`}
+                                      />
+                                      {cellPriceWasManual && (
+                                        <span
+                                          className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-50 border border-amber-200 text-amber-800 self-start"
+                                          title="Preço manual — vale pra TODAS as contas (não recebe multiplicador)"
+                                        >
+                                          manual
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col gap-0.5">
+                                      <span
+                                        className={`inline-block w-20 px-1.5 py-1 text-xs font-mono rounded border ${
+                                          isNegPub
+                                            ? "border-red-400 bg-red-50 text-red-800"
+                                            : belowMin4x
+                                            ? "border-amber-400 bg-amber-50 text-amber-900"
+                                            : "border-gray-200 bg-gray-50 text-gray-800"
+                                        }`}
+                                        title={
+                                          cellPriceWasManual
+                                            ? `Preço manual (R$ ${adjustedPrice.toFixed(2)}) — não recebe multiplicador`
+                                            : adjDesc
+                                            ? `R$ ${clientPrice.toFixed(2)} × ${adjDesc.factor.toFixed(4)} = R$ ${adjustedPrice.toFixed(2)}`
+                                            : `R$ ${adjustedPrice.toFixed(2)} (mesmo preço da principal — sem multiplicador na conta)`
+                                        }
+                                      >
+                                        R$ {adjustedPrice.toFixed(2)}
+                                      </span>
+                                      <div className="flex items-center gap-0.5 flex-wrap">
+                                        {cellPriceWasManual ? (
+                                          <span
+                                            className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-50 border border-amber-200 text-amber-800"
+                                            title="Preço manual — não recebe multiplicador"
+                                          >
+                                            manual
+                                          </span>
+                                        ) : adjDesc ? (
+                                          <span
+                                            className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-50 border border-blue-200 text-blue-800"
+                                            title={`Multiplicador efetivo: ${adjDesc.factor.toFixed(4)} (pub ${pub.priceMultiplier}x / listing ${listingMultiplier}x)`}
+                                          >
+                                            ×{adjDesc.factor.toFixed(2)}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* Estoque — rowSpan = pubsCount */}
+                                {isFirstPub ? (
+                                  <td rowSpan={pubsCount} className="px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      placeholder={pricingPerProduct[productIdx]?.globalStock || "0"}
+                                      value={opt.stock}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => updateDetail(opt.id, "stock", e.target.value, productIdx)}
+                                      className="w-16 px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                    />
+                                  </td>
+                                ) : null}
+
+                                {/* Lucro — recalculado com preço ajustado da conta */}
+                                <td className="px-2 py-1.5">
+                                  {hasPricingForRow ? (
+                                    <div
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold cursor-help ${
+                                        isNegPub
+                                          ? "bg-red-100 text-red-700 border border-red-300"
+                                          : `${badge.bg}`
+                                      }`}
+                                      title={
+                                        isNegPub
+                                          ? `PREJUÍZO\nMargem: R$ ${margin.toFixed(2)}\nPreço efetivo: R$ ${adjustedPrice.toFixed(2)}\nCusto: R$ ${c.totalProductCost.toFixed(2)}\nPlataforma: R$ ${platformCost.toFixed(2)}`
+                                          : `Lucro: ${profitPct.toFixed(1)}%\nPreço efetivo: R$ ${adjustedPrice.toFixed(2)}\nMargem: R$ ${margin.toFixed(2)}\nCusto produto: R$ ${c.totalProductCost.toFixed(2)}\nCusto plataforma: R$ ${platformCost.toFixed(2)}\nQtd: ${c.qty}x`
+                                      }
+                                    >
+                                      {isNegPub ? "PREJ." : `${profitPct.toFixed(0)}%`}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-300 text-xs">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        });
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>
