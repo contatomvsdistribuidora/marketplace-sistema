@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download,
-  Copy, Clipboard, Upload,
+  Copy, Clipboard, Upload, Paperclip,
 } from "lucide-react";
 
 type Props = {
@@ -154,6 +154,11 @@ export default function ThumbGeneratorModal({
   const [assignments, setAssignments] = useState<Record<number, number | null>>({});
   const [savingAssignments, setSavingAssignments] = useState(false);
   const [assignResult, setAssignResult] = useState<{ savedIds: number[]; failedIds: number[] } | null>(null);
+  // Origem de cada URL em generatedUrls (Fase 5.1.F). IA é o default; uploads
+  // manuais (anexar/colar) ganham flag pra mostrar badge no card.
+  const [urlOrigins, setUrlOrigins] = useState<Record<string, "ai" | "upload" | "paste">>({});
+  const [uploadingBatch, setUploadingBatch] = useState(false);
+  const batchFileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset states quando modal abre
   useEffect(() => {
@@ -168,6 +173,8 @@ export default function ThumbGeneratorModal({
     setSelectedGeneratedIdx(null);
     setAssignments({});
     setAssignResult(null);
+    setUrlOrigins({});
+    setUploadingBatch(false);
   }, [isOpen, initialThumbUrl, isPublicationBatch, publications?.length]);
 
   // Busca fotos agrupadas por produto
@@ -205,6 +212,10 @@ export default function ThumbGeneratorModal({
         setGeneratedUrls(urls);
         setSelectedGeneratedIdx(0);
         if (urls.length > 0) setGeneratedUrl(urls[0]);
+        // Fase 5.1.F: marca origem 'ai' pras URLs do batch.
+        const origins: Record<string, "ai" | "upload" | "paste"> = {};
+        urls.forEach((u) => { origins[u] = "ai"; });
+        setUrlOrigins(origins);
 
         if (data.errors.length > 0) {
           toast.warning(`${urls.length} thumbs geradas. ${data.errors.length} falharam.`);
@@ -227,6 +238,92 @@ export default function ThumbGeneratorModal({
 
   // Mutation: atribui thumb a uma publication (Fase 5.1.B)
   const updatePublicationMediaMut = trpc.multiProduct.updatePublicationMedia.useMutation();
+  // Mutation: upload manual sem gravar (Fase 5.1.F) — pra anexar/colar no batch
+  const uploadToBucketMut = trpc.multiProduct.uploadThumbToBucket.useMutation();
+
+  /**
+   * Adiciona uma URL nova ao array generatedUrls com origem manual
+   * (anexar/colar). Só usado em mode='publication-batch'.
+   */
+  async function appendManualThumb(
+    contentType: "image/jpeg" | "image/png" | "image/webp",
+    base64Data: string,
+    origin: "upload" | "paste",
+  ) {
+    setUploadingBatch(true);
+    try {
+      const { thumbUrl } = await uploadToBucketMut.mutateAsync({
+        listingId,
+        contentType,
+        base64Data,
+      });
+      setGeneratedUrls((prev) => {
+        const next = [...prev, thumbUrl];
+        return next;
+      });
+      setUrlOrigins((prev) => ({ ...prev, [thumbUrl]: origin }));
+      toast.success(origin === "paste" ? "Imagem colada — atribua às contas." : "Imagem anexada — atribua às contas.");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Falha no upload.");
+    } finally {
+      setUploadingBatch(false);
+    }
+  }
+
+  async function handleAttachFromPCBatch(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Use JPG, PNG ou WEBP.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64Data = dataUrl.split(",")[1];
+      appendManualThumb(
+        file.type as "image/jpeg" | "image/png" | "image/webp",
+        base64Data,
+        "upload",
+      );
+    };
+    reader.onerror = () => toast.error("Erro ao ler arquivo.");
+    reader.readAsDataURL(file);
+  }
+
+  async function handlePasteFromClipboardBatch() {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"));
+        if (!imageType) continue;
+        const blob = await item.getType(imageType);
+        if (blob.size > 5 * 1024 * 1024) {
+          toast.error("Imagem maior que 5MB.");
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64Data = dataUrl.split(",")[1];
+          appendManualThumb(
+            imageType as "image/jpeg" | "image/png" | "image/webp",
+            base64Data,
+            "paste",
+          );
+        };
+        reader.onerror = () => toast.error("Erro ao processar imagem.");
+        reader.readAsDataURL(blob);
+        return;
+      }
+      toast.error("Nenhuma imagem no clipboard. Copie uma imagem primeiro.");
+    } catch (e: any) {
+      console.error("Paste error:", e);
+      toast.error("Falha ao acessar clipboard. Permita acesso e tente de novo.");
+    }
+  }
 
   const generateCollageMutation = trpc.multiProduct.generateCollage.useMutation({
     onSuccess: (data) => {
@@ -860,9 +957,55 @@ export default function ThumbGeneratorModal({
 
               {/* COLUNA 3 — PREVIEW */}
               <div className="space-y-4">
-                <Label className="text-base font-semibold">
-                  🖼️ Preview da thumb
-                </Label>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <Label className="text-base font-semibold">
+                    🖼️ Preview da thumb
+                  </Label>
+                  {/* Fase 5.1.F: anexar/colar entram na mesma grade pra atribuição */}
+                  {isPublicationBatch && (
+                    <div className="flex gap-1.5">
+                      <input
+                        ref={batchFileInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleAttachFromPCBatch(f);
+                          e.target.value = "";
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => batchFileInputRef.current?.click()}
+                        disabled={uploadingBatch || isGenerating}
+                        className="h-7 text-xs"
+                        title="Anexa imagem do PC pra atribuir às contas"
+                      >
+                        {uploadingBatch
+                          ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          : <Paperclip className="h-3 w-3 mr-1" />}
+                        Anexar
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handlePasteFromClipboardBatch}
+                        disabled={uploadingBatch || isGenerating}
+                        className="h-7 text-xs"
+                        title="Cola imagem do clipboard (Ctrl+V copiou antes)"
+                      >
+                        {uploadingBatch
+                          ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          : <Clipboard className="h-3 w-3 mr-1" />}
+                        Colar
+                      </Button>
+                    </div>
+                  )}
+                </div>
                 {isGenerating && (
                   <div className="flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg min-h-[400px]">
                     <Loader2 className="h-10 w-10 animate-spin text-purple-600 mb-3" />
@@ -897,8 +1040,14 @@ export default function ThumbGeneratorModal({
                               }}
                             >
                               <img src={url} alt={`Variação ${idx + 1}`} className="w-full" />
-                              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded font-semibold">
-                                Variante {String.fromCharCode(65 + idx)}
+                              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded font-semibold flex items-center gap-1.5">
+                                {urlOrigins[url] === "upload" ? (
+                                  <><Paperclip className="h-3 w-3" /> Anexada</>
+                                ) : urlOrigins[url] === "paste" ? (
+                                  <><Clipboard className="h-3 w-3" /> Colada</>
+                                ) : (
+                                  <><Sparkles className="h-3 w-3" /> Var {String.fromCharCode(65 + idx)}</>
+                                )}
                               </div>
                               {isSelected && !isPublicationBatch && (
                                 <div className="absolute top-2 right-2 bg-orange-500 text-white rounded-full p-1.5 shadow">

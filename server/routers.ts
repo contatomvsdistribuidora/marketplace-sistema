@@ -4805,6 +4805,49 @@ export const appRouter = router({
         return { thumbUrl: stored.url };
       }),
 
+    // Upload de thumb pro R2 SEM gravar em listing nem publication (Fase 5.1.F).
+    // Usado quando operador anexa/cola imagens no modal multi-store batch e
+    // depois atribui manualmente a publications via checkbox. Retorna só a URL
+    // pra appendar em generatedUrls do modal — atribuição final usa
+    // updatePublicationMedia em série.
+    uploadThumbToBucket: protectedProcedure
+      .input(z.object({
+        listingId: z.number().int().positive(),
+        contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+        base64Data: z.string().min(100),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const sizeBytes = (input.base64Data.length * 3) / 4;
+        if (sizeBytes > 5 * 1024 * 1024) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Imagem maior que 5MB. Reduza antes de enviar.",
+          });
+        }
+
+        // Ownership: listing deve ser do user (evita upload no namespace de outro)
+        const [listing] = await sharedDb
+          .select({ id: multiProductListings.id })
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.listingId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Listing não encontrado." });
+        }
+
+        const buf = Buffer.from(input.base64Data, "base64");
+        const ext = input.contentType === "image/jpeg" ? "jpg"
+                  : input.contentType === "image/png" ? "png"
+                  : "webp";
+        const key = `multi-product-thumbs/${ctx.user.id}/${input.listingId}-batch-${Date.now()}.${ext}`;
+        const stored = await storagePut(key, buf, input.contentType);
+
+        return { thumbUrl: stored.url };
+      }),
+
     // Desvincula o item Shopee da listing — uso pra "item orfao" (publicou
     // mas a listing foi resetada/regenerada e o itemId antigo nao bate mais).
     // Reseta status pra "draft" se estava "published"/"error" pra permitir

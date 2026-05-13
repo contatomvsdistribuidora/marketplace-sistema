@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
   SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Loader2, Image as ImageIcon, Video, Package, Sparkles, Play, X, Film, Upload, Store, Star, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -935,6 +936,7 @@ function PerAccountMediaCard({
   );
   const utils = trpc.useUtils();
   const [thumbBatchModalOpen, setThumbBatchModalOpen] = useState(false);
+  const [batchUploadOpen, setBatchUploadOpen] = useState(false);
 
   const accounts = accountsQuery.data ?? [];
   const publications = publicationsQuery.data ?? [];
@@ -969,17 +971,30 @@ function PerAccountMediaCard({
               Shopee penaliza thumbs idênticas entre lojas — varie pelo menos um pouco.
             </CardDescription>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setThumbBatchModalOpen(true)}
-            disabled={isLoading || publications.length === 0}
-            className="h-8 gap-1 flex-shrink-0"
-            title="Abre o editor IA completo: gera N variantes e atribui cada uma a uma conta"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            Editor completo
-          </Button>
+          <div className="flex flex-col gap-1.5 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBatchUploadOpen(true)}
+              disabled={isLoading || publications.length === 0}
+              className="h-8 gap-1"
+              title="Anexa ou cola 1 imagem e atribui pra várias contas de uma vez"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Anexar p/ várias
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setThumbBatchModalOpen(true)}
+              disabled={isLoading || publications.length === 0}
+              className="h-8 gap-1"
+              title="Abre o editor IA completo: gera N variantes e atribui cada uma a uma conta"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Editor completo
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -1029,7 +1044,272 @@ function PerAccountMediaCard({
         publications={thumbBatchPublications}
         onPublicationAssignmentsSaved={onSaved}
       />
+
+      <BatchThumbUploadModal
+        listingId={listing.id}
+        isOpen={batchUploadOpen}
+        onClose={() => setBatchUploadOpen(false)}
+        publications={thumbBatchPublications}
+        onSaved={onSaved}
+      />
     </Card>
+  );
+}
+
+/**
+ * Sub-modal pra anexar/colar 1 imagem e atribuir a múltiplas contas
+ * simultaneamente (Fase 5.1.F). Pipeline: upload R2 1× → loop em série
+ * updatePublicationMedia preservando customVideoId existente.
+ */
+function BatchThumbUploadModal({
+  listingId,
+  isOpen,
+  onClose,
+  publications,
+  onSaved,
+}: {
+  listingId: number;
+  isOpen: boolean;
+  onClose: () => void;
+  publications: Array<{
+    id: number;
+    label: string;
+    isPrincipal: boolean;
+    customVideoId: number | null;
+  }>;
+  onSaved: () => void;
+}) {
+  const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [selectedPubIds, setSelectedPubIds] = useState<Set<number>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Reset state ao abrir
+  useEffect(() => {
+    if (!isOpen) return;
+    setUploadedUrl(null);
+    setSelectedPubIds(new Set(publications.map((p) => p.id))); // default: todas marcadas
+    setSaving(false);
+  }, [isOpen, publications]);
+
+  const uploadMut = trpc.multiProduct.uploadThumbToBucket.useMutation();
+  const updateMediaMut = trpc.multiProduct.updatePublicationMedia.useMutation();
+
+  async function doUpload(
+    contentType: "image/jpeg" | "image/png" | "image/webp",
+    base64Data: string,
+  ) {
+    setUploading(true);
+    try {
+      const { thumbUrl } = await uploadMut.mutateAsync({ listingId, contentType, base64Data });
+      setUploadedUrl(thumbUrl);
+      toast.success("Imagem pronta — marque as contas e salve.");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Falha no upload.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleFile(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Use JPG, PNG ou WEBP.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64Data = dataUrl.split(",")[1];
+      doUpload(file.type as "image/jpeg" | "image/png" | "image/webp", base64Data);
+    };
+    reader.onerror = () => toast.error("Erro ao ler arquivo.");
+    reader.readAsDataURL(file);
+  }
+
+  async function handlePaste() {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"));
+        if (!imageType) continue;
+        const blob = await item.getType(imageType);
+        if (blob.size > 5 * 1024 * 1024) {
+          toast.error("Imagem maior que 5MB.");
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64Data = dataUrl.split(",")[1];
+          doUpload(imageType as "image/jpeg" | "image/png" | "image/webp", base64Data);
+        };
+        reader.onerror = () => toast.error("Erro ao processar imagem.");
+        reader.readAsDataURL(blob);
+        return;
+      }
+      toast.error("Nenhuma imagem no clipboard.");
+    } catch (e: any) {
+      toast.error("Falha ao acessar clipboard. Permita acesso e tente de novo.");
+    }
+  }
+
+  async function handleSave() {
+    if (!uploadedUrl) {
+      toast.error("Anexe ou cole uma imagem primeiro.");
+      return;
+    }
+    if (selectedPubIds.size === 0) {
+      toast.error("Marque pelo menos 1 conta.");
+      return;
+    }
+    setSaving(true);
+    let ok = 0;
+    let fail = 0;
+    for (const pub of publications) {
+      if (!selectedPubIds.has(pub.id)) continue;
+      try {
+        await updateMediaMut.mutateAsync({
+          publicationId: pub.id,
+          customThumbUrl: uploadedUrl,
+          customVideoId: pub.customVideoId,
+        });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setSaving(false);
+    if (fail === 0) {
+      toast.success(`Thumb aplicada em ${ok} conta(s).`);
+      onSaved();
+      onClose();
+    } else {
+      toast.warning(`${ok} salvas, ${fail} falharam.`);
+      onSaved();
+    }
+  }
+
+  function togglePub(id: number, checked: boolean) {
+    setSelectedPubIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(o) => !o && !saving && onClose()}>
+      <DialogContent className="!max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Upload className="h-5 w-5" />
+            Anexar imagem pra várias contas
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Botões anexar/colar — sempre disponíveis, troca imagem */}
+          <div className="flex gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || saving}
+              className="flex-1"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+              Anexar do PC
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePaste}
+              disabled={uploading || saving}
+              className="flex-1"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+              Colar imagem
+            </Button>
+          </div>
+
+          {/* Preview */}
+          {uploadedUrl ? (
+            <div className="border rounded-lg overflow-hidden">
+              <ZoomableImage
+                src={uploadedUrl}
+                alt="Preview"
+                wrapperClassName="w-full"
+                className="w-full max-h-64 object-contain bg-gray-50"
+              />
+            </div>
+          ) : (
+            <div className="border-2 border-dashed rounded-lg p-6 text-center text-sm text-muted-foreground">
+              Anexe ou cole uma imagem pra ver o preview aqui.
+            </div>
+          )}
+
+          {/* Checkboxes de contas */}
+          {publications.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Aplicar nas contas:</Label>
+              <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                {publications.map((pub) => (
+                  <label
+                    key={pub.id}
+                    className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-muted"
+                  >
+                    <Checkbox
+                      checked={selectedPubIds.has(pub.id)}
+                      disabled={saving}
+                      onCheckedChange={(v) => togglePub(pub.id, v === true)}
+                    />
+                    <span className="text-sm flex-1 truncate">{pub.label}</span>
+                    {pub.isPrincipal && (
+                      <Badge variant="outline" className="text-[9px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
+                        <Star className="h-3 w-3 fill-yellow-400" />
+                        principal
+                      </Badge>
+                    )}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={!uploadedUrl || selectedPubIds.size === 0 || saving}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            {saving
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
+              : <>Aplicar em {selectedPubIds.size} conta(s)</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
