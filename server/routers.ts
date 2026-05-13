@@ -5597,6 +5597,16 @@ export const appRouter = router({
           error?: string;
         }> = [];
 
+        // Fase 6.2: identifica a publication PRINCIPAL (a que aponta pra
+        // listing.shopeeAccountId) pra passar seu priceMultiplier como
+        // denominador do ajuste das demais contas. Se não houver row pra
+        // principal nas publications (raro — auto-seed faz isso), passa
+        // null e o server cai no fallback pricingPerProduct[i] / wsGlobal.
+        const principalPub = publications.find(
+          (p) => p.shopeeAccountId === listing.shopeeAccountId,
+        );
+        const principalMultRaw = principalPub?.priceMultiplier ?? null;
+
         for (const pub of filtered) {
           try {
             const r = await multiProductPublish.publishMultiProductListing(
@@ -5615,10 +5625,12 @@ export const appRouter = router({
                 variationNameSuffixVar1: pub.variationNameSuffixVar1,
                 variationNamePrefixVar2: pub.variationNamePrefixVar2,
                 variationNameSuffixVar2: pub.variationNameSuffixVar2,
-                // Fase 6.1.B: pricing override por conta (multiplier ativo,
-                // minMargin inerte — placeholder pra futuro motor server)
+                // Fase 6.1.B + 6.2: pricing override per-conta. minMargin
+                // AGORA ATIVO (motor server). Denominador do mult é o da
+                // PRINCIPAL (passado em principalPriceMultiplier).
                 priceMultiplier: pub.priceMultiplier,
                 minMarginPct: pub.minMarginPct,
+                principalPriceMultiplier: principalMultRaw,
               },
             );
             results.push({

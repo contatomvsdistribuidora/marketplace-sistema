@@ -10,7 +10,7 @@
  * Fase H1.1 — sem suporte a vídeo (só imagens).
  */
 
-import { db as sharedDb } from "./db";
+import { db as sharedDb, getSetting } from "./db";
 import { eq } from "drizzle-orm";
 import {
   multiProductListings,
@@ -25,6 +25,15 @@ import * as shopeeVideo from "./shopee-video";
 import { getValidToken } from "./shopee";
 import { fetchContentDiagnosis } from "./shopee/content-diagnosis";
 import { getRichOptionLabels } from "./lib/wizard-labels";
+// Fase 6.2: motor de pricing server. Mesmas funções que o client usa.
+import {
+  shopeeCommission, solvePriceByMargin, extractQty,
+} from "@shared/shopee-pricing";
+import {
+  calculateSellerFreightCost, DEFAULT_FREIGHT_TABLE, DEFAULT_SUBSIDY_TABLE,
+  type FreightTier, type SubsidyTier,
+} from "@shared/freight-calc";
+import { scaleDimsLargestFirst } from "@shared/dim-scale";
 
 export class PublishMultiProductError extends Error {
   constructor(public code: string, message: string) {
@@ -41,6 +50,13 @@ type ResolvedItem = {
   price: number;
   stock: number;
   imageUrl: string | null;
+  // Fase 6.2: peso/dim necessários no fallback do cálculo de frete dinâmico
+  // (quando cellOpt não tem o campo preenchido). Loaded de productCache /
+  // shopeeProducts no momento do resolve.
+  weight: number | null;
+  dimensionLength: number | null;
+  dimensionWidth: number | null;
+  dimensionHeight: number | null;
 };
 
 /**
@@ -94,30 +110,65 @@ export type PublishMultiProductTarget = {
   variationNameSuffixVar1?: string | null;
   variationNamePrefixVar2?: string | null;
   variationNameSuffixVar2?: string | null;
-  // Fase 6.1.B: pricing override por conta. priceMultiplier ativo;
-  // minMarginPct INERTE nesta fase (salvo mas não aplicado — exige motor
-  // de pricing server-side com custo + comissão + frete, fase futura).
+  // Fase 6.1.B: pricing override por conta (priceMultiplier ativo).
+  // Fase 6.2: minMarginPct AGORA ATIVO (motor de pricing server). Piso
+  // efetivo = MAX(pricingPerProduct[i].minMarginPct, pub.minMarginPct).
   priceMultiplier?: string | null;
   minMarginPct?: string | null;
+  // Fase 6.2: multiplier efetivo da CONTA PRINCIPAL (usado como denominador
+  // do ajuste). Resolvido pelo caller via resolveEffectiveMultiplier(principal,
+  // productIdx, ws). Quando ausente: caller é single-conta legacy ou principal
+  // não tem override próprio — denominador cai pra ws.pricingPerProduct[i]
+  // .marginMultiplier ?? ws.pricing.marginMultiplier.
+  principalPriceMultiplier?: string | null;
 };
 
 /**
- * Fase 6.1.B: ajuste de pricing per-publication (Caminho 1 — postprocessing).
+ * Fase 6.2: resolve o multiplier "efetivo" de uma publication pra um produto.
+ * Fallback chain: pub.priceMultiplier → ws.pricingPerProduct[i].marginMultiplier
+ * → ws.pricing.marginMultiplier.
  *
- * Cliente calcula o preço base com `ws.pricing.marginMultiplier` (default 2.5).
- * Pra outra conta, operador define `publication.priceMultiplier` distinto.
- * Aplicamos um fator de ajuste em cima do preço já calculado pelo cliente:
+ * Retorna string|undefined. Usado tanto pro numerador (mult da pub atual) como
+ * pro denominador (mult da pub principal).
+ */
+function resolveEffectiveMultiplier(
+  publicationMultiplier: string | number | null | undefined,
+  productMultiplier: string | number | null | undefined,
+  globalMultiplier: string | number | null | undefined,
+): string | undefined {
+  const norm = (v: string | number | null | undefined): string | undefined => {
+    if (v == null) return undefined;
+    const s = typeof v === "string" ? v.trim() : String(v);
+    if (s === "" || s === "0") return undefined;
+    const n = Number(s);
+    if (!Number.isFinite(n) || n <= 0) return undefined;
+    return s;
+  };
+  return norm(publicationMultiplier) ?? norm(productMultiplier) ?? norm(globalMultiplier);
+}
+
+/**
+ * Fase 6.1.B + 6.2: ajuste de pricing per-publication (Caminho 1 — post-
+ * processing).
  *
- *   factor = publicationMultiplier / listingMultiplier
- *   finalPrice = clientPrice × factor
+ *   factor = publicationMultiplier / denominatorMultiplier
+ *   finalPrice = max(clientPrice × factor, 1)
  *
- * Casos onde NÃO aplica (fator = 1):
- *  - `pub.priceMultiplier` null/vazio (sem override)
- *  - `cellPriceWasManual` true (operador digitou cellOpt.price no Step C —
- *    preço exato deve ser respeitado, não ajustado)
+ * Fase 6.2 mudou a semântica do parâmetro `listingMultiplier`:
+ *  - ANTES (6.1.B): era ws.pricing.marginMultiplier (default 2.5) — global
+ *    do wizard. Bug: razão entre contas ficava enviesada pelo default.
+ *  - AGORA (6.2): é o multiplier EFETIVO da CONTA PRINCIPAL (resolvido
+ *    via resolveEffectiveMultiplier antes de chamar). O parâmetro
+ *    permanece com o mesmo nome pra não quebrar o helper espelho do
+ *    client (pricingAdjust.ts).
+ *
+ * Casos onde NÃO aplica (retorna clientPrice):
+ *  - `pub.priceMultiplier` null/vazio (sem override per-conta)
+ *  - `cellPriceWasManual` true (manual sempre vence)
  *  - `listingMultiplier` inválido (NaN, 0)
  *
- * minMarginPct: inerte nesta fase. Salvo no banco, aviso na UI, sem efeito.
+ * Margem mínima: aplicada SEPARADAMENTE em applyMinMarginFloor, depois
+ * de applyPricingAdjustment.
  */
 function applyPricingAdjustment(params: {
   clientPrice: number;
@@ -162,6 +213,94 @@ function applyPricingAdjustment(params: {
     `clientPrice=${clientPrice.toFixed(2)} × (pubMult=${pubMult} / listingMult=${listingMult}) = factor=${factor.toFixed(4)} → final=${adjusted.toFixed(2)}`,
   );
   return adjusted;
+}
+
+/**
+ * Fase 6.2: motor de margem mínima server-side.
+ *
+ * Aplicado DEPOIS de applyPricingAdjustment. Recomputa a margem com base no
+ * preço ajustado e nos custos da variação (produto + embalagem + frete +
+ * comissão + taxa). Se margem < floor → faz BUMP via solvePriceByMargin
+ * (mesma função do client, agora em shared/shopee-pricing.ts).
+ *
+ * floor = MAX(productMinMargin, publicationMinMargin) — a maior vence.
+ *
+ * Casos onde NÃO aplica (no-op, retorna adjustedPrice):
+ *  - cellPriceWasManual (manual sempre vence, mesmo abaixo do floor)
+ *  - pricingMode === "blPrice" (preço é o do BL × qty, sem motor de margem)
+ *  - totalProductCost <= 0 (margem incalculável)
+ *  - floor <= 0 (nem produto nem conta exigem piso)
+ *
+ * Caso especial: solvePriceByMargin pode retornar 0 (denom <= 0 — floor
+ * matematicamente inviável dado custos + comissão Shopee). Sinaliza
+ * via `infeasible: true` pra caller falhar essa publication específica
+ * com erro claro (MIN_MARGIN_INFEASIBLE).
+ */
+function applyMinMarginFloor(params: {
+  adjustedPrice: number;
+  cellPriceWasManual: boolean;
+  pricingMode: string | undefined;
+  totalProductCost: number;
+  packaging: number;
+  shipping: number;
+  txFee: number;
+  productMinMargin: string | number | null | undefined;
+  publicationMinMargin: string | number | null | undefined;
+  logContext: { publicationId: number; cellKey: string };
+}): { price: number; floored: boolean; infeasible: boolean; floorPct: number } {
+  const {
+    adjustedPrice, cellPriceWasManual, pricingMode, totalProductCost,
+    packaging, shipping, txFee, productMinMargin, publicationMinMargin, logContext,
+  } = params;
+
+  if (cellPriceWasManual) {
+    return { price: adjustedPrice, floored: false, infeasible: false, floorPct: 0 };
+  }
+  if (pricingMode === "blPrice") {
+    return { price: adjustedPrice, floored: false, infeasible: false, floorPct: 0 };
+  }
+  if (totalProductCost <= 0) {
+    return { price: adjustedPrice, floored: false, infeasible: false, floorPct: 0 };
+  }
+
+  const pmm = Number(productMinMargin ?? 0);
+  const pubmm = Number(publicationMinMargin ?? 0);
+  const productFloor = Number.isFinite(pmm) && pmm > 0 ? pmm : 0;
+  const pubFloor = Number.isFinite(pubmm) && pubmm > 0 ? pubmm : 0;
+  const floor = Math.max(productFloor, pubFloor);
+
+  if (floor <= 0) {
+    return { price: adjustedPrice, floored: false, infeasible: false, floorPct: 0 };
+  }
+
+  // Margem atual com o preço ajustado.
+  const { rate, fixed } = shopeeCommission(adjustedPrice);
+  const platformCost = adjustedPrice * (rate + txFee / 100) + fixed + packaging + shipping;
+  const curMargin = adjustedPrice > 0
+    ? ((adjustedPrice - totalProductCost - platformCost) / adjustedPrice) * 100
+    : -Infinity;
+
+  if (curMargin >= floor) {
+    return { price: adjustedPrice, floored: false, infeasible: false, floorPct: floor };
+  }
+
+  const bumped = solvePriceByMargin(totalProductCost, packaging, shipping, txFee, floor);
+  if (!Number.isFinite(bumped) || bumped <= 0) {
+    console.warn(
+      `[min-margin] pub=${logContext.publicationId} cell=${logContext.cellKey}: ` +
+      `INFEASIBLE — solvePriceByMargin retornou ${bumped} (floor=${floor}% incompatível com custos)`,
+    );
+    return { price: adjustedPrice, floored: false, infeasible: true, floorPct: floor };
+  }
+  if (bumped <= adjustedPrice) {
+    return { price: adjustedPrice, floored: false, infeasible: false, floorPct: floor };
+  }
+
+  console.log(
+    `[min-margin] pub=${logContext.publicationId} cell=${logContext.cellKey}: ` +
+    `FLOORED ${adjustedPrice.toFixed(2)} → ${bumped.toFixed(2)} (curMargin=${curMargin.toFixed(1)}% < floor=${floor}%)`,
+  );
+  return { price: bumped, floored: true, infeasible: false, floorPct: floor };
 }
 
 /**
@@ -304,6 +443,13 @@ export async function publishMultiProductListing(
             price: Number(item.customPrice ?? p.mainPrice ?? 0),
             stock: Number(p.totalStock ?? 0),
             imageUrl: p.imageUrl ?? null,
+            // Fase 6.2: peso como fallback no calc de frete server.
+            // productCache (BL) NÃO tem dims — fallback null força cellOpt
+            // (Step C) como única fonte de dim pra produtos BL.
+            weight: p.weight != null && p.weight !== "" ? Number(p.weight) : null,
+            dimensionLength: null,
+            dimensionWidth: null,
+            dimensionHeight: null,
           });
         }
       } else {
@@ -321,6 +467,10 @@ export async function publishMultiProductListing(
             price: Number(item.customPrice ?? p.price ?? 0),
             stock: Number(p.stock ?? 0),
             imageUrl: p.imageUrl ?? null,
+            weight: p.weight != null && p.weight !== "" ? Number(p.weight) : null,
+            dimensionLength: p.dimensionLength != null && p.dimensionLength !== "" ? Number(p.dimensionLength) : null,
+            dimensionWidth: p.dimensionWidth != null && p.dimensionWidth !== "" ? Number(p.dimensionWidth) : null,
+            dimensionHeight: p.dimensionHeight != null && p.dimensionHeight !== "" ? Number(p.dimensionHeight) : null,
           });
         }
       }
@@ -627,12 +777,76 @@ export async function publishMultiProductListing(
     const models: shopeePublish.KitVariation["models"] = [];
     let minPrice = Infinity;
 
-    // Fase 6.1.B: multiplicador global do listing vem do wizardStateJson.
-    // ws.pricing.marginMultiplier é string (default "2.5" no client).
-    const listingMultiplier: string | undefined = ws?.pricing?.marginMultiplier;
+    // Fase 6.2: motor de pricing server. Carrega tabelas de frete + subsídio
+    // do user (mesma fonte que getFreightTable/getSubsidyTable em routers.ts).
+    // Só carrega quando targetPublication != null — single-conta legacy
+    // continua sendo pricing 100% no client (NO-OP no server).
+    let freightTable: FreightTier[] = DEFAULT_FREIGHT_TABLE;
+    let subsidyTable: SubsidyTier[] = DEFAULT_SUBSIDY_TABLE;
+    if (targetPublication) {
+      try {
+        const rawFreight = await getSetting(userId, "freight_table");
+        if (rawFreight) {
+          const parsed = JSON.parse(rawFreight);
+          if (Array.isArray(parsed) && parsed.every((t: any) => typeof t?.maxWeight === "number" && typeof t?.cost === "number")) {
+            freightTable = parsed as FreightTier[];
+          }
+        }
+      } catch { /* fallback DEFAULT */ }
+      try {
+        const rawSubsidy = await getSetting(userId, "subsidy_table");
+        if (rawSubsidy) {
+          const parsed = JSON.parse(rawSubsidy);
+          if (Array.isArray(parsed) && parsed.every((t: any) => (typeof t?.maxPrice === "number" || t?.maxPrice === null) && typeof t?.subsidy === "number")) {
+            // JSON serializa Infinity como null — restaura.
+            subsidyTable = parsed.map((t: any) => ({
+              maxPrice: t.maxPrice === null ? Infinity : t.maxPrice,
+              subsidy: t.subsidy,
+            })) as SubsidyTier[];
+          }
+        }
+      } catch { /* fallback DEFAULT */ }
+    }
+
+    const wsPricingPerProduct: any[] = Array.isArray(ws?.pricingPerProduct) ? ws.pricingPerProduct : [];
+    const wsPricingGlobal = ws?.pricing ?? {};
+    const wsPricingMode: string | undefined = ws?.pricingMode;
 
     for (let productIdx = 0; productIdx < resolved.length; productIdx++) {
       const product = resolved[productIdx];
+      // Fase 6.2: dados de custo do produto pra recompute server-side.
+      const pp = wsPricingPerProduct[productIdx] ?? {};
+      const productMargMult = pp.marginMultiplier ?? wsPricingGlobal.marginMultiplier;
+      const productMinMargin = pp.minMarginPct;
+      const packaging = parseFloat(pp.packagingCost ?? "") || 0;
+      const txFee = parseFloat(pp.transactionFee ?? "") || 0;
+      const userShippingOverride = parseFloat(pp.shippingCost ?? "") || 0;
+      const unitCost = (() => {
+        const batch = parseFloat(pp.batchCost ?? "");
+        const baseQty = Math.max(parseFloat(pp.baseProductQty ?? "") || 1, 0.001);
+        if (Number.isFinite(batch) && batch > 0) return batch / baseQty;
+        const uc = parseFloat(pp.unitCost ?? "") || 0;
+        return uc / baseQty;
+      })();
+
+      // Fase 6.2: denominador (mult da PRINCIPAL) e numerador (mult desta pub).
+      // Chain: pub.priceMultiplier → pp.marginMultiplier → ws.pricing.marginMultiplier.
+      // Quando targetPublication ausente (legacy) → ambos undefined, applyPricingAdjustment
+      // já trata e retorna clientPrice bit-for-bit.
+      const principalMult = targetPublication
+        ? resolveEffectiveMultiplier(
+            targetPublication.principalPriceMultiplier,
+            productMargMult,
+            wsPricingGlobal.marginMultiplier,
+          )
+        : undefined;
+      const publicationMult = targetPublication
+        ? resolveEffectiveMultiplier(
+            targetPublication.priceMultiplier,
+            productMargMult,
+            wsPricingGlobal.marginMultiplier,
+          )
+        : undefined;
 
       if (hasOptions) {
         for (let optIdx = 0; optIdx < optionLabels.length; optIdx++) {
@@ -652,15 +866,68 @@ export async function publishMultiProductListing(
             price = Number(product.price ?? 0);
           }
 
-          // Fase 6.1.B: ajusta pra multiplier per-publication (postprocessing)
+          // Fase 6.1.B + 6.2: ajusta pra multiplier per-publication.
+          // Denominador agora é o mult da CONTA PRINCIPAL (corrige razão
+          // entre contas — bug 6.1.B). Single-conta legacy: NO-OP.
           if (targetPublication) {
             price = applyPricingAdjustment({
               clientPrice: price,
               cellPriceWasManual,
-              listingMultiplier,
-              publicationMultiplier: targetPublication.priceMultiplier,
+              listingMultiplier: principalMult,
+              publicationMultiplier: publicationMult,
               logContext: { publicationId: targetPublication.id, cellKey },
             });
+          }
+
+          // Fase 6.2: piso de margem mínima (per-product MAX per-account).
+          // Aplicado SÓ no caminho multi-loja — legacy single-conta continua
+          // sendo pricing 100% no client (bit-for-bit).
+          if (targetPublication) {
+            const qty = extractQty(cellOpt?.label ?? optionLabels[optIdx] ?? "1");
+            const totalProductCost = unitCost * qty;
+            // Frete: override do operador (campo Frete no Step C) tem prioridade.
+            // Senão: cálculo dinâmico com peso + dim escalada por qty + tabelas.
+            let shippingForMargin = userShippingOverride;
+            if (shippingForMargin <= 0) {
+              const baseW = parseFloat(cellOpt?.weight ?? "") || Number(product.weight ?? "") || 0;
+              const baseL0 = parseFloat(cellOpt?.length ?? "") || Number(product.dimensionLength ?? "") || 0;
+              const baseW0 = parseFloat(cellOpt?.width ?? "") || Number(product.dimensionWidth ?? "") || 0;
+              const baseH0 = parseFloat(cellOpt?.height ?? "") || Number(product.dimensionHeight ?? "") || 0;
+              // Tipo "quantidade" escala dim por qty; demais tipos não.
+              const isQty = ws?.selectedType === "quantidade";
+              const baseProductQty = Math.max(parseFloat(pp.baseProductQty ?? "") || 1, 0.001);
+              const dimRatio = isQty ? qty / baseProductQty : 1;
+              const scaled = scaleDimsLargestFirst(baseL0, baseW0, baseH0, dimRatio);
+              const wKg = isQty ? baseW * dimRatio : baseW;
+              if (wKg > 0 && scaled.length > 0 && scaled.width > 0 && scaled.height > 0) {
+                const calc = calculateSellerFreightCost(
+                  wKg, scaled.length, scaled.width, scaled.height,
+                  price, freightTable, subsidyTable,
+                );
+                shippingForMargin = calc.sellerCost;
+              }
+            }
+            const minMarginResult = applyMinMarginFloor({
+              adjustedPrice: price,
+              cellPriceWasManual,
+              pricingMode: wsPricingMode,
+              totalProductCost,
+              packaging,
+              shipping: shippingForMargin,
+              txFee,
+              productMinMargin,
+              publicationMinMargin: targetPublication.minMarginPct,
+              logContext: { publicationId: targetPublication.id, cellKey },
+            });
+            if (minMarginResult.infeasible) {
+              throw new PublishMultiProductError(
+                "MIN_MARGIN_INFEASIBLE",
+                `Margem mínima de ${minMarginResult.floorPct}% inviável pra variação ` +
+                `${cellKey} (custos + comissão Shopee não permitem atingir esse piso). ` +
+                `Reduza o piso pra essa conta ou revise custos.`,
+              );
+            }
+            price = minMarginResult.price;
           }
 
           const stock = cellOpt?.stock != null && cellOpt.stock !== ""
@@ -681,16 +948,48 @@ export async function publishMultiProductListing(
         }
       } else {
         let price = Number(product.price ?? 0);
-        // Fase 6.1.B: aplica ajuste no caso single-variation também.
+        // Fase 6.1.B + 6.2: aplica ajuste no caso single-variation também.
         // cellPriceWasManual=false aqui — não há override manual sem hasOptions.
         if (targetPublication) {
           price = applyPricingAdjustment({
             clientPrice: price,
             cellPriceWasManual: false,
-            listingMultiplier,
-            publicationMultiplier: targetPublication.priceMultiplier,
+            listingMultiplier: principalMult,
+            publicationMultiplier: publicationMult,
             logContext: { publicationId: targetPublication.id, cellKey: `${productIdx}-novars` },
           });
+          // Sem variações: qty=1, dims do produto, sem escala.
+          const baseW = Number(product.weight ?? "") || 0;
+          const baseL0 = Number(product.dimensionLength ?? "") || 0;
+          const baseW0 = Number(product.dimensionWidth ?? "") || 0;
+          const baseH0 = Number(product.dimensionHeight ?? "") || 0;
+          let shippingForMargin = userShippingOverride;
+          if (shippingForMargin <= 0 && baseW > 0 && baseL0 > 0 && baseW0 > 0 && baseH0 > 0) {
+            const calc = calculateSellerFreightCost(
+              baseW, baseL0, baseW0, baseH0, price, freightTable, subsidyTable,
+            );
+            shippingForMargin = calc.sellerCost;
+          }
+          const minMarginResult = applyMinMarginFloor({
+            adjustedPrice: price,
+            cellPriceWasManual: false,
+            pricingMode: wsPricingMode,
+            totalProductCost: unitCost, // qty=1 sem variações
+            packaging,
+            shipping: shippingForMargin,
+            txFee,
+            productMinMargin,
+            publicationMinMargin: targetPublication.minMarginPct,
+            logContext: { publicationId: targetPublication.id, cellKey: `${productIdx}-novars` },
+          });
+          if (minMarginResult.infeasible) {
+            throw new PublishMultiProductError(
+              "MIN_MARGIN_INFEASIBLE",
+              `Margem mínima de ${minMarginResult.floorPct}% inviável pra produto ` +
+              `${productIdx} (custos + comissão Shopee não permitem atingir esse piso).`,
+            );
+          }
+          price = minMarginResult.price;
         }
         const stock = product.stock > 0 ? product.stock : 1;
         const sku = product.sku || `${listing.id}-${skuSuffix}-P${productIdx + 1}`;

@@ -632,14 +632,8 @@ function PricingSection({
           />
         </div>
         <div>
-          <Label htmlFor={`mm-${publication.id}`} className="text-[11px] text-muted-foreground flex items-center gap-1">
+          <Label htmlFor={`mm-${publication.id}`} className="text-[11px] text-muted-foreground">
             Margem mín %
-            <span
-              className="text-[9px] text-yellow-700 bg-yellow-50 border border-yellow-300 rounded px-1 py-0.5"
-              title="Salvo no banco mas ainda não aplicado no cálculo do preço final. Será ativado quando motor de pricing migrar pro servidor (fase futura)."
-            >
-              inerte
-            </span>
           </Label>
           <Input
             id={`mm-${publication.id}`}
@@ -653,8 +647,10 @@ function PricingSection({
         </div>
       </div>
       <p className="text-[10px] text-muted-foreground italic">
-        Multiplicador ATIVO — aplica fator (pub / global do anúncio) sobre o preço calculado.
-        Margem mín ainda não aplica no preço final (em desenvolvimento).
+        Ambos ATIVOS (Fase 6.2). Multiplicador aplica fator (pub / principal)
+        sobre o preço calculado. Margem mín força piso de margem (MAX entre
+        produto e conta) — se preço ajustado ficar abaixo, sobe via solver
+        de margem da Shopee.
       </p>
       <div className="flex items-center gap-2 justify-end">
         <Button

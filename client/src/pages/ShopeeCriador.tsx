@@ -20,7 +20,7 @@ import {
   solvePriceByMargin,
   solvePriceByMinProfit,
   extractQty,
-} from "@/lib/shopee-pricing";
+} from "@shared/shopee-pricing";
 import { GradeBadge, ScoreBar } from "@/components/shopee/atoms/QualityIndicators";
 import { InfoBox } from "@/components/shopee/atoms/InfoBox";
 import { DescriptionEditor } from "@/components/shopee/DescriptionEditor";

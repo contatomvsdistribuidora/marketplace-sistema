@@ -10,8 +10,12 @@ import {
   shopeeCommission, shopeeCommissionLabel,
   solvePriceByMargin, solvePriceByMinProfit,
   extractQty,
-} from "@/lib/shopee-pricing";
-import { applyPricingAdjustment, describePricingAdjustment } from "./pricingAdjust";
+} from "@shared/shopee-pricing";
+import { scaleDimsLargestFirst, INTERNAL_MAX_PERIMETER_CM } from "@shared/dim-scale";
+import {
+  applyPricingAdjustment, describePricingAdjustment,
+  applyMinMarginFloor, describeMarginViolation, resolveEffectiveMultiplier,
+} from "./pricingAdjust";
 import { InfoBox } from "@/components/shopee/atoms/InfoBox";
 import type {
   VariationType, WizardStep, VariationOption, VariationGroup,
@@ -34,45 +38,8 @@ const SHOPEE_MAX_WEIGHT_KG = 30;
 const SHOPEE_MAX_DIMENSION_CM = 120;
 const SHOPEE_MAX_DIMENSION_SUM_CM = 200;
 
-const INTERNAL_MAX_DIM_CM = 90;
-const INTERNAL_MAX_PERIMETER_CM = 220;
-
-// Escala dim crescendo o LADO MAIOR primeiro até INTERNAL_MAX_DIM_CM (90).
-// Quando satura, vai pro próximo maior. Se todos saturam, escala proporcional final.
-function scaleDimsLargestFirst(baseL: number, baseW: number, baseH: number, qty: number) {
-  if (qty <= 1 || baseL <= 0 || baseW <= 0 || baseH <= 0) {
-    return { length: baseL, width: baseW, height: baseH, exceededPerimeter: false };
-  }
-  const dims = [
-    { key: "L", val: baseL },
-    { key: "W", val: baseW },
-    { key: "H", val: baseH },
-  ].sort((a, b) => b.val - a.val);
-  let factor = qty;
-  let d0 = dims[0].val * factor;
-  if (d0 <= INTERNAL_MAX_DIM_CM) {
-    dims[0].val = d0;
-  } else {
-    const remaining = (dims[0].val * factor) / INTERNAL_MAX_DIM_CM;
-    dims[0].val = INTERNAL_MAX_DIM_CM;
-    let d1 = dims[1].val * remaining;
-    if (d1 <= INTERNAL_MAX_DIM_CM) {
-      dims[1].val = d1;
-    } else {
-      const remaining2 = (dims[1].val * remaining) / INTERNAL_MAX_DIM_CM;
-      dims[1].val = INTERNAL_MAX_DIM_CM;
-      dims[2].val = Math.min(dims[2].val * remaining2, INTERNAL_MAX_DIM_CM);
-    }
-  }
-  const out = { length: baseL, width: baseW, height: baseH };
-  for (const d of dims) {
-    if (d.key === "L") out.length = parseFloat(d.val.toFixed(1));
-    if (d.key === "W") out.width = parseFloat(d.val.toFixed(1));
-    if (d.key === "H") out.height = parseFloat(d.val.toFixed(1));
-  }
-  const perimeter = out.length + out.width + out.height;
-  return { ...out, exceededPerimeter: perimeter > INTERNAL_MAX_PERIMETER_CM };
-}
+// Fase 6.2: scaleDimsLargestFirst movido pra shared/dim-scale.ts
+// (compartilhado com server pra recomputar shipping no publish).
 
 import {
   uid, emptyOption, isValidEan, suggestNewName, truncateVariationName,
@@ -2618,15 +2585,17 @@ export function CombinedWizard({
                       });
                     }); })()}
 
-                    {/* Fase 6.1.C: multi-loja path — N rows × M contas com rowSpan
-                        em campos compartilhados (peso/dim/SKU/estoque) e preço
-                        efetivo por conta (applyPricingAdjustment ESPELHO backend). */}
+                    {/* Fase 6.1.C + 6.2: multi-loja path — N rows × M contas com
+                        rowSpan em campos compartilhados (peso/dim/SKU/estoque) +
+                        preço efetivo por conta. Fase 6.2 ativou: denominador
+                        do mult = conta principal, e piso de margem mínima
+                        (applyMinMarginFloor) por conta. */}
                     {isMultiStore && (() => {
                       const __validPrices = computedCells.map(c => c.pricing.price).filter(p => p > 0);
                       const __maxP = __validPrices.length ? Math.max(...__validPrices) : 0;
                       const __targetMin = __maxP > 0 ? __maxP / 4 : 0;
                       const pubsCount = publications.length;
-                      const listingMultiplier = pricing.marginMultiplier;
+                      const principalPub = publications.find((p) => p.shopeeAccountId === accountId);
                       const txFeeGlobal = (productIdx: number) =>
                         parseFloat(pricingPerProduct[productIdx]?.transactionFee ?? "") || 0;
                       const packagingGlobal = (productIdx: number) =>
@@ -2639,6 +2608,12 @@ export function CombinedWizard({
                         const productRowCount = row.length * pubsCount;
                         const txFee = txFeeGlobal(productIdx);
                         const packaging = packagingGlobal(productIdx);
+                        // Fase 6.2: denominador = mult efetivo da PRINCIPAL.
+                        const principalEffMult = resolveEffectiveMultiplier(
+                          principalPub?.priceMultiplier,
+                          pp?.marginMultiplier,
+                          pricing.marginMultiplier,
+                        );
                         return row.flatMap((opt, idx) => {
                           const c = computePricing(opt, idx, productIdx);
                           const cellLimitError = limitErrorByCell.get(`${productIdx}-${idx}`);
@@ -2647,7 +2622,7 @@ export function CombinedWizard({
                           const groupBorder = isFirstInProduct && productIdx > 0 ? "border-t-2 border-t-gray-300" : "";
 
                           // Preço base do cliente — mesma lógica do backend
-                          // (multi-product-publish.ts:646-653).
+                          // (multi-product-publish.ts ramo hasOptions).
                           const manualNum = parseFloat(opt.price as any);
                           const cellPriceWasManual = Number.isFinite(manualNum) && manualNum > 0;
                           const clientPrice = cellPriceWasManual
@@ -2660,17 +2635,54 @@ export function CombinedWizard({
                             const acc = accountById.get(pub.shopeeAccountId);
                             const isPrincipal = pub.shopeeAccountId === accountId;
 
-                            const adjustedPrice = applyPricingAdjustment({
+                            // Numerador: mult efetivo desta pub.
+                            const pubEffMult = resolveEffectiveMultiplier(
+                              pub.priceMultiplier,
+                              pp?.marginMultiplier,
+                              pricing.marginMultiplier,
+                            );
+
+                            const adjustedPriceRaw = applyPricingAdjustment({
                               clientPrice,
                               cellPriceWasManual,
-                              listingMultiplier,
-                              publicationMultiplier: pub.priceMultiplier,
+                              listingMultiplier: principalEffMult,
+                              publicationMultiplier: pubEffMult,
                             });
                             const adjDesc = describePricingAdjustment({
                               cellPriceWasManual,
-                              listingMultiplier,
-                              publicationMultiplier: pub.priceMultiplier,
+                              listingMultiplier: principalEffMult,
+                              publicationMultiplier: pubEffMult,
                             });
+
+                            // Fase 6.2: piso de margem mínima (espelho server).
+                            const floorResult = applyMinMarginFloor({
+                              adjustedPrice: adjustedPriceRaw,
+                              cellPriceWasManual,
+                              pricingMode,
+                              totalProductCost: c.totalProductCost,
+                              packaging,
+                              shipping: c.shipping ?? 0,
+                              txFee,
+                              productMinMargin: pp?.minMarginPct,
+                              publicationMinMargin: pub.minMarginPct,
+                            });
+                            const adjustedPrice = floorResult.price;
+                            const flooredByMinMargin = floorResult.floored;
+                            const minMarginInfeasible = floorResult.infeasible;
+
+                            // Para manual: detectar se viola o floor (não
+                            // sobrescreve — só mostra badge "abaixo do mínimo").
+                            const manualViolation = cellPriceWasManual
+                              ? describeMarginViolation({
+                                  manualPrice: adjustedPrice,
+                                  totalProductCost: c.totalProductCost,
+                                  packaging,
+                                  shipping: c.shipping ?? 0,
+                                  txFee,
+                                  productMinMargin: pp?.minMarginPct,
+                                  publicationMinMargin: pub.minMarginPct,
+                                })
+                              : null;
 
                             // Lucro recalculado com preço ajustado da conta.
                             const { rate: commRate, fixed: commFixed } = shopeeCommission(adjustedPrice);
@@ -2837,14 +2849,24 @@ export function CombinedWizard({
                                             : "border-gray-200"
                                         }`}
                                       />
-                                      {cellPriceWasManual && (
-                                        <span
-                                          className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-50 border border-amber-200 text-amber-800 self-start"
-                                          title="Preço manual — vale pra TODAS as contas (não recebe multiplicador)"
-                                        >
-                                          manual
-                                        </span>
-                                      )}
+                                      <div className="flex items-center gap-0.5 flex-wrap">
+                                        {cellPriceWasManual && (
+                                          <span
+                                            className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-50 border border-amber-200 text-amber-800 self-start"
+                                            title="Preço manual — vale pra TODAS as contas (não recebe multiplicador nem piso de margem)"
+                                          >
+                                            manual
+                                          </span>
+                                        )}
+                                        {manualViolation && (
+                                          <span
+                                            className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-red-50 border border-red-300 text-red-800"
+                                            title={`Margem ${manualViolation.curMargin.toFixed(1)}% abaixo do piso ${manualViolation.floorPct}% (manual vence — vai publicar mesmo assim)`}
+                                          >
+                                            abaixo do mín
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="flex flex-col gap-0.5">
@@ -2870,18 +2892,42 @@ export function CombinedWizard({
                                         {cellPriceWasManual ? (
                                           <span
                                             className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-50 border border-amber-200 text-amber-800"
-                                            title="Preço manual — não recebe multiplicador"
+                                            title="Preço manual — não recebe multiplicador nem piso"
                                           >
                                             manual
                                           </span>
                                         ) : adjDesc ? (
                                           <span
                                             className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-50 border border-blue-200 text-blue-800"
-                                            title={`Multiplicador efetivo: ${adjDesc.factor.toFixed(4)} (pub ${pub.priceMultiplier}x / listing ${listingMultiplier}x)`}
+                                            title={`Multiplicador efetivo: ${adjDesc.factor.toFixed(4)} (pub ${pubEffMult ?? "?"} / principal ${principalEffMult ?? "?"})`}
                                           >
                                             ×{adjDesc.factor.toFixed(2)}
                                           </span>
                                         ) : null}
+                                        {flooredByMinMargin && (
+                                          <span
+                                            className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-green-50 border border-green-300 text-green-800"
+                                            title={`Margem mínima ${floorResult.floorPct}% aplicada (preço subiu pra atingir o piso)`}
+                                          >
+                                            ↑ mín {floorResult.floorPct.toFixed(0)}%
+                                          </span>
+                                        )}
+                                        {minMarginInfeasible && (
+                                          <span
+                                            className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-red-100 border border-red-400 text-red-900"
+                                            title={`Piso ${floorResult.floorPct}% inviável dado custos+comissão Shopee. Publish vai falhar nessa conta.`}
+                                          >
+                                            ⚠ inviável
+                                          </span>
+                                        )}
+                                        {manualViolation && (
+                                          <span
+                                            className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-red-50 border border-red-300 text-red-800"
+                                            title={`Margem ${manualViolation.curMargin.toFixed(1)}% < piso ${manualViolation.floorPct}% (manual vence)`}
+                                          >
+                                            abaixo do mín
+                                          </span>
+                                        )}
                                       </div>
                                     </div>
                                   )}
