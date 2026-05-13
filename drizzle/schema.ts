@@ -135,6 +135,22 @@ export const productCache = mysqlTable("product_cache", {
   videoTitle: varchar("videoTitle", { length: 256 }),
   videoLinkUrl: varchar("videoLinkUrl", { length: 1024 }),
   cachedAt: timestamp("cachedAt").defaultNow().notNull(),
+  // Fase 7.B: cache local de dim/custo BL + timestamps last-write-wins.
+  // Dim/cost guardados como string pra manter consistência com weight existente
+  // e evitar perda de precisão (BL pode devolver decimais variáveis).
+  // Timestamps por grupo (peso / dim / custo) — sync BL só sobrescreve
+  // um grupo quando bl_at > local_at. Migration: 0026_product_cache_dim_cost.sql.
+  dimensionLength: varchar("dimension_length", { length: 32 }),
+  dimensionWidth: varchar("dimension_width", { length: 32 }),
+  dimensionHeight: varchar("dimension_height", { length: 32 }),
+  averageCost: varchar("average_cost", { length: 32 }),
+  averageLandedCost: varchar("average_landed_cost", { length: 32 }),
+  weightUpdatedLocalAt: timestamp("weight_updated_local_at"),
+  weightUpdatedBlAt: timestamp("weight_updated_bl_at"),
+  dimUpdatedLocalAt: timestamp("dim_updated_local_at"),
+  dimUpdatedBlAt: timestamp("dim_updated_bl_at"),
+  costUpdatedLocalAt: timestamp("cost_updated_local_at"),
+  costUpdatedBlAt: timestamp("cost_updated_bl_at"),
 });
 
 export type ProductCacheRow = typeof productCache.$inferSelect;
