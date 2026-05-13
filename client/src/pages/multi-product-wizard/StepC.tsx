@@ -277,6 +277,12 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
       { enabled: !!inventoryId },
     );
 
+  // Vídeos Shopee cacheados em shopee_products.videoUrl (Fase 5.1.C).
+  // Sem accountId aqui — Step 4 global mostra de TODAS as contas do user.
+  // PerAccountMediaCard re-busca filtrado por publication.shopeeAccountId.
+  const { data: shopeeVideos, isLoading: shopeeVideosLoading } =
+    trpc.videoBank.listShopeeVideos.useQuery({});
+
   const updateMutation = trpc.multiProduct.updateMultiProductListing.useMutation({
     onSuccess: () => {
       onChange();
@@ -478,8 +484,8 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
     ? (videos as any[] | undefined)?.find((v) => v.id === listing.videoBankId)
     : undefined;
 
-  // Lista unificada de videos: BaseLinker + Banco
-  const allVideos: Array<{ key: string; value: string; title: string; url: string; source: "bl" | "bank"; subtitle?: string; thumbHint?: string; productName?: string }> = [];
+  // Lista unificada de videos: BaseLinker + Banco + Shopee
+  const allVideos: Array<{ key: string; value: string; title: string; url: string; source: "bl" | "bank" | "shopee"; subtitle?: string; thumbHint?: string; productName?: string; shopeeItemId?: number; shopeeAccountId?: number }> = [];
   (blVideos as any[] | undefined ?? []).forEach((v: any) => {
     allVideos.push({
       key: `bl-${v.productId}`,
@@ -502,6 +508,20 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
       subtitle: v.source === "manual_upload" ? "Upload do PC" : v.source === "external_url" ? "URL importada" : "Banco",
     });
   });
+  (shopeeVideos as any[] | undefined ?? []).forEach((v: any) => {
+    allVideos.push({
+      key: `shopee-${v.itemId}`,
+      value: `shopee:${v.itemId}`,
+      title: v.name || `Item Shopee #${v.itemId}`,
+      url: v.videoUrl,
+      source: "shopee",
+      subtitle: `Shopee · ${v.shopName ?? `Conta #${v.shopId}`}`,
+      thumbHint: v.imageUrl,
+      productName: v.name,
+      shopeeItemId: v.itemId,
+      shopeeAccountId: v.accountId,
+    });
+  });
 
   let currentValue: string;
   if (listing.videoBankId !== null) {
@@ -517,7 +537,7 @@ export function StepC({ listing, onChange }: { listing: Listing; onChange: () =>
 
   const selectedVideoMeta = allVideos.find(v => v.value === currentValue);
 
-  const isLoading = blVideosLoading || videosLoading;
+  const isLoading = blVideosLoading || videosLoading || shopeeVideosLoading;
   const hasAnyVideo = (blVideos?.length ?? 0) > 0 || (videos?.length ?? 0) > 0;
 
   return (
@@ -883,10 +903,12 @@ type AllVideosList = Array<{
   value: string;
   title: string;
   url: string;
-  source: "bl" | "bank";
+  source: "bl" | "bank" | "shopee";
   subtitle?: string;
   thumbHint?: string;
   productName?: string;
+  shopeeItemId?: number;
+  shopeeAccountId?: number;
 }>;
 
 /**
@@ -1023,6 +1045,7 @@ function MediaSection({
 }: {
   publication: {
     id: number;
+    shopeeAccountId: number;
     customThumbUrl: string | null;
     customVideoId: number | null;
   };
@@ -1060,6 +1083,9 @@ function MediaSection({
     onSuccess: () => { toast.success("Thumb gerada pela IA."); onSaved(); },
     onError: (e) => toast.error(e.message),
   });
+  // Fase 5.1.C: import on-fly BL/Shopee → video_bank.id pra usar como override.
+  const importBlMut = trpc.videoBank.importBaselinkerVideoToBank.useMutation();
+  const importShopeeMut = trpc.videoBank.importShopeeVideoToBank.useMutation();
 
   async function handleUpload(file: File) {
     if (file.size > 5 * 1024 * 1024) {
@@ -1084,7 +1110,7 @@ function MediaSection({
     reader.readAsDataURL(file);
   }
 
-  function changeVideo(value: string) {
+  async function changeVideo(value: string) {
     if (value === "none") {
       updateMut.mutate({
         publicationId: publication.id,
@@ -1100,6 +1126,35 @@ function MediaSection({
         customThumbUrl: publication.customThumbUrl,
         customVideoId: bankId,
       });
+      return;
+    }
+    // Fase 5.1.C: BL/Shopee viram override via import on-fly pro video_bank.
+    if (value.startsWith("bl:")) {
+      const productId = Number(value.slice(3));
+      try {
+        const { id } = await importBlMut.mutateAsync({ productId });
+        updateMut.mutate({
+          publicationId: publication.id,
+          customThumbUrl: publication.customThumbUrl,
+          customVideoId: id,
+        });
+      } catch (e: any) {
+        toast.error(e?.message ?? "Falha ao importar vídeo BL.");
+      }
+      return;
+    }
+    if (value.startsWith("shopee:")) {
+      const itemId = Number(value.slice(7));
+      try {
+        const { id } = await importShopeeMut.mutateAsync({ itemId });
+        updateMut.mutate({
+          publicationId: publication.id,
+          customThumbUrl: publication.customThumbUrl,
+          customVideoId: id,
+        });
+      } catch (e: any) {
+        toast.error(e?.message ?? "Falha ao importar vídeo Shopee.");
+      }
     }
   }
 
@@ -1222,7 +1277,7 @@ function MediaSection({
         </div>
         {listingHasBlVideo && publication.customVideoId == null && (
           <p className="text-[10px] text-orange-700 italic mt-1">
-            Anúncio usa vídeo BaseLinker — pra variar por conta, suba ao banco no template acima.
+            Anúncio usa vídeo BaseLinker. Use "Painel completo" pra escolher BL/Shopee — importa automático pro banco.
           </p>
         )}
         {currentVideoMeta && (
@@ -1236,6 +1291,7 @@ function MediaSection({
         mode="publication"
         currentValue={currentVideoValue}
         allVideos={allVideos}
+        publicationAccountId={publication.shopeeAccountId}
         onSelect={(v) => { changeVideo(v); setVideoPickerOpen(false); }}
       />
     </div>
@@ -1244,10 +1300,11 @@ function MediaSection({
 
 /**
  * Dialog reutilizado pra seleção de vídeo. Suporta 2 modos:
- *  - "listing" (default): mostra TODOS os vídeos (bank + BL) + footer com
- *    botões Upload PC / Importar URL. Usado pelo Step 4 template global.
- *  - "publication": mostra APENAS bank videos, sem footer de upload —
- *    publication só seleciona, não cria. Quem quer subir novo usa o template.
+ *  - "listing" (default): mostra TODOS os vídeos (bank + BL + Shopee) +
+ *    footer com botões Upload PC / Importar URL. Step 4 template global.
+ *  - "publication": mostra bank + BL + Shopee filtrados pela conta.
+ *    Sem footer de upload. BL/Shopee viram override via import on-fly
+ *    pro video_bank (responsabilidade do caller via onSelect).
  */
 function VideoPickerDialog({
   isOpen,
@@ -1255,6 +1312,7 @@ function VideoPickerDialog({
   mode = "listing",
   currentValue,
   allVideos,
+  publicationAccountId,
   onSelect,
   onPreview,
   onUploadFile,
@@ -1267,6 +1325,7 @@ function VideoPickerDialog({
   mode?: "listing" | "publication";
   currentValue: string;
   allVideos: AllVideosList;
+  publicationAccountId?: number;
   onSelect: (value: string) => void;
   onPreview?: (url: string) => void;
   onUploadFile?: (file: File) => void;
@@ -1277,8 +1336,16 @@ function VideoPickerDialog({
   const [search, setSearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Em publication mode: mostra bank (todos), BL (todos — operador escolhe
+  // qual produto), Shopee FILTRADO pela conta dessa publication. BL/Shopee
+  // viram override via import on-fly (caller resolve em onSelect).
   const visibleVideos = mode === "publication"
-    ? allVideos.filter((v) => v.source === "bank")
+    ? allVideos.filter((v) => {
+        if (v.source === "shopee") {
+          return publicationAccountId == null || v.shopeeAccountId === publicationAccountId;
+        }
+        return true; // bank + bl passam direto
+      })
     : allVideos;
   const filtered = search.trim()
     ? visibleVideos.filter((v) => v.title.toLowerCase().includes(search.toLowerCase()))

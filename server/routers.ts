@@ -3578,6 +3578,8 @@ export const appRouter = router({
           imageUrl:        item.image?.image_url_list?.[0] || "",
           images:          item.image?.image_url_list || [],
           hasVideo:        item.video_info?.length > 0 ? 1 : 0,
+          // URL do vídeo Shopee (Fase 5.1.C — antes só hasVideo era cacheado).
+          videoUrl:        item.video_info?.[0]?.video_url_list?.[0]?.url ?? null,
           attributes:      attrs,
           attributesFilled: filledAttrs,
           attributesTotal:  attrs.length,
@@ -5725,6 +5727,134 @@ export const appRouter = router({
           ))
           .orderBy(asc(productCache.name));
         return rows;
+      }),
+
+    /**
+     * Lista vídeos cacheados de produtos Shopee.
+     * Fase 5.1.C: shopee_products.videoUrl é populado pelo sync (após
+     * re-sync das contas). Filtro opcional por accountId — quando vier,
+     * só vídeos daquela conta (multi-store publication mode).
+     */
+    listShopeeVideos: protectedProcedure
+      .input(z.object({ accountId: z.number().int().positive().optional() }))
+      .query(async ({ ctx, input }) => {
+        const conditions: any[] = [
+          eq(shopeeAccounts.userId, ctx.user.id),
+          sql`${shopeeProducts.videoUrl} IS NOT NULL AND ${shopeeProducts.videoUrl} != ''`,
+        ];
+        if (input.accountId) {
+          conditions.push(eq(shopeeProducts.shopeeAccountId, input.accountId));
+        }
+        const rows = await sharedDb
+          .select({
+            itemId: shopeeProducts.itemId,
+            name: shopeeProducts.itemName,
+            videoUrl: shopeeProducts.videoUrl,
+            imageUrl: shopeeProducts.imageUrl,
+            accountId: shopeeProducts.shopeeAccountId,
+            shopName: shopeeAccounts.shopName,
+            shopId: shopeeAccounts.shopId,
+          })
+          .from(shopeeProducts)
+          .innerJoin(shopeeAccounts, eq(shopeeAccounts.id, shopeeProducts.shopeeAccountId))
+          .where(and(...conditions))
+          .orderBy(asc(shopeeProducts.itemName));
+        return rows;
+      }),
+
+    /**
+     * Importa vídeo BaseLinker pro video_bank (Fase 5.1.C).
+     *
+     * Usado quando operador escolhe vídeo BL no painel publication —
+     * publication.custom_video_id exige id no video_bank, então criamos
+     * uma row sintética com source='baselinker'. Dedup por URL evita lixo.
+     */
+    importBaselinkerVideoToBank: protectedProcedure
+      .input(z.object({
+        productId: z.number().int().positive(),
+        title: z.string().max(256).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [src] = await sharedDb
+          .select({
+            videoUrl: productCache.videoUrl,
+            videoTitle: productCache.videoTitle,
+            name: productCache.name,
+          })
+          .from(productCache)
+          .where(and(
+            eq(productCache.userId, ctx.user.id),
+            eq(productCache.productId, input.productId),
+          ))
+          .limit(1);
+        if (!src?.videoUrl) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Vídeo BaseLinker não encontrado." });
+        }
+
+        const [existing] = await sharedDb
+          .select({ id: videoBank.id })
+          .from(videoBank)
+          .where(eq(videoBank.url, src.videoUrl))
+          .limit(1);
+        if (existing) return { id: existing.id, alreadyExisted: true };
+
+        const finalTitle = input.title?.trim() || src.videoTitle?.trim() || src.name || `Vídeo BL #${input.productId}`;
+        const result = await sharedDb.insert(videoBank).values({
+          title: finalTitle.slice(0, 256),
+          url: src.videoUrl,
+          source: "baselinker",
+          durationSeconds: null,
+          thumbnailUrl: null,
+          isActive: 1,
+        });
+        const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
+        return { id: Number(insertedId), alreadyExisted: false };
+      }),
+
+    /**
+     * Importa vídeo Shopee pro video_bank (Fase 5.1.C). Mesma lógica do BL.
+     * Source no banco fica 'external_url' (enum não inclui 'shopee').
+     */
+    importShopeeVideoToBank: protectedProcedure
+      .input(z.object({
+        itemId: z.number().int().positive(),
+        title: z.string().max(256).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [src] = await sharedDb
+          .select({
+            videoUrl: shopeeProducts.videoUrl,
+            itemName: shopeeProducts.itemName,
+          })
+          .from(shopeeProducts)
+          .innerJoin(shopeeAccounts, eq(shopeeAccounts.id, shopeeProducts.shopeeAccountId))
+          .where(and(
+            eq(shopeeAccounts.userId, ctx.user.id),
+            eq(shopeeProducts.itemId, input.itemId),
+          ))
+          .limit(1);
+        if (!src?.videoUrl) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Vídeo Shopee não encontrado." });
+        }
+
+        const [existing] = await sharedDb
+          .select({ id: videoBank.id })
+          .from(videoBank)
+          .where(eq(videoBank.url, src.videoUrl))
+          .limit(1);
+        if (existing) return { id: existing.id, alreadyExisted: true };
+
+        const finalTitle = input.title?.trim() || src.itemName || `Vídeo Shopee #${input.itemId}`;
+        const result = await sharedDb.insert(videoBank).values({
+          title: finalTitle.slice(0, 256),
+          url: src.videoUrl,
+          source: "external_url",
+          durationSeconds: null,
+          thumbnailUrl: null,
+          isActive: 1,
+        });
+        const insertedId = (result as any)[0]?.insertId ?? (result as any).insertId;
+        return { id: Number(insertedId), alreadyExisted: false };
       }),
   }),
 });

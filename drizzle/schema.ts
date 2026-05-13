@@ -467,6 +467,7 @@ export const shopeeProducts = mysqlTable("shopee_products", {
   imageUrl: varchar("imageUrl", { length: 1024 }),
   images: json("images").$type<string[]>(),
   hasVideo: int("hasVideo").default(0),
+  videoUrl: varchar("videoUrl", { length: 1024 }),
   attributes: json("attributes"),
   attributesFilled: int("attributesFilled").default(0),
   attributesTotal: int("attributesTotal").default(0),

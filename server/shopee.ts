@@ -771,6 +771,9 @@ export async function upsertItemBatch(
         imageUrl: mainImage,
         images: allImages,
         hasVideo: item.video_info?.length > 0 ? 1 : 0,
+        // URL do vídeo Shopee (já vem no response, mas só agora persistimos).
+        // Múltiplas qualidades em video_url_list — pega o primeiro (highest).
+        videoUrl: item.video_info?.[0]?.video_url_list?.[0]?.url ?? null,
         attributes: attrs,
         attributesFilled: filledAttrs,
         attributesTotal: attrs.length,
