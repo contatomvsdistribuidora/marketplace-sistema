@@ -9,8 +9,8 @@
  *    Divergência = bug invisível em produção (UI mostra um valor,
  *    backend publica outro — operador valida visualmente e confia).
  *
- *    Última sincronia: <COMMIT_FASE_6_2_HASH> (Fase 6.2 — motor pricing
- *    server + margem mín ATIVA + denominador da conta principal).
+ *    Última sincronia: e9064e6 (Fase 6.2 — motor pricing server + margem
+ *    mín ATIVA + denominador da conta principal).
  *    Substitui referência antiga ao commit 5cd76c7 (Fase 6.1.B).
  *
  * Mudanças da Fase 6.2 vs Fase 6.1.B:
