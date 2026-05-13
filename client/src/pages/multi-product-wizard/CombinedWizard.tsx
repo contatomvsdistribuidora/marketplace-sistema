@@ -238,55 +238,140 @@ export function CombinedWizard({
     { inventoryId: blInventoryId!, productIds: blProductIds },
     { enabled: !!blInventoryId && blProductIds.length > 0, staleTime: 5 * 60 * 1000 },
   );
+
+  // Fase 7.E: cache LOCAL de dim/custo (lê do banco, latência ms).
+  // Roda em paralelo com getProductsCostInfo. Prioridade 1 na merge.
+  // BL live continua sendo fallback pros produtos sem cache populado
+  // (sync ainda não rodou OU produto recém-criado no BL).
+  const { data: dimsFromCache } = trpc.baselinker.getProductsDimsFromCache.useQuery(
+    { inventoryId: blInventoryId!, productIds: blProductIds },
+    { enabled: !!blInventoryId && blProductIds.length > 0, staleTime: 5 * 60 * 1000 },
+  );
+
+  // Parser helper: BL retorna number nas queries, cache retorna string (varchar).
+  const toPositiveNumber = (v: unknown): number => {
+    if (typeof v === "number") return Number.isFinite(v) && v > 0 ? v : 0;
+    if (typeof v === "string") {
+      const n = parseFloat(v);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+    return 0;
+  };
+
   // Custo: prefere average_landed_cost (com frete de aquisicao); cai em
   // average_cost se landed for 0 ou ausente. BL costuma cadastrar so um
   // dos dois — sem fallback, produtos com so cost ficavam sem hidratar.
+  // Fase 7.E: cache local prioridade 1; BL live preenche os faltantes.
   const costByProductId = useMemo(() => {
     const map = new Map<number, number>();
+    for (const c of (dimsFromCache ?? []) as Array<{ productId: number; averageCost: string | null; averageLandedCost: string | null }>) {
+      const landed = toPositiveNumber(c.averageLandedCost);
+      const avg = toPositiveNumber(c.averageCost);
+      const cost = landed > 0 ? landed : avg;
+      if (cost > 0) map.set(c.productId, cost);
+    }
     for (const c of (costInfo ?? []) as Array<{ productId: number; averageCost: number | null; averageLandedCost: number | null }>) {
-      const landed = typeof c.averageLandedCost === "number" ? c.averageLandedCost : 0;
-      const avg = typeof c.averageCost === "number" ? c.averageCost : 0;
+      if (map.has(c.productId)) continue;
+      const landed = toPositiveNumber(c.averageLandedCost);
+      const avg = toPositiveNumber(c.averageCost);
       const cost = landed > 0 ? landed : avg;
       if (cost > 0) map.set(c.productId, cost);
     }
     return map;
-  }, [costInfo]);
+  }, [dimsFromCache, costInfo]);
+
   // Stock total real da API (soma de todos warehouses) — mais robusto que
   // o cache local que pode pegar apenas um warehouse especifico.
+  // Fase 7.E: stock JÁ existia em product_cache.totalStock (não é coluna nova).
+  // Cache prioridade 1. BL live preenche faltantes.
   const stockByProductId = useMemo(() => {
     const map = new Map<number, number>();
+    for (const c of (dimsFromCache ?? []) as Array<{ productId: number; totalStock: number | null }>) {
+      const s = typeof c.totalStock === "number" ? c.totalStock : 0;
+      if (s > 0) map.set(c.productId, s);
+    }
     for (const c of (costInfo ?? []) as Array<{ productId: number; stockTotal: number | null }>) {
+      if (map.has(c.productId)) continue;
       if (typeof c.stockTotal === "number" && c.stockTotal > 0) {
         map.set(c.productId, c.stockTotal);
       }
     }
     return map;
-  }, [costInfo]);
+  }, [dimsFromCache, costInfo]);
+
   // IDs de produtos BL sem custo (ambos average_landed_cost E average_cost
   // sao 0/null). Usado pra mostrar aviso "preencha manualmente".
+  // Fase 7.E: derivado do mesmo merge cache+BL — produto entra no set apenas
+  // quando NENHUMA fonte (cache nem BL live) trouxe custo.
   const blProductIdsWithoutCost = useMemo(() => {
-    const set = new Set<number>();
+    const withCost = new Set<number>();
+    const allSeen = new Set<number>();
+    for (const c of (dimsFromCache ?? []) as Array<{ productId: number; averageCost: string | null; averageLandedCost: string | null }>) {
+      allSeen.add(c.productId);
+      if (toPositiveNumber(c.averageLandedCost) > 0 || toPositiveNumber(c.averageCost) > 0) {
+        withCost.add(c.productId);
+      }
+    }
     for (const c of (costInfo ?? []) as Array<{ productId: number; averageCost: number | null; averageLandedCost: number | null }>) {
-      const landed = typeof c.averageLandedCost === "number" ? c.averageLandedCost : 0;
-      const avg = typeof c.averageCost === "number" ? c.averageCost : 0;
-      if (landed <= 0 && avg <= 0) set.add(c.productId);
+      allSeen.add(c.productId);
+      if (toPositiveNumber(c.averageLandedCost) > 0 || toPositiveNumber(c.averageCost) > 0) {
+        withCost.add(c.productId);
+      }
     }
-    return set;
-  }, [costInfo]);
-  // IDs de produtos BL com stockTotal <= 0 — usado pra aviso de estoque.
-  const blProductIdsWithoutStock = useMemo(() => {
     const set = new Set<number>();
-    for (const c of (costInfo ?? []) as Array<{ productId: number; stockTotal: number | null }>) {
-      if (c.stockTotal === 0 || c.stockTotal == null) set.add(c.productId);
-    }
+    allSeen.forEach((id) => { if (!withCost.has(id)) set.add(id); });
     return set;
-  }, [costInfo]);
-  // Peso (kg) e dimensoes (cm) do BL — usados pra hidratar a 1a variacao do
-  // optionDetailsMatrix. Nao tem fallback: se o produto nao tiver no BL,
-  // o usuario preenche manualmente.
+  }, [dimsFromCache, costInfo]);
+
+  // IDs de produtos BL com stockTotal <= 0 — usado pra aviso de estoque.
+  // Fase 7.E: merge cache+BL pra evitar falso positivo quando cache traz
+  // stock=0 mas BL live tem stock real (ou vice-versa).
+  const blProductIdsWithoutStock = useMemo(() => {
+    const withStock = new Set<number>();
+    const allSeen = new Set<number>();
+    for (const c of (dimsFromCache ?? []) as Array<{ productId: number; totalStock: number | null }>) {
+      allSeen.add(c.productId);
+      if (typeof c.totalStock === "number" && c.totalStock > 0) withStock.add(c.productId);
+    }
+    for (const c of (costInfo ?? []) as Array<{ productId: number; stockTotal: number | null }>) {
+      allSeen.add(c.productId);
+      if (typeof c.stockTotal === "number" && c.stockTotal > 0) withStock.add(c.productId);
+    }
+    const set = new Set<number>();
+    allSeen.forEach((id) => { if (!withStock.has(id)) set.add(id); });
+    return set;
+  }, [dimsFromCache, costInfo]);
+
+  // Peso (kg) e dimensoes (cm) — usados pra hidratar a 1a variacao do
+  // optionDetailsMatrix. Fase 7.E: cache prioridade 1 (latência ms),
+  // BL live fallback (5-10s) preenche produtos não-cacheados.
+  // Sem nenhuma fonte: usuário preenche manualmente.
   const dimsByProductId = useMemo(() => {
     const map = new Map<number, { weight: number; length: number; width: number; height: number }>();
-    for (const c of (costInfo ?? []) as Array<{ productId: number; weight: number | null; length: number | null; width: number | null; height: number | null }>) {
+    for (const c of (dimsFromCache ?? []) as Array<{
+      productId: number;
+      weight: string | null;
+      dimensionLength: string | null;
+      dimensionWidth: string | null;
+      dimensionHeight: string | null;
+    }>) {
+      const w = toPositiveNumber(c.weight);
+      const l = toPositiveNumber(c.dimensionLength);
+      const wd = toPositiveNumber(c.dimensionWidth);
+      const h = toPositiveNumber(c.dimensionHeight);
+      // Só registra se ao menos peso ou alguma dim foi populada pelo cache.
+      if (w > 0 || l > 0 || wd > 0 || h > 0) {
+        map.set(c.productId, { weight: w, length: l, width: wd, height: h });
+      }
+    }
+    for (const c of (costInfo ?? []) as Array<{
+      productId: number;
+      weight: number | null;
+      length: number | null;
+      width: number | null;
+      height: number | null;
+    }>) {
+      if (map.has(c.productId)) continue;
       map.set(c.productId, {
         weight: typeof c.weight === "number" ? c.weight : 0,
         length: typeof c.length === "number" ? c.length : 0,
@@ -295,7 +380,7 @@ export function CombinedWizard({
       });
     }
     return map;
-  }, [costInfo]);
+  }, [dimsFromCache, costInfo]);
 
   // ── Importar mainPrice como Custo ─────────────────────────────────────────
   // Seta pricingPerProduct[i].unitCost = mainPrice do BL pra cada produto BL.

@@ -568,6 +568,65 @@ export const appRouter = router({
         });
       }),
 
+    /**
+     * Fase 7.E: lê dim/custo do cache local (product_cache) SEM hit BL.
+     *
+     * Diferença vs getProductsCostInfo:
+     *  - Esta query: cache LOCAL, latência ~ms.
+     *  - getProductsCostInfo: BL live, latência 5-15s.
+     *
+     * Wizard usa esta como prioridade 1 (hidrata instant) e mantém
+     * getProductsCostInfo como fallback pros produtos NÃO cacheados
+     * (sync nunca rodou OU produto novo no BL pós-sync).
+     *
+     * Campos podem vir null quando o sync ainda não populou — wizard
+     * combina ambas as fontes via Map merge.
+     */
+    getProductsDimsFromCache: protectedProcedure
+      .input(z.object({
+        inventoryId: z.number(),
+        productIds: z.array(z.number()),
+      }))
+      .query(async ({ ctx, input }) => {
+        if (input.productIds.length === 0) return [];
+        const rows = await sharedDb
+          .select({
+            productId: productCache.productId,
+            weight: productCache.weight,
+            dimensionLength: productCache.dimensionLength,
+            dimensionWidth: productCache.dimensionWidth,
+            dimensionHeight: productCache.dimensionHeight,
+            averageCost: productCache.averageCost,
+            averageLandedCost: productCache.averageLandedCost,
+            totalStock: productCache.totalStock,
+            weightUpdatedBlAt: productCache.weightUpdatedBlAt,
+            dimUpdatedBlAt: productCache.dimUpdatedBlAt,
+            costUpdatedBlAt: productCache.costUpdatedBlAt,
+          })
+          .from(productCache)
+          .where(and(
+            eq(productCache.userId, ctx.user.id),
+            eq(productCache.inventoryId, input.inventoryId),
+            inArray(productCache.productId, input.productIds),
+          ));
+        return rows.map((r) => ({
+          productId: Number(r.productId),
+          weight: r.weight,
+          dimensionLength: r.dimensionLength,
+          dimensionWidth: r.dimensionWidth,
+          dimensionHeight: r.dimensionHeight,
+          averageCost: r.averageCost,
+          averageLandedCost: r.averageLandedCost,
+          totalStock: r.totalStock,
+          // bl_at timestamps expostos pro debug (não usados hoje pelo wizard,
+          // úteis se futuramente quisermos forçar fallback BL quando bl_at
+          // está obsoleto).
+          weightUpdatedBlAt: r.weightUpdatedBlAt,
+          dimUpdatedBlAt: r.dimUpdatedBlAt,
+          costUpdatedBlAt: r.costUpdatedBlAt,
+        }));
+      }),
+
     // Proximo numero sequencial do padrao SKU HIG-VIRT-EML-NNNNNN-V. Olha
     // produtos sincronizados (product_cache) E itens de listings ja salvos
     // (multi_product_listing_items.custom_sku) pra evitar colisao. Inicia em
