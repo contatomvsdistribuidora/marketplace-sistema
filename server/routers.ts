@@ -37,6 +37,7 @@ import {
   shopeeListingPublications,
   productCache,
   shopeeProducts,
+  shopeeCategoryCache,
 } from "../drizzle/schema";
 
 /**
@@ -3073,6 +3074,105 @@ export const appRouter = router({
 
         const indexed = shopeePublish.buildCategoryIndex(tree as any);
         return shopeePublish.fuzzyMatchCategories(indexed, input.query, input.limit ?? 20);
+      }),
+
+    /**
+     * Fase 8.C — refresh proativo do shopee_category_cache (região BR).
+     *
+     * Diferença vs searchCategories: aquela é lazy + TTL 7d, esta é
+     * mutation explícita que IGNORA TTL e sempre re-fetch da API Shopee.
+     * Idempotente — pode rodar várias vezes seguidas.
+     *
+     * Usa accessToken da primeira shopee_account ativa do user (categoria
+     * é GLOBAL por região, não depende de shop específico).
+     *
+     * Pré-requisito da Fase 8.D (sync marcas) e 8.E (cron mensal): ambas
+     * precisam da árvore de categorias atualizada pra iterar.
+     */
+    syncAllCategoriesBR: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        const REGION = "BR";
+
+        // Primeira shopee_account ativa (ordem alfabética por shopName,
+        // mesmo critério de listActiveAccounts).
+        const [acc] = await sharedDb
+          .select({ id: shopeeAccounts.id })
+          .from(shopeeAccounts)
+          .where(and(
+            eq(shopeeAccounts.userId, ctx.user.id),
+            eq(shopeeAccounts.isActive, 1),
+            ne(shopeeAccounts.tokenStatus, "revoked"),
+          ))
+          .orderBy(asc(shopeeAccounts.shopName))
+          .limit(1);
+
+        if (!acc) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Nenhuma conta Shopee ativa pra obter token. Conecte ao menos uma conta antes.",
+          });
+        }
+
+        const { accessToken, shopId } = await shopee.getValidToken(acc.id);
+        const tree = await shopeePublish.getCategories(accessToken, shopId);
+
+        if (!Array.isArray(tree) || tree.length === 0) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `API Shopee retornou árvore vazia (length=${Array.isArray(tree) ? 0 : "not-array"}). Não sobrescrevendo cache.`,
+          });
+        }
+
+        // Upsert: mesmo padrão do searchCategories (select + update/insert).
+        // category_cache.region é UNIQUE — poderia ON DUPLICATE KEY mas
+        // o select prévio confirma se updateAt vai mudar bem.
+        const [existing] = await sharedDb
+          .select({ id: shopeeCategoryCache.id })
+          .from(shopeeCategoryCache)
+          .where(eq(shopeeCategoryCache.region, REGION))
+          .limit(1);
+
+        // Força updatedAt = NOW() explicitamente. MySQL ON UPDATE
+        // CURRENT_TIMESTAMP só dispara quando alguma coluna muda; se a API
+        // Shopee retorna a mesma tree, sem isso o timestamp ficaria preso e
+        // o TTL do searchCategories trataria como stale incorretamente.
+        const syncedAt = new Date();
+        if (existing) {
+          await sharedDb
+            .update(shopeeCategoryCache)
+            .set({ categoryTree: tree, updatedAt: syncedAt })
+            .where(eq(shopeeCategoryCache.region, REGION));
+        } else {
+          await sharedDb
+            .insert(shopeeCategoryCache)
+            .values({ region: REGION, categoryTree: tree, updatedAt: syncedAt });
+        }
+
+        // Estatísticas. API retorna FLAT array com parent_category_id.
+        // Leaf = categoria que não é parent de nenhuma outra (publicáveis).
+        const totalCategories = tree.length;
+        const parentIds = new Set<number>();
+        for (const c of tree as any[]) {
+          const p = Number(c?.parent_category_id ?? 0);
+          if (p > 0) parentIds.add(p);
+        }
+        let leafCategories = 0;
+        for (const c of tree as any[]) {
+          const id = Number(c?.category_id ?? 0);
+          if (id > 0 && !parentIds.has(id)) leafCategories++;
+        }
+
+        console.log(
+          `[syncAllCategoriesBR] user=${ctx.user.id} acct=${acc.id}: ` +
+          `${totalCategories} categorias (${leafCategories} leaf) gravadas em shopee_category_cache`,
+        );
+
+        return {
+          success: true as const,
+          totalCategories,
+          leafCategories,
+          syncedAt,
+        };
       }),
 
     /**
