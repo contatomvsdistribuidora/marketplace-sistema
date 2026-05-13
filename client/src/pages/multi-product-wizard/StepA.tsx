@@ -492,13 +492,22 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
               const isPrincipal = acc.id === listing.shopeeAccountId;
               const pub = pubsByAccountId.get(acc.id);
               const hasOverride = pub && (pub.priceMultiplier != null || pub.minMarginPct != null);
+              // Fase 6.0.4: publication já publicada NÃO pode ser
+              // desmarcada — perderia referência ao shopee_item_id na Shopee.
+              const isLocked = pub?.publishStatus === "published";
               return (
                 <div key={acc.id} className="rounded border border-gray-200">
                   <div className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted">
                     <Checkbox
                       checked={checked}
-                      disabled={saveMutation.isPending}
-                      onCheckedChange={(v) => toggle(acc.id, v === true)}
+                      disabled={saveMutation.isPending || isLocked}
+                      onCheckedChange={(v) => {
+                        if (isLocked && v === false) {
+                          toast.error("Conta já publicada na Shopee. Despublique manualmente na seller.shopee.com.br primeiro.");
+                          return;
+                        }
+                        toggle(acc.id, v === true);
+                      }}
                     />
                     <span className="text-sm font-medium flex-1">{acc.shopName ?? `Conta #${acc.shopId}`}</span>
                     <span className="text-xs text-muted-foreground">#{acc.shopId}</span>
@@ -506,6 +515,15 @@ function MultiStoreAccountPicker({ listing }: { listing: Listing }) {
                       <Badge variant="outline" className="text-[10px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
                         <Star className="h-3 w-3 fill-yellow-400" />
                         principal
+                      </Badge>
+                    )}
+                    {isLocked && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] gap-1 border-green-300 bg-green-50 text-green-700"
+                        title="Conta já publicada — não pode ser removida da seleção"
+                      >
+                        🔒 publicado
                       </Badge>
                     )}
                     {hasOverride && (

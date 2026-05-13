@@ -418,7 +418,10 @@ export function StepD({
             </div>
           )}
 
-          {listing.status === "published" && (
+          {/* Fase 6.0.4: ContentDiagnosis do listing-pai só faz sentido em
+              single-conta legacy. Em multi-loja, qualidade vai por publication
+              na tabela do MultiStorePublishPanel (coluna "Qualidade"). */}
+          {listing.status === "published" && publications.length === 0 && (
             <ContentDiagnosis
               qualityLevel={listing.qualityLevel}
               unfinishedTasks={listing.unfinishedTasks}
@@ -867,6 +870,7 @@ function MultiStorePublishPanel({
               <th className="px-2 py-1.5 text-left">Conta</th>
               <th className="px-2 py-1.5 text-left">Status</th>
               <th className="px-2 py-1.5 text-left">Resultado</th>
+              <th className="px-2 py-1.5 text-left">Qualidade</th>
             </tr>
           </thead>
           <tbody>
@@ -939,6 +943,13 @@ function MultiStorePublishPanel({
                       </div>
                     )}
                   </td>
+                  {/* Fase 6.0.4: qualidade por publication */}
+                  <td className="px-2 py-2 text-xs">
+                    <PublicationQualityBadge
+                      qualityLevel={pub.qualityLevel}
+                      unfinishedTasks={pub.unfinishedTasks}
+                    />
+                  </td>
                 </tr>
               );
             })}
@@ -962,6 +973,62 @@ function MultiStorePublishPanel({
         <p className="text-[10px] text-muted-foreground italic text-center">
           Cada conta publica em série. Falha em uma não interrompe as outras.
         </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Fase 6.0.4: badge compacto de qualidade Shopee por publication.
+ * Backend grava qualityLevel + unfinishedTasks em
+ * shopee_listing_publications após cada publish (Fase 6.0.3).
+ *
+ * qualityLevel mapping (Shopee API):
+ *  1 = Básico (★)
+ *  2 = Bom (★★)
+ *  3 = Excelente (★★★)
+ *
+ * Tooltip mostra lista de unfinished_tasks quando há tarefas pendentes.
+ */
+function PublicationQualityBadge({
+  qualityLevel,
+  unfinishedTasks,
+}: {
+  qualityLevel: number | null;
+  unfinishedTasks: unknown;
+}) {
+  if (qualityLevel == null) {
+    return <span className="text-[10px] text-muted-foreground italic">—</span>;
+  }
+  const label =
+    qualityLevel === 3 ? "★★★ Excelente"
+    : qualityLevel === 2 ? "★★ Bom"
+    : qualityLevel === 1 ? "★ Básico"
+    : `Nível ${qualityLevel}`;
+  const color =
+    qualityLevel === 3 ? "border-green-300 bg-green-50 text-green-700"
+    : qualityLevel === 2 ? "border-blue-300 bg-blue-50 text-blue-700"
+    : "border-yellow-300 bg-yellow-50 text-yellow-700";
+
+  const tasks = Array.isArray(unfinishedTasks) ? unfinishedTasks : [];
+  const tasksText = tasks
+    .map((t: any) => t?.suggestion ?? "")
+    .filter(Boolean)
+    .join(" • ");
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <Badge
+        variant="outline"
+        className={`text-[10px] ${color}`}
+        title={tasksText || "Sem tarefas pendentes"}
+      >
+        {label}
+      </Badge>
+      {tasks.length > 0 && (
+        <span className="text-[9px] text-muted-foreground" title={tasksText}>
+          {tasks.length} tarefa{tasks.length > 1 ? "s" : ""} pendente{tasks.length > 1 ? "s" : ""}
+        </span>
       )}
     </div>
   );

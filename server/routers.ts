@@ -4476,12 +4476,16 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Conta Shopee inválida." });
         }
 
-        // Delete rows whose account_id não está mais na seleção
+        // Delete rows whose account_id não está mais na seleção.
+        // Fase 6.0.4: NÃO deleta publications já published — preserva
+        // referência ao shopee_item_id criado lá. Operador precisa
+        // despublicar manualmente na Shopee primeiro.
         await sharedDb
           .delete(shopeeListingPublications)
           .where(and(
             eq(shopeeListingPublications.listingId, input.listingId),
             notInArray(shopeeListingPublications.shopeeAccountId, input.accountIds),
+            ne(shopeeListingPublications.publishStatus, "published"),
           ));
 
         // Insert rows que ainda não existem. UNIQUE(listing_id, account_id)
