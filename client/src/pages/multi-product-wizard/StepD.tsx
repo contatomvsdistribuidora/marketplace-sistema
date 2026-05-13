@@ -369,24 +369,11 @@ export function StepD({
             </Button>
           )}
           {listing.status !== "published" && (
-            <Button
-              size="lg"
-              className="w-full"
-              disabled={!!blockingPublishReason || publishMutation.isPending}
-              onClick={() => publishMutation.mutate({ id: listing.id })}
-            >
-              {publishMutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Publicando...
-                </>
-              ) : (
-                <>
-                  <Send className="h-4 w-4 mr-2" />
-                  {listing.status === "error" ? "Tentar novamente" : "Publicar na Shopee"}
-                </>
-              )}
-            </Button>
+            <MultiStorePublishPanel
+              listing={listing}
+              blockingPublishReason={blockingPublishReason}
+              onChange={onChange}
+            />
           )}
 
           {(publishedItemUrl || listing.status === "published") && listing.shopeeItemId && (
@@ -714,6 +701,237 @@ export function StepD({
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Painel de publicação multi-loja (Fase 6.0).
+ *
+ * Tabela com 1 row por publication marcada no Step 1. Checkbox por conta
+ * controla quais publicar agora. Default seguro: só conta de teste pré-
+ * selecionada (Bidushop, id=2). Status ao vivo via polling de listPublications.
+ *
+ * Sucesso/falha é por conta — uma falha não derruba as outras.
+ */
+function MultiStorePublishPanel({
+  listing,
+  blockingPublishReason,
+  onChange,
+}: {
+  listing: Listing;
+  blockingPublishReason: string | null;
+  onChange: () => void;
+}) {
+  const accountsQuery = trpc.shopee.listActiveAccounts.useQuery();
+  const publicationsQuery = trpc.multiProduct.listPublications.useQuery(
+    { listingId: listing.id },
+    {
+      // Polling enquanto alguma publication está 'publishing' (Fase 6.0).
+      refetchInterval: (data: any) => {
+        const rows = Array.isArray(data?.state?.data) ? data.state.data : data;
+        if (!Array.isArray(rows)) return false;
+        return rows.some((p: any) => p.publishStatus === "publishing") ? 3000 : false;
+      },
+    },
+  );
+
+  const publishMultiMut = trpc.multiProduct.publishToShopeeMultiStore.useMutation({
+    onSuccess: (data: any) => {
+      onChange();
+      const ok = data.totalPublished ?? 0;
+      const fail = data.totalFailed ?? 0;
+      if (fail === 0) {
+        toast.success(`Publicado em ${ok} conta(s)!`);
+      } else if (ok === 0) {
+        toast.error(`Todas as ${fail} contas falharam. Veja o detalhe na tabela.`);
+      } else {
+        toast.warning(`${ok} OK, ${fail} falharam. Veja detalhes na tabela.`);
+      }
+    },
+    onError: (e) => {
+      onChange();
+      toast.error(e.message);
+    },
+  });
+
+  const accounts = accountsQuery.data ?? [];
+  const publications = publicationsQuery.data ?? [];
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
+
+  // Default seguro: só conta 2 (Bidushop) marcada pra teste inicial.
+  // Operador desmarca/marca conforme quiser publicar.
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set([2]));
+
+  // Quando publications carrega pela primeira vez, garante que só accounts
+  // que existem nas publications são pré-marcadas.
+  useEffect(() => {
+    if (publications.length === 0) return;
+    setSelectedAccountIds((prev) => {
+      const valid = new Set<number>();
+      publications.forEach((p) => {
+        if (prev.has(p.shopeeAccountId)) valid.add(p.shopeeAccountId);
+      });
+      // Se nada bate, defaulta pra conta 2 se existir
+      if (valid.size === 0) {
+        const hasBidu = publications.some((p) => p.shopeeAccountId === 2);
+        if (hasBidu) valid.add(2);
+        else if (publications.length > 0) valid.add(publications[0].shopeeAccountId);
+      }
+      return valid;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publications.length]);
+
+  const isLoading = publicationsQuery.isLoading || accountsQuery.isLoading;
+  const isPending = publishMultiMut.isPending;
+
+  function toggleAccount(accountId: number, checked: boolean) {
+    setSelectedAccountIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(accountId);
+      else next.delete(accountId);
+      return next;
+    });
+  }
+
+  function doPublish() {
+    if (selectedAccountIds.size === 0) {
+      toast.error("Marque pelo menos 1 conta.");
+      return;
+    }
+    publishMultiMut.mutate({
+      listingId: listing.id,
+      onlyAccountIds: Array.from(selectedAccountIds),
+    });
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        Carregando contas…
+      </div>
+    );
+  }
+
+  if (publications.length === 0) {
+    return (
+      <div className="border rounded-lg p-3 bg-yellow-50 text-xs text-yellow-800">
+        Nenhuma conta selecionada. Volte ao Step 1 e marque as contas onde quer publicar.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-semibold text-muted-foreground uppercase">
+        Publicação multi-loja
+      </div>
+      <div className="border rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/30 text-xs">
+            <tr>
+              <th className="px-2 py-1.5 text-left w-10"></th>
+              <th className="px-2 py-1.5 text-left">Conta</th>
+              <th className="px-2 py-1.5 text-left">Status</th>
+              <th className="px-2 py-1.5 text-left">Resultado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {publications.map((pub) => {
+              const acc = accountById.get(pub.shopeeAccountId);
+              const isPrincipal = pub.shopeeAccountId === listing.shopeeAccountId;
+              const checked = selectedAccountIds.has(pub.shopeeAccountId);
+              return (
+                <tr key={pub.id} className="border-t">
+                  <td className="px-2 py-2">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={isPending}
+                      onChange={(e) => toggleAccount(pub.shopeeAccountId, e.target.checked)}
+                      className="h-4 w-4 accent-orange-500"
+                    />
+                  </td>
+                  <td className="px-2 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-medium">
+                        {acc?.shopName ?? `Conta #${acc?.shopId ?? pub.shopeeAccountId}`}
+                      </span>
+                      {isPrincipal && (
+                        <Badge variant="outline" className="text-[9px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
+                          <Star className="h-3 w-3 fill-yellow-400" />
+                          principal
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">#{acc?.shopId ?? pub.shopeeAccountId}</div>
+                  </td>
+                  <td className="px-2 py-2">
+                    {pub.publishStatus === "pending" && (
+                      <Badge variant="outline" className="text-[10px]">pending</Badge>
+                    )}
+                    {pub.publishStatus === "publishing" && (
+                      <Badge variant="outline" className="text-[10px] gap-1 border-blue-300 bg-blue-50 text-blue-700">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        publicando…
+                      </Badge>
+                    )}
+                    {pub.publishStatus === "published" && (
+                      <Badge variant="outline" className="text-[10px] gap-1 border-green-300 bg-green-50 text-green-700">
+                        <CheckCircle2 className="h-3 w-3" />
+                        publicado
+                      </Badge>
+                    )}
+                    {pub.publishStatus === "failed" && (
+                      <Badge variant="outline" className="text-[10px] gap-1 border-red-300 bg-red-50 text-red-700">
+                        <AlertCircle className="h-3 w-3" />
+                        falhou
+                      </Badge>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-xs">
+                    {pub.shopeeItemId && (
+                      <a
+                        href={`https://shopee.com.br/product/${acc?.shopId}/${pub.shopeeItemId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        #{pub.shopeeItemId}
+                      </a>
+                    )}
+                    {pub.publishError && (
+                      <div className="text-[10px] text-red-700 italic line-clamp-2" title={pub.publishError}>
+                        {pub.publishError}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <Button
+        size="lg"
+        className="w-full"
+        disabled={!!blockingPublishReason || isPending || selectedAccountIds.size === 0}
+        onClick={doPublish}
+      >
+        {isPending ? (
+          <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Publicando…</>
+        ) : (
+          <><Send className="h-4 w-4 mr-2" /> Publicar em {selectedAccountIds.size} conta(s) marcada(s)</>
+        )}
+      </Button>
+      {selectedAccountIds.size > 0 && (
+        <p className="text-[10px] text-muted-foreground italic text-center">
+          Cada conta publica em série. Falha em uma não interrompe as outras.
+        </p>
+      )}
     </div>
   );
 }

@@ -5453,6 +5453,122 @@ export const appRouter = router({
         return result;
       }),
 
+    /**
+     * Fase 6.0 — publica multi-loja em série.
+     *
+     * Itera publications da listing (opcionalmente filtradas por
+     * onlyAccountIds) e chama publishMultiProductListing pra cada,
+     * passando o publication como targetPublication. Falha em uma não
+     * derruba as outras.
+     *
+     * Ao final: listing.status='published' se ≥1 conta OK; senão 'error'.
+     * shopeeItemId do listing recebe o item da CONTA PRINCIPAL se foi
+     * publicada (retrocompat com leitores legados).
+     */
+    publishToShopeeMultiStore: protectedProcedure
+      .input(z.object({
+        listingId: z.number().int().positive(),
+        onlyAccountIds: z.array(z.number().int().positive()).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [listing] = await sharedDb
+          .select()
+          .from(multiProductListings)
+          .where(and(
+            eq(multiProductListings.id, input.listingId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!listing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Anúncio não encontrado." });
+        }
+
+        const publications = await sharedDb
+          .select()
+          .from(shopeeListingPublications)
+          .where(eq(shopeeListingPublications.listingId, input.listingId));
+        const filtered = input.onlyAccountIds && input.onlyAccountIds.length > 0
+          ? publications.filter((p) => input.onlyAccountIds!.includes(p.shopeeAccountId))
+          : publications;
+        if (filtered.length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Nenhuma conta selecionada pra publicar.",
+          });
+        }
+
+        // Lock global do listing
+        await sharedDb
+          .update(multiProductListings)
+          .set({ status: "publishing", lastError: null })
+          .where(eq(multiProductListings.id, input.listingId));
+
+        const results: Array<{
+          publicationId: number;
+          shopeeAccountId: number;
+          status: "published" | "failed";
+          shopeeItemId?: number;
+          itemUrl?: string;
+          error?: string;
+        }> = [];
+
+        for (const pub of filtered) {
+          try {
+            const r = await multiProductPublish.publishMultiProductListing(
+              input.listingId,
+              ctx.user.id,
+              undefined,
+              {
+                id: pub.id,
+                shopeeAccountId: pub.shopeeAccountId,
+                customTitle: pub.customTitle,
+                customDescription: pub.customDescription,
+                customThumbUrl: pub.customThumbUrl,
+                customVideoId: pub.customVideoId,
+              },
+            );
+            results.push({
+              publicationId: pub.id,
+              shopeeAccountId: pub.shopeeAccountId,
+              status: "published",
+              shopeeItemId: r.itemId,
+              itemUrl: r.itemUrl,
+            });
+          } catch (err: any) {
+            results.push({
+              publicationId: pub.id,
+              shopeeAccountId: pub.shopeeAccountId,
+              status: "failed",
+              error: String(err?.message ?? err).substring(0, 1024),
+            });
+          }
+        }
+
+        // Resolve status do listing-pai + shopeeItemId da conta principal
+        const successCount = results.filter((r) => r.status === "published").length;
+        const principalResult = results.find(
+          (r) => r.shopeeAccountId === listing.shopeeAccountId && r.status === "published",
+        );
+
+        await sharedDb
+          .update(multiProductListings)
+          .set({
+            status: successCount > 0 ? "published" : "error",
+            shopeeItemId: principalResult?.shopeeItemId ?? listing.shopeeItemId,
+            publishedAt: successCount > 0 ? new Date() : listing.publishedAt,
+            lastError: successCount === 0
+              ? results.map((r) => r.error).filter(Boolean).join(" | ").substring(0, 1024) || "Todas as contas falharam"
+              : null,
+          })
+          .where(eq(multiProductListings.id, input.listingId));
+
+        return {
+          results,
+          totalPublished: successCount,
+          totalFailed: results.length - successCount,
+        };
+      }),
+
     cloneListing: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {

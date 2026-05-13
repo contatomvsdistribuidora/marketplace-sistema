@@ -18,6 +18,7 @@ import {
   productCache,
   shopeeProducts,
   videoBank,
+  shopeeListingPublications,
 } from "../drizzle/schema";
 import * as shopeePublish from "./shopee-publish";
 import * as shopeeVideo from "./shopee-video";
@@ -69,10 +70,32 @@ function convertAttributesToCreateInput(
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * Override de publicação multi-loja (Fase 6.0).
+ *
+ * Quando `targetPublication` é passado:
+ *  - Usa `targetPublication.shopeeAccountId` no lugar de `listing.shopeeAccountId`
+ *  - Aplica overrides de title/description/thumb/video (NULL = herda do listing)
+ *  - SKU suffix inclui `pub-${id}` pra evitar colisão entre contas
+ *  - Status final grava em `shopee_listing_publications` (não em `multi_product_listings`)
+ *
+ * Quando `targetPublication` é `undefined`:
+ *  - Comportamento bit-for-bit do single-conta legado.
+ */
+export type PublishMultiProductTarget = {
+  id: number;
+  shopeeAccountId: number;
+  customTitle: string | null;
+  customDescription: string | null;
+  customThumbUrl: string | null;
+  customVideoId: number | null;
+};
+
 export async function publishMultiProductListing(
   listingId: number,
   userId: number,
   onProgress?: (step: string) => void,
+  targetPublication?: PublishMultiProductTarget,
 ): Promise<{
   itemId: number;
   itemUrl: string;
@@ -91,11 +114,16 @@ export async function publishMultiProductListing(
     throw new PublishMultiProductError("NOT_FOUND", "Anúncio combinado não encontrado.");
   }
 
-  if (listing.status === "published") {
-    throw new PublishMultiProductError("ALREADY_PUBLISHED", "Este anúncio já foi publicado.");
-  }
-  if (listing.status === "publishing") {
-    throw new PublishMultiProductError("ALREADY_PUBLISHING", "Publicação em andamento. Aguarde.");
+  // Em multi-store, listing.status pode estar "publishing" durante o loop
+  // ou "published" se ≥1 conta já saiu. Não bloqueamos publication individual
+  // baseado no listing — o status da publication é a fonte de verdade.
+  if (!targetPublication) {
+    if (listing.status === "published") {
+      throw new PublishMultiProductError("ALREADY_PUBLISHED", "Este anúncio já foi publicado.");
+    }
+    if (listing.status === "publishing") {
+      throw new PublishMultiProductError("ALREADY_PUBLISHING", "Publicação em andamento. Aguarde.");
+    }
   }
 
   // ============ 2. Principal precisa ser Shopee OU wizard precisa ter categoryId
@@ -111,20 +139,25 @@ export async function publishMultiProductListing(
     );
   }
 
-  // ============ 3. Valida campos do listing
-  if (!listing.title || listing.title.trim().length < 10) {
+  // ============ 3. Valida campos efetivos (override ?? listing)
+  const effectiveTitle = targetPublication?.customTitle ?? listing.title;
+  const effectiveDescription = targetPublication?.customDescription ?? listing.description;
+  const effectiveThumbUrl = targetPublication?.customThumbUrl ?? listing.thumbUrl;
+  const effectiveShopeeAccountId = targetPublication?.shopeeAccountId ?? listing.shopeeAccountId;
+
+  if (!effectiveTitle || effectiveTitle.trim().length < 10) {
     throw new PublishMultiProductError(
       "TITLE_INVALID",
       "Título precisa ter pelo menos 10 caracteres. Edite no Step B.",
     );
   }
-  if (!listing.description || listing.description.trim().length < 30) {
+  if (!effectiveDescription || effectiveDescription.trim().length < 30) {
     throw new PublishMultiProductError(
       "DESCRIPTION_INVALID",
       "Descrição precisa ter pelo menos 30 caracteres. Edite no Step B.",
     );
   }
-  if (!listing.thumbUrl) {
+  if (!effectiveThumbUrl) {
     throw new PublishMultiProductError(
       "THUMB_MISSING",
       "Thumb não gerada. Gere no Step C antes de publicar.",
@@ -148,11 +181,19 @@ export async function publishMultiProductListing(
     );
   }
 
-  // ============ 5. Lock: status=publishing
-  await sharedDb
-    .update(multiProductListings)
-    .set({ status: "publishing", lastError: null })
-    .where(eq(multiProductListings.id, listingId));
+  // ============ 5. Lock: status=publishing (legacy escreve no listing;
+  // multi-store escreve na publication específica)
+  if (targetPublication) {
+    await sharedDb
+      .update(shopeeListingPublications)
+      .set({ publishStatus: "publishing", publishError: null })
+      .where(eq(shopeeListingPublications.id, targetPublication.id));
+  } else {
+    await sharedDb
+      .update(multiProductListings)
+      .set({ status: "publishing", lastError: null })
+      .where(eq(multiProductListings.id, listingId));
+  }
 
   try {
     // ============ 6. Resolve items (nome, preço, estoque, imagem)
@@ -231,16 +272,16 @@ export async function publishMultiProductListing(
       );
     }
 
-    // ============ 8. Token Shopee
+    // ============ 8. Token Shopee (conta efetiva — override de publication ou listing)
     onProgress?.("Validando token Shopee");
-    const { accessToken, shopId } = await getValidToken(listing.shopeeAccountId);
+    const { accessToken, shopId } = await getValidToken(effectiveShopeeAccountId);
 
-    // ============ 9. Upload de imagens
+    // ============ 9. Upload de imagens (thumb efetiva — override ou listing)
     onProgress?.("Fazendo upload da capa do anúncio");
     const thumbImageId = await shopeePublish.uploadImageFromUrl(
       accessToken,
       shopId,
-      listing.thumbUrl,
+      effectiveThumbUrl,
       "normal",
     );
 
@@ -258,18 +299,25 @@ export async function publishMultiProductListing(
     let videoUploadIds: string[] | undefined = undefined;
     let resolvedVideoUrl: string | null = null;
     let resolvedDuration: number | undefined = undefined;
-    if ((listing as any).videoBankId) {
+    // Fase 6.0: override de vídeo por publication (customVideoId) vence
+    // sobre o videoBankId do listing. Se publication.customVideoId == null,
+    // herda do listing (comportamento legado).
+    const effectiveVideoBankId = targetPublication?.customVideoId
+      ?? (listing as any).videoBankId
+      ?? null;
+    if (effectiveVideoBankId) {
       const [vb] = await sharedDb
         .select({ url: videoBank.url, duration: videoBank.durationSeconds })
         .from(videoBank)
-        .where(eq(videoBank.id, (listing as any).videoBankId))
+        .where(eq(videoBank.id, effectiveVideoBankId))
         .limit(1);
       if (vb?.url) {
         resolvedVideoUrl = vb.url;
         resolvedDuration = vb.duration ?? undefined;
       }
     }
-    if (!resolvedVideoUrl && (listing as any).videoUrl) {
+    // Fallback URL crua só quando NÃO tem publication (legado BL global).
+    if (!resolvedVideoUrl && !targetPublication && (listing as any).videoUrl) {
       resolvedVideoUrl = (listing as any).videoUrl;
     }
     if (resolvedVideoUrl) {
@@ -415,8 +463,12 @@ export async function publishMultiProductListing(
     const computedByCellKey = new Map<string, any>();
     computedCellsList.forEach((c: any) => computedByCellKey.set(c.cellKey, c));
 
-    // Sufixo unico pra evitar duplicate de SKU em re-tentativas
-    const skuSuffix = String(Date.now()).slice(-6);
+    // Sufixo unico pra evitar duplicate de SKU em re-tentativas.
+    // Em multi-store (Fase 6.0) inclui pub-${id} pra distinguir SKUs entre
+    // contas mesmo quando 2 calls disparam no mesmo segundo.
+    const skuSuffix = targetPublication
+      ? `${String(Date.now()).slice(-6)}P${targetPublication.id}`
+      : String(Date.now()).slice(-6);
 
     // Categoria: prefere a do wizard
     const finalCategoryId = Number(ws.categoryId ?? principalData?.categoryId);
@@ -627,14 +679,14 @@ export async function publishMultiProductListing(
       // Auto-retry com sufixo unico quando Shopee detecta duplicate
       let created: { itemId: number } | null = null;
       let currentSuffix = skuSuffix;
-      let currentTitle = listing.title.trim().substring(0, 120);
+      let currentTitle = effectiveTitle.trim().substring(0, 120);
       const MAX_ATTEMPTS = 3;
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
           created = await shopeePublish.createProduct(accessToken, shopId, {
             itemName: currentTitle,
-            description: listing.description.trim().substring(0, 5000),
+            description: effectiveDescription.trim().substring(0, 5000),
             categoryId: finalCategoryId,
             // Item-level price/stock são "container" — o init_tier_variation
             // sobrescreve com valores reais por modelo. Usamos o menor preco
@@ -681,7 +733,7 @@ export async function publishMultiProductListing(
             }
             // Na 2a tentativa adiciona sufixo no titulo tambem
             if (attempt >= 2) {
-              const baseTitle = listing.title.trim().substring(0, 110);
+              const baseTitle = effectiveTitle.trim().substring(0, 110);
               currentTitle = `${baseTitle} #${newSuffix}`.substring(0, 120);
             }
             currentSuffix = newSuffix;
@@ -699,9 +751,15 @@ export async function publishMultiProductListing(
       shopeeItemId = created.itemId;
 
       // Salva o shopeeItemId IMEDIATAMENTE pra rastrear orfaos se init_tier_variation falhar
-      await sharedDb.update(multiProductListings)
-        .set({ shopeeItemId: shopeeItemId, status: "publishing" })
-        .where(eq(multiProductListings.id, listingId));
+      if (targetPublication) {
+        await sharedDb.update(shopeeListingPublications)
+          .set({ shopeeItemId, publishStatus: "publishing" })
+          .where(eq(shopeeListingPublications.id, targetPublication.id));
+      } else {
+        await sharedDb.update(multiProductListings)
+          .set({ shopeeItemId, status: "publishing" })
+          .where(eq(multiProductListings.id, listingId));
+      }
 
       onProgress?.("Criando variações");
       try {
@@ -736,17 +794,30 @@ export async function publishMultiProductListing(
       console.warn(`[multi-publish] diagnose falhou (item ${shopeeItemId}): ${e?.message}`);
     }
 
-    await sharedDb
-      .update(multiProductListings)
-      .set({
-        status: "published",
-        shopeeItemId,
-        publishedAt: new Date(),
-        lastError: null,
-        qualityLevel,
-        unfinishedTasks,
-      })
-      .where(eq(multiProductListings.id, listingId));
+    // Persist final: multi-store grava na publication; legacy escreve no listing.
+    if (targetPublication) {
+      await sharedDb
+        .update(shopeeListingPublications)
+        .set({
+          publishStatus: "published",
+          shopeeItemId,
+          publishedAt: new Date(),
+          publishError: null,
+        })
+        .where(eq(shopeeListingPublications.id, targetPublication.id));
+    } else {
+      await sharedDb
+        .update(multiProductListings)
+        .set({
+          status: "published",
+          shopeeItemId,
+          publishedAt: new Date(),
+          lastError: null,
+          qualityLevel,
+          unfinishedTasks,
+        })
+        .where(eq(multiProductListings.id, listingId));
+    }
 
     return {
       itemId: shopeeItemId,
@@ -757,13 +828,23 @@ export async function publishMultiProductListing(
     };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    await sharedDb
-      .update(multiProductListings)
-      .set({
-        status: "error",
-        lastError: errorMsg.substring(0, 1024),
-      })
-      .where(eq(multiProductListings.id, listingId));
+    if (targetPublication) {
+      await sharedDb
+        .update(shopeeListingPublications)
+        .set({
+          publishStatus: "failed",
+          publishError: errorMsg.substring(0, 1024),
+        })
+        .where(eq(shopeeListingPublications.id, targetPublication.id));
+    } else {
+      await sharedDb
+        .update(multiProductListings)
+        .set({
+          status: "error",
+          lastError: errorMsg.substring(0, 1024),
+        })
+        .where(eq(multiProductListings.id, listingId));
+    }
     throw err;
   }
 }
