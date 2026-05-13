@@ -1900,6 +1900,15 @@ export function CombinedWizard({
                   value={selectedCategoryId}
                   valueBreadcrumb={selectedCategoryBreadcrumb}
                   onChange={(id, crumb) => {
+                    // Fase 6.0.1: limpar atributos quando categoria muda.
+                    // Atributos de categoria A são inválidos em categoria B —
+                    // Shopee rejeita ("not mapped with the category").
+                    // Validação de obrigatórios no Step C força operador a
+                    // preencher os da nova categoria antes de publicar.
+                    if (id !== selectedCategoryId && Object.keys(attributeValues).length > 0) {
+                      setAttributeValues({});
+                      toast.info("Atributos limpos pela troca de categoria — preencha os da nova categoria no Step C.");
+                    }
                     setSelectedCategoryId(id);
                     setSelectedCategoryBreadcrumb(crumb);
                   }}

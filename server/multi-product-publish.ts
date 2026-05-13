@@ -641,6 +641,38 @@ export async function publishMultiProductListing(
         if (fromWizard.length > 0) finalAttributes = fromWizard as any;
       }
 
+      // Fase 6.0.1: safety net contra atributos órfãos.
+      // Drafts antigos (pré-fix do frontend) podem ter attributeValues de uma
+      // categoria diferente da atual. Shopee rejeita com "not mapped with the
+      // category" — filtramos defensivamente antes de mandar.
+      // Se API getCategoryAttributes falhar (token issue, rate limit), seguimos
+      // sem filtrar — não bloquear publicação por causa de safety opcional.
+      try {
+        const validAttrs = await shopeePublish.getCategoryAttributes(
+          accessToken,
+          shopId,
+          finalCategoryId,
+        );
+        if (validAttrs.length > 0 && Array.isArray(finalAttributes) && finalAttributes.length > 0) {
+          const validIds = new Set<number>(
+            validAttrs.map((a: any) => Number(a.attribute_id)).filter((n) => Number.isFinite(n)),
+          );
+          const before = (finalAttributes as any[]).length;
+          const filtered = (finalAttributes as any[]).filter(
+            (a: any) => validIds.has(Number(a.attributeId)),
+          );
+          finalAttributes = filtered as any;
+          const dropped = before - filtered.length;
+          if (dropped > 0) {
+            console.warn(
+              `[multi-publish] safety-net: ${dropped} atributo(s) órfão(s) descartado(s) (não estão na categoria ${finalCategoryId}).`,
+            );
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[multi-publish] safety-net falhou (seguindo sem filtrar): ${e?.message}`);
+      }
+
       // Fallback de peso/dimensões quando principal é BL (principalData=null)
       let fallbackWeight = 0;
       let fallbackDimL = 0;

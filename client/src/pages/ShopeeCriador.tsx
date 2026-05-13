@@ -3085,6 +3085,13 @@ function VariationWizard({
                         disabled={!isCreateFlow}
                         disabledReason={categoryDisabledReason}
                         onChange={(id, crumb) => {
+                          // Fase 6.0.1: limpar atributos quando categoria muda.
+                          // Atributos de categoria A são inválidos em B — Shopee
+                          // rejeita ("not mapped with the category").
+                          if (id !== selectedCategoryId && Object.keys(attributeValues).length > 0) {
+                            setAttributeValues({});
+                            toast.info("Atributos limpos pela troca de categoria — preencha os da nova categoria.");
+                          }
                           setSelectedCategoryId(id);
                           setSelectedCategoryBreadcrumb(crumb);
                         }}
