@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Star, Image as ImageIcon, Send, AlertTriangle, CheckCircle2, Loader2,
-  Eye, AlertCircle, X, Unlink, Copy,
+  Eye, AlertCircle, X, Unlink, Copy, Store,
 } from "lucide-react";
+import { applyPricingAdjustment, resolveEffectiveMultiplier } from "./pricingAdjust";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -138,6 +139,10 @@ export function StepD({
   });
 
   const isMultiStore = publications.length > 0;
+  // V12+1: o modal de Preview só ganha layout por-loja com 2+ publications.
+  // Com 0 ou 1 publication, o modal preserva bit-for-bit o layout legacy —
+  // Bella vende real no single-conta, qualquer regressão visual = bug.
+  const previewIsMultiStore = publications.length >= 2;
 
   const blockingPublishReason: string | null = (() => {
     if (!isPrincipalShopee && !wsCategoryId)
@@ -614,7 +619,25 @@ export function StepD({
               </div>
 
               <div className="flex-1 overflow-y-auto mt-4">
-                {previewTab === "resumo" && (
+                {previewTab === "resumo" && previewIsMultiStore && (
+                  <MultiStorePreviewResumo
+                    previewData={previewQuery.data}
+                    listing={listing}
+                    publications={publications}
+                    accountById={accountById}
+                    autoFixPending={autoFixMutation.isPending}
+                    onAutoFix={async () => {
+                      try {
+                        const result = await autoFixMutation.mutateAsync({ id: listing.id });
+                        toast.success(result.message || "Preços corrigidos");
+                        await previewQuery.refetch();
+                      } catch (e: any) {
+                        toast.error(e?.message ?? "Falha ao corrigir");
+                      }
+                    }}
+                  />
+                )}
+                {previewTab === "resumo" && !previewIsMultiStore && (
                   <div className="space-y-4">
                     {previewQuery.data.issues.length > 0 && (
                       <div className="space-y-2">
@@ -754,7 +777,15 @@ export function StepD({
                   </div>
                 )}
 
-                {previewTab === "json" && (
+                {previewTab === "json" && previewIsMultiStore && (
+                  <MultiStorePreviewJSON
+                    previewData={previewQuery.data}
+                    listing={listing}
+                    publications={publications}
+                    accountById={accountById}
+                  />
+                )}
+                {previewTab === "json" && !previewIsMultiStore && (
                   <div className="space-y-3">
                     <div>
                       <h3 className="font-semibold text-sm mb-2">add_item payload</h3>
@@ -1078,6 +1109,590 @@ function PublicationQualityBadge({
           {tasks.length} tarefa{tasks.length > 1 ? "s" : ""} pendente{tasks.length > 1 ? "s" : ""}
         </span>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V12+1: Preview multi-loja — UM card "Item Principal" POR loja, validações
+// independentes, tabela de variações com sub-coluna de preço por loja, JSON
+// segmentado.
+//
+// Só renderiza quando publications.length >= 2 (single-conta legacy usa o
+// layout antigo INTOCADO — Bella vende real).
+//
+// Backend NÃO foi alterado: o endpoint previewPublishPayload continua
+// retornando UM payload global. Espelhamos a lógica do publish multi-loja
+// no front via applyPricingAdjustment (mesma função usada na tabela do Step 2).
+//
+// Limitação consciente: a margem mínima (applyMinMarginFloor) NÃO é aplicada
+// aqui — exigiria fetch de pricingPerProduct/dimensions que não vêm no payload
+// do preview. Operador valida valores finais (com floor) na tabela do Step 2.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type PreviewIssue = { severity: "error" | "warning"; field: string; message: string };
+
+function MultiStorePreviewResumo({
+  previewData,
+  listing,
+  publications,
+  accountById,
+  onAutoFix,
+  autoFixPending,
+}: {
+  previewData: any;
+  listing: Listing;
+  publications: Array<any>;
+  accountById: Map<number, any>;
+  onAutoFix: () => Promise<void>;
+  autoFixPending: boolean;
+}) {
+  // Reordena: principal primeiro, depois demais por shopName.
+  const orderedPubs = useMemo(() => {
+    const list = [...publications];
+    list.sort((a, b) => {
+      const aP = a.shopeeAccountId === listing.shopeeAccountId ? 0 : 1;
+      const bP = b.shopeeAccountId === listing.shopeeAccountId ? 0 : 1;
+      if (aP !== bP) return aP - bP;
+      const aName = accountById.get(a.shopeeAccountId)?.shopName ?? "";
+      const bName = accountById.get(b.shopeeAccountId)?.shopName ?? "";
+      return aName.localeCompare(bName);
+    });
+    return list;
+  }, [publications, listing.shopeeAccountId, accountById]);
+
+  // Pega marginMultiplier global do wizardStateJson — denominador do
+  // applyPricingAdjustment quando a pub principal não tem priceMultiplier.
+  const wsGlobalMargin = useMemo(() => {
+    if (!listing.wizardStateJson) return null;
+    try {
+      const parsed = JSON.parse(listing.wizardStateJson);
+      if (parsed.version !== 1) return null;
+      return parsed.pricing?.marginMultiplier ?? null;
+    } catch { return null; }
+  }, [listing.wizardStateJson]);
+
+  const principalPub = orderedPubs[0];
+  // Denominador: mult da principal → mult global do ws → undefined (sem ajuste).
+  const principalEffMult = resolveEffectiveMultiplier(
+    principalPub?.priceMultiplier,
+    undefined,
+    wsGlobalMargin,
+  );
+
+  // Efetivo por publication (override custom_X ?? listing.X).
+  function effFor(pub: any) {
+    return {
+      title: (pub.customTitle ?? listing.title ?? "") as string,
+      description: (pub.customDescription ?? listing.description ?? "") as string,
+      thumbUrl: (pub.customThumbUrl ?? listing.thumbUrl ?? "") as string,
+      videoBankId: pub.customVideoId ?? listing.videoBankId,
+      // URL crua só conta se a pub NÃO tem custom_video_id (espelho do
+      // multi-product-publish.ts:558+ — custom da pub vence sobre URL global).
+      videoUrl: pub.customVideoId ? null : listing.videoUrl,
+    };
+  }
+
+  // Issues do backend que NÃO dependem de override per-pub (categoria, marca,
+  // items, variations, prices, stock). Title/desc/thumb/video são re-derivados
+  // por pub a partir do effFor — esses ficam fora do "shared".
+  const sharedIssues: PreviewIssue[] = useMemo(() => {
+    const exclude = new Set(["title", "description", "thumbUrl", "thumb", "video"]);
+    return ((previewData.issues ?? []) as PreviewIssue[]).filter((i) => !exclude.has(i.field));
+  }, [previewData.issues]);
+
+  function getPubIssues(pub: any): PreviewIssue[] {
+    const eff = effFor(pub);
+    const out: PreviewIssue[] = [];
+    if (eff.title.trim().length < 10) {
+      out.push({ severity: "error", field: "title", message: "Título precisa ter ao menos 10 caracteres (Step 3)." });
+    }
+    if (eff.description.trim().length < 30) {
+      out.push({ severity: "error", field: "description", message: "Descrição precisa ter ao menos 30 caracteres (Step 3)." });
+    }
+    if (!eff.thumbUrl) {
+      out.push({ severity: "error", field: "thumb", message: "Thumb (capa) não definida (Step 4)." });
+    }
+    const hasVideo = !!eff.videoBankId || !!eff.videoUrl;
+    if (!hasVideo) {
+      out.push({ severity: "warning", field: "video", message: "Sem vídeo — anúncios com vídeo tem mais conversão." });
+    }
+    return out;
+  }
+
+  const pubIssuesById = useMemo(() => {
+    const map = new Map<number, PreviewIssue[]>();
+    orderedPubs.forEach((pub) => {
+      map.set(pub.id, [...getPubIssues(pub), ...sharedIssues]);
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedPubs, sharedIssues, listing.title, listing.description, listing.thumbUrl, listing.videoBankId, listing.videoUrl]);
+
+  const pubsWithError = orderedPubs.filter((p) =>
+    (pubIssuesById.get(p.id) ?? []).some((i) => i.severity === "error"),
+  );
+  const anyError = pubsWithError.length > 0;
+  const hasPriceErrors = sharedIssues.some((i) => i.field === "price" && i.severity === "error");
+
+  return (
+    <div className="space-y-4">
+      {/* Auto-fix banner — escopo global porque price errors vêm dos models
+          globais (mesmo cálculo no backend pra todas as pubs). */}
+      {hasPriceErrors && (
+        <div className="rounded p-3 bg-blue-50 border border-blue-200 flex items-center gap-3 flex-wrap">
+          <span className="text-blue-900 text-xs flex-1 min-w-[180px]">
+            🔧 <b>Tem erros de preço?</b> Posso corrigir automaticamente: ajusta preços baixos pra respeitar o limite Shopee de 4x.
+          </span>
+          <button
+            type="button"
+            onClick={() => { void onAutoFix(); }}
+            disabled={autoFixPending}
+            className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 shrink-0"
+          >
+            {autoFixPending ? "Corrigindo..." : "🔧 Auto-corrigir agora"}
+          </button>
+        </div>
+      )}
+
+      {/* Validação POR LOJA */}
+      <div className="space-y-3">
+        <h3 className="font-semibold text-sm">Validação por loja</h3>
+        {orderedPubs.map((pub) => {
+          const acc = accountById.get(pub.shopeeAccountId);
+          const isPrincipal = pub.shopeeAccountId === listing.shopeeAccountId;
+          const issues = pubIssuesById.get(pub.id) ?? [];
+          const errorCount = issues.filter((i) => i.severity === "error").length;
+          const warnCount = issues.filter((i) => i.severity === "warning").length;
+          const hasError = errorCount > 0;
+
+          return (
+            <div
+              key={pub.id}
+              className={`rounded-lg border ${
+                hasError ? "border-red-200 bg-red-50/30" : "border-green-200 bg-green-50/30"
+              }`}
+            >
+              <div className="px-3 py-2 border-b flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-sm font-semibold flex items-center gap-1.5">
+                  Validação — {acc?.shopName ?? `Conta #${pub.shopeeAccountId}`}
+                  {isPrincipal && <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-500" />}
+                </div>
+                {hasError ? (
+                  <Badge variant="outline" className="text-[10px] bg-red-100 text-red-800 border-red-300">
+                    <X className="h-3 w-3 mr-1" />
+                    {errorCount} erro{errorCount > 1 ? "s" : ""}
+                    {warnCount > 0 && ` + ${warnCount} aviso${warnCount > 1 ? "s" : ""}`}
+                  </Badge>
+                ) : warnCount > 0 ? (
+                  <Badge variant="outline" className="text-[10px] bg-yellow-50 text-yellow-800 border-yellow-300">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    {warnCount} aviso{warnCount > 1 ? "s" : ""}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] bg-green-100 text-green-800 border-green-300">
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    OK
+                  </Badge>
+                )}
+              </div>
+              {issues.length > 0 && (
+                <div className="p-3 space-y-1.5">
+                  {issues.map((issue, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 rounded p-2 text-xs ${
+                        issue.severity === "error"
+                          ? "bg-red-100 border border-red-200 text-red-800"
+                          : "bg-yellow-50 border border-yellow-200 text-yellow-800"
+                      }`}
+                    >
+                      {issue.severity === "error" ? (
+                        <X className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                      ) : (
+                        <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                      )}
+                      <div>
+                        <strong className="capitalize">{issue.field}:</strong> {issue.message}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Banner consolidado */}
+      <div
+        className={`rounded-lg p-3 text-sm flex items-center gap-2 ${
+          anyError
+            ? "bg-red-50 border border-red-200 text-red-800"
+            : "bg-green-50 border border-green-200 text-green-800"
+        }`}
+      >
+        {anyError ? (
+          <>
+            <AlertTriangle className="h-5 w-5" />
+            Existem erros em {pubsWithError.length} de {orderedPubs.length} loja(s) — corrija antes de publicar
+          </>
+        ) : (
+          <>
+            <CheckCircle2 className="h-5 w-5" /> Pronto pra publicar em {orderedPubs.length} loja(s)
+          </>
+        )}
+      </div>
+
+      {/* Bloco compartilhado: Categoria/Marca/Atributos (globais no schema —
+          shopee_listing_publications não tem custom_category_id nem custom_brand). */}
+      <div className="border rounded-lg p-4 bg-muted/20">
+        <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-2">
+          Comum a todas as lojas
+        </h3>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div><span className="text-muted-foreground">Modo:</span> <strong>{previewData.mode}</strong></div>
+          <div><span className="text-muted-foreground">Categoria:</span> {previewData.payloadPreview.addItem.category_id ?? "—"}</div>
+          <div><span className="text-muted-foreground">Marca:</span> {previewData.payloadPreview.addItem.brand.original_brand_name}</div>
+          <div><span className="text-muted-foreground">Atributos:</span> {previewData.wizardState.attributeCount}</div>
+          <div><span className="text-muted-foreground">Imagens:</span> {previewData.media.productImagesCount} produto(s)</div>
+        </div>
+      </div>
+
+      {/* N cards Item Principal */}
+      <div className="space-y-3">
+        <h3 className="font-semibold text-sm">Item Principal por loja</h3>
+        {orderedPubs.map((pub) => {
+          const acc = accountById.get(pub.shopeeAccountId);
+          const isPrincipal = pub.shopeeAccountId === listing.shopeeAccountId;
+          const eff = effFor(pub);
+          const hasCustomTitle = !!pub.customTitle;
+          const hasCustomDesc = !!pub.customDescription;
+          const hasCustomThumb = !!pub.customThumbUrl;
+          const hasCustomVideo = !!pub.customVideoId;
+          const hasVideo = !!eff.videoBankId || !!eff.videoUrl;
+
+          return (
+            <div key={pub.id} className="border rounded-lg p-4 bg-white">
+              <div className="flex items-center gap-2 mb-3 pb-2 border-b">
+                <Store className="h-4 w-4 text-orange-500" />
+                <span className="font-semibold text-sm">{acc?.shopName ?? `Conta #${pub.shopeeAccountId}`}</span>
+                {isPrincipal && (
+                  <Badge variant="outline" className="text-[9px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
+                    <Star className="h-3 w-3 fill-yellow-400" />
+                    principal
+                  </Badge>
+                )}
+                <span className="text-[10px] text-muted-foreground ml-auto">#{acc?.shopId ?? pub.shopeeAccountId}</span>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-start gap-2">
+                  <span className="text-muted-foreground w-24 shrink-0 text-xs">Título:</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="break-words">{eff.title || <em className="text-yellow-700">(vazio)</em>}</span>
+                    {hasCustomTitle && (
+                      <Badge variant="outline" className="text-[9px] ml-2 border-blue-300 bg-blue-50 text-blue-700">custom</Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-muted-foreground w-24 shrink-0 text-xs">Descrição:</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="line-clamp-2 text-xs">{eff.description || <em className="text-yellow-700">(vazia)</em>}</span>
+                    {hasCustomDesc && (
+                      <Badge variant="outline" className="text-[9px] mt-0.5 border-blue-300 bg-blue-50 text-blue-700">custom</Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-muted-foreground w-24 shrink-0 text-xs">Thumb:</span>
+                  <div className="flex-1 flex items-center gap-2">
+                    {eff.thumbUrl ? (
+                      <>
+                        <img src={eff.thumbUrl} alt="" className="h-12 w-12 rounded border object-cover" />
+                        {hasCustomThumb && (
+                          <Badge variant="outline" className="text-[9px] border-blue-300 bg-blue-50 text-blue-700">custom</Badge>
+                        )}
+                      </>
+                    ) : (
+                      <em className="text-red-700 text-xs">faltando</em>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-muted-foreground w-24 shrink-0 text-xs">Vídeo:</span>
+                  <div className="flex-1">
+                    {hasVideo ? (
+                      <>
+                        <span className="text-green-700 text-xs">definido ✓</span>
+                        {hasCustomVideo && (
+                          <Badge variant="outline" className="text-[9px] ml-2 border-blue-300 bg-blue-50 text-blue-700">custom</Badge>
+                        )}
+                      </>
+                    ) : (
+                      <em className="text-muted-foreground text-xs">opcional, faltando</em>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-muted-foreground w-24 shrink-0 text-xs">Multiplicador:</span>
+                  <span className="text-xs">
+                    {pub.priceMultiplier ? <strong>{pub.priceMultiplier}</strong> : <em className="text-muted-foreground">herdado do global</em>}
+                  </span>
+                </div>
+                {pub.minMarginPct && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-muted-foreground w-24 shrink-0 text-xs">Margem mín:</span>
+                    <span className="text-xs">{pub.minMarginPct}%</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Variações com preço por loja */}
+      {previewData.payloadPreview.initTierVariation && (
+        <div className="border rounded-lg p-4">
+          <h3 className="font-semibold mb-2 text-sm">
+            Variações ({previewData.wizardState.totalCells} combinações × {orderedPubs.length} lojas)
+          </h3>
+          <div className="text-xs space-y-0.5 mb-3 text-muted-foreground">
+            <div>
+              <strong>Variação 1:</strong> {previewData.wizardState.variation1.name} ({previewData.wizardState.variation1.options} opções)
+            </div>
+            {previewData.wizardState.variation2 && (
+              <div>
+                <strong>Variação 2:</strong> {previewData.wizardState.variation2.name} ({previewData.wizardState.variation2.options} opções)
+              </div>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/30">
+                <tr>
+                  <th className="text-left p-2 border-r border-muted/40">Tier Index</th>
+                  {orderedPubs.map((pub) => {
+                    const acc = accountById.get(pub.shopeeAccountId);
+                    const isPrincipal = pub.shopeeAccountId === listing.shopeeAccountId;
+                    const name = acc?.shopName ?? `Conta #${pub.shopeeAccountId}`;
+                    return (
+                      <th key={pub.id} className="text-right p-2 border-r border-muted/40">
+                        <div className="flex items-center justify-end gap-1">
+                          <span className="truncate max-w-[100px]" title={name}>{name}</span>
+                          {isPrincipal && <Star className="h-3 w-3 fill-yellow-400 text-yellow-500 shrink-0" />}
+                        </div>
+                      </th>
+                    );
+                  })}
+                  <th className="text-right p-2 border-r border-muted/40">Estoque</th>
+                  <th className="text-left p-2">SKU</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previewData.payloadPreview.initTierVariation.model.map((m: any, i: number) => {
+                  const wasManual = m._from === "cellOpt";
+                  return (
+                    <tr key={i} className="border-b border-muted/30">
+                      <td className="p-2 border-r border-muted/40">[{m.tier_index.join(", ")}]</td>
+                      {orderedPubs.map((pub) => {
+                        const isPrincipal = pub.shopeeAccountId === listing.shopeeAccountId;
+                        const adjusted = applyPricingAdjustment({
+                          clientPrice: Number(m.original_price),
+                          cellPriceWasManual: wasManual,
+                          listingMultiplier: principalEffMult,
+                          publicationMultiplier: pub.priceMultiplier,
+                        });
+                        const diff = !wasManual && adjusted !== Number(m.original_price);
+                        return (
+                          <td
+                            key={pub.id}
+                            className={`p-2 text-right border-r border-muted/40 ${
+                              isPrincipal ? "font-semibold" : ""
+                            }`}
+                          >
+                            R$ {adjusted.toFixed(2)}
+                            {diff && (
+                              <span className="text-[9px] text-muted-foreground ml-1">
+                                ×{pub.priceMultiplier ?? "?"}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="p-2 text-right border-r border-muted/40">{m.seller_stock[0].stock}</td>
+                      <td className="p-2 font-mono text-[10px]">{m.model_sku}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2 italic">
+            Preço por loja = preço base × (multiplicador da loja ÷ multiplicador da principal).
+            Preços manuais (digitados na célula) não ganham ajuste. Piso de margem mínima é aplicado no publish — valores finais com floor na tabela do Step 2.
+          </p>
+        </div>
+      )}
+
+      {/* Produtos da combinação (info global) */}
+      <div className="border rounded-lg p-4">
+        <h3 className="font-semibold mb-2 text-sm">Produtos da Combinação</h3>
+        <div className="space-y-1 text-sm">
+          {previewData.resolved.map((r: any, i: number) => (
+            <div key={i} className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px]">{r.source}</Badge>
+              <span className="flex-1">{r.name}</span>
+              <span className="text-muted-foreground">R$ {r.price.toFixed(2)}</span>
+              <span className="text-muted-foreground">Est: {r.stock}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MultiStorePreviewJSON({
+  previewData,
+  listing,
+  publications,
+  accountById,
+}: {
+  previewData: any;
+  listing: Listing;
+  publications: Array<any>;
+  accountById: Map<number, any>;
+}) {
+  const orderedPubs = useMemo(() => {
+    const list = [...publications];
+    list.sort((a, b) => {
+      const aP = a.shopeeAccountId === listing.shopeeAccountId ? 0 : 1;
+      const bP = b.shopeeAccountId === listing.shopeeAccountId ? 0 : 1;
+      if (aP !== bP) return aP - bP;
+      const aName = accountById.get(a.shopeeAccountId)?.shopName ?? "";
+      const bName = accountById.get(b.shopeeAccountId)?.shopName ?? "";
+      return aName.localeCompare(bName);
+    });
+    return list;
+  }, [publications, listing.shopeeAccountId, accountById]);
+
+  const wsGlobalMargin = useMemo(() => {
+    if (!listing.wizardStateJson) return null;
+    try {
+      const parsed = JSON.parse(listing.wizardStateJson);
+      if (parsed.version !== 1) return null;
+      return parsed.pricing?.marginMultiplier ?? null;
+    } catch { return null; }
+  }, [listing.wizardStateJson]);
+
+  const principalPub = orderedPubs[0];
+  const principalEffMult = resolveEffectiveMultiplier(
+    principalPub?.priceMultiplier,
+    undefined,
+    wsGlobalMargin,
+  );
+
+  // Default: principal aberta, demais fechadas (evita megapilha de JSON).
+  const [expanded, setExpanded] = useState<Set<number>>(() =>
+    principalPub ? new Set([principalPub.id]) : new Set(),
+  );
+
+  function buildPayloadFor(pub: any) {
+    const baseAddItem = previewData.payloadPreview.addItem;
+    const addItem = {
+      ...baseAddItem,
+      item_name: ((pub.customTitle ?? listing.title ?? "") as string).slice(0, 120),
+      description: ((pub.customDescription ?? listing.description ?? "") as string).slice(0, 5000),
+    };
+    let initTier: any = null;
+    if (previewData.payloadPreview.initTierVariation) {
+      const base = previewData.payloadPreview.initTierVariation;
+      initTier = {
+        ...base,
+        model: base.model.map((m: any) => {
+          const wasManual = m._from === "cellOpt";
+          const adjusted = applyPricingAdjustment({
+            clientPrice: Number(m.original_price),
+            cellPriceWasManual: wasManual,
+            listingMultiplier: principalEffMult,
+            publicationMultiplier: pub.priceMultiplier,
+          });
+          return { ...m, original_price: adjusted };
+        }),
+      };
+    }
+    return { addItem, initTier };
+  }
+
+  function toggle(id: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground italic">
+        JSON segmentado por loja: cada accordion mostra o payload que será enviado pra Shopee
+        daquela conta, com título/descrição custom e preços ajustados pelo multiplicador.
+      </p>
+      {orderedPubs.map((pub) => {
+        const acc = accountById.get(pub.shopeeAccountId);
+        const isPrincipal = pub.shopeeAccountId === listing.shopeeAccountId;
+        const open = expanded.has(pub.id);
+        const payload = buildPayloadFor(pub);
+        return (
+          <div key={pub.id} className="border rounded-lg">
+            <button
+              type="button"
+              onClick={() => toggle(pub.id)}
+              className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-muted/30 transition rounded-t-lg"
+            >
+              <span className={`text-xs transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
+              <Store className="h-4 w-4 text-orange-500" />
+              <span className="font-semibold text-sm">{acc?.shopName ?? `Conta #${pub.shopeeAccountId}`}</span>
+              {isPrincipal && (
+                <Badge variant="outline" className="text-[9px] gap-1 border-yellow-300 bg-yellow-50 text-yellow-700">
+                  <Star className="h-3 w-3 fill-yellow-400" />
+                  principal
+                </Badge>
+              )}
+              <span className="text-[10px] text-muted-foreground ml-auto">#{acc?.shopId ?? pub.shopeeAccountId}</span>
+            </button>
+            {open && (
+              <div className="px-3 pb-3 space-y-2 border-t">
+                <div>
+                  <h4 className="font-semibold text-xs mb-1 text-muted-foreground mt-2">add_item payload</h4>
+                  <pre className="bg-zinc-900 text-zinc-100 p-3 rounded text-xs overflow-auto max-h-72">
+                    {JSON.stringify(payload.addItem, null, 2)}
+                  </pre>
+                </div>
+                {payload.initTier && (
+                  <div>
+                    <h4 className="font-semibold text-xs mb-1 text-muted-foreground">init_tier_variation payload</h4>
+                    <pre className="bg-zinc-900 text-zinc-100 p-3 rounded text-xs overflow-auto max-h-72">
+                      {JSON.stringify(payload.initTier, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <details className="border rounded">
+        <summary className="px-3 py-2 text-xs font-semibold text-muted-foreground cursor-pointer hover:bg-muted/30">
+          Estado completo (debug)
+        </summary>
+        <pre className="bg-zinc-900 text-zinc-100 p-3 rounded text-xs overflow-auto max-h-64">
+          {JSON.stringify(previewData, null, 2)}
+        </pre>
+      </details>
     </div>
   );
 }
