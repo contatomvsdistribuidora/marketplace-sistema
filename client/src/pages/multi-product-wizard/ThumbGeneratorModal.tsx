@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
   Loader2, Sparkles, ZoomIn, ImageIcon, Check, Download,
@@ -491,9 +490,9 @@ export default function ThumbGeneratorModal({
             </DialogTitle>
           </DialogHeader>
 
-          {/* Conteúdo: 3 colunas */}
+          {/* Conteúdo: 3 colunas — col 3 (Preview) maior pra thumbs em tamanho útil */}
           <div className="flex-1 overflow-y-auto px-6 py-4">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_1fr] gap-6 max-w-[1800px] mx-auto">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_1.5fr] gap-6 max-w-[1800px] mx-auto">
               {/* COLUNA 1 — FOTOS AGRUPADAS POR PRODUTO */}
               <div className="space-y-4">
                 <div>
@@ -877,51 +876,108 @@ export default function ThumbGeneratorModal({
                     <p className="text-sm text-muted-foreground">
                       {generatedUrls.length === 1
                         ? "✨ Thumb gerada!"
+                        : isPublicationBatch
+                        ? `✨ ${generatedUrls.length} variações geradas! Marque as contas embaixo de cada thumb:`
                         : `✨ ${generatedUrls.length} variações geradas! Clique na que quiser usar:`}
                     </p>
-                    <div className={`grid gap-3 ${generatedUrls.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+                    <div className={`grid gap-4 ${generatedUrls.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
                       {generatedUrls.map((url, idx) => {
                         const isSelected = selectedGeneratedIdx === idx;
                         return (
-                          <div
-                            key={url}
-                            className={`relative rounded-lg overflow-hidden border-4 transition cursor-pointer ${
-                              isSelected
-                                ? "border-orange-500 ring-2 ring-orange-200 shadow-lg"
-                                : "border-gray-200 hover:border-gray-300"
-                            }`}
-                            onClick={() => {
-                              setSelectedGeneratedIdx(idx);
-                              setGeneratedUrl(url);
-                            }}
-                          >
-                            <img src={url} alt={`Variação ${idx + 1}`} className="w-full" />
-                            <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                              {String.fromCharCode(65 + idx)}
+                          <div key={url} className="space-y-2">
+                            <div
+                              className={`relative rounded-lg overflow-hidden border-4 transition cursor-pointer ${
+                                isSelected && !isPublicationBatch
+                                  ? "border-orange-500 ring-2 ring-orange-200 shadow-lg"
+                                  : "border-gray-200 hover:border-gray-300"
+                              }`}
+                              onClick={() => {
+                                setSelectedGeneratedIdx(idx);
+                                setGeneratedUrl(url);
+                              }}
+                            >
+                              <img src={url} alt={`Variação ${idx + 1}`} className="w-full" />
+                              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded font-semibold">
+                                Variante {String.fromCharCode(65 + idx)}
+                              </div>
+                              {isSelected && !isPublicationBatch && (
+                                <div className="absolute top-2 right-2 bg-orange-500 text-white rounded-full p-1.5 shadow">
+                                  <Check className="h-4 w-4" />
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setZoomOpen(url);
+                                }}
+                                className="absolute bottom-2 right-2 bg-black/60 text-white rounded-full p-1.5 hover:bg-black/80"
+                                title="Ampliar"
+                              >
+                                <ZoomIn className="h-3 w-3" />
+                              </button>
                             </div>
-                            {isSelected && (
-                              <div className="absolute top-2 right-2 bg-orange-500 text-white rounded-full p-1.5 shadow">
-                                <Check className="h-4 w-4" />
+
+                            {/* Atribuição multi-store: checkboxes de contas embaixo de cada thumb */}
+                            {isPublicationBatch && publications && publications.length > 0 && (
+                              <div className="border border-gray-200 rounded-lg p-2 bg-gray-50/50 space-y-1">
+                                <div className="text-[11px] font-medium text-muted-foreground mb-1">
+                                  Atribuir a:
+                                </div>
+                                {publications.map((pub) => {
+                                  const isHere = assignments[pub.id] === idx;
+                                  const isElsewhere =
+                                    assignments[pub.id] !== undefined &&
+                                    assignments[pub.id] !== null &&
+                                    assignments[pub.id] !== idx;
+                                  return (
+                                    <label
+                                      key={pub.id}
+                                      className={`flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 hover:bg-white ${
+                                        isElsewhere ? "opacity-60" : ""
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isHere}
+                                        disabled={savingAssignments}
+                                        onChange={(e) => {
+                                          setAssignments((prev) => ({
+                                            ...prev,
+                                            // Radio: marcar aqui desmarca de outras variantes automaticamente
+                                            // (assignments mapeia pubId → variantIdx, então atualizar a chave
+                                            // já remove de outra variante).
+                                            [pub.id]: e.target.checked ? idx : null,
+                                          }));
+                                        }}
+                                        className="h-3.5 w-3.5 accent-orange-500"
+                                      />
+                                      <span className="text-xs flex-1 truncate">{pub.label}</span>
+                                      {pub.isPrincipal && (
+                                        <span className="text-[9px] text-yellow-700">⭐</span>
+                                      )}
+                                      {isElsewhere && (
+                                        <span
+                                          className="text-[9px] text-muted-foreground"
+                                          title={`Atualmente em Variante ${String.fromCharCode(65 + (assignments[pub.id] as number))}`}
+                                        >
+                                          → {String.fromCharCode(65 + (assignments[pub.id] as number))}
+                                        </span>
+                                      )}
+                                    </label>
+                                  );
+                                })}
                               </div>
                             )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setZoomOpen(url);
-                              }}
-                              className="absolute bottom-2 right-2 bg-black/60 text-white rounded-full p-1.5 hover:bg-black/80"
-                              title="Ampliar"
-                            >
-                              <ZoomIn className="h-3 w-3" />
-                            </button>
                           </div>
                         );
                       })}
                     </div>
-                    <p className="text-xs text-muted-foreground text-center">
-                      Variação selecionada: {selectedGeneratedIdx !== null ? String.fromCharCode(65 + selectedGeneratedIdx) : "—"}
-                    </p>
+                    {!isPublicationBatch && (
+                      <p className="text-xs text-muted-foreground text-center">
+                        Variação selecionada: {selectedGeneratedIdx !== null ? String.fromCharCode(65 + selectedGeneratedIdx) : "—"}
+                      </p>
+                    )}
                   </div>
                 )}
                 {!isGenerating && generatedUrls.length === 0 && generatedUrl && (
@@ -948,57 +1004,21 @@ export default function ThumbGeneratorModal({
             </div>
           </div>
 
-          {/* Painel de atribuição multi-store (Fase 5.1.B) */}
-          {isPublicationBatch && publications && generatedUrls.length > 0 && (
-            <div className="border-t bg-orange-50/30 px-6 py-3 shrink-0 max-h-[35vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h3 className="text-sm font-semibold">Atribuir variantes às contas</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Escolha qual variante (A/B/C/D) cada conta vai usar. Pode reusar a mesma variante em N contas.
-                  </p>
-                </div>
-                <Badge variant="outline" className="text-[10px]">
-                  {Object.values(assignments).filter((v) => v !== null).length}/{publications.length} atribuídas
-                </Badge>
-              </div>
-              <div className="space-y-1.5">
-                {publications.map((pub) => {
-                  const current = assignments[pub.id];
-                  const wasSaved = assignResult?.savedIds.includes(pub.id);
-                  const wasFailed = assignResult?.failedIds.includes(pub.id);
-                  return (
-                    <div key={pub.id} className="flex items-center gap-3 bg-white rounded border border-gray-200 px-3 py-1.5">
-                      <span className="text-sm font-medium flex-1 line-clamp-1">{pub.label}</span>
-                      {pub.isPrincipal && (
-                        <Badge variant="outline" className="text-[9px] border-yellow-300 bg-yellow-50 text-yellow-700">
-                          principal
-                        </Badge>
-                      )}
-                      <select
-                        value={current === null || current === undefined ? "" : String(current)}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setAssignments((prev) => ({
-                            ...prev,
-                            [pub.id]: v === "" ? null : Number(v),
-                          }));
-                        }}
-                        disabled={savingAssignments}
-                        className="h-7 text-xs rounded border border-gray-300 px-2 bg-white"
-                      >
-                        <option value="">— Não atribuir —</option>
-                        {generatedUrls.map((_, idx) => (
-                          <option key={idx} value={idx}>
-                            Variante {String.fromCharCode(65 + idx)}
-                          </option>
-                        ))}
-                      </select>
-                      {wasSaved && <Check className="h-4 w-4 text-green-600" />}
-                      {wasFailed && <span className="text-[10px] text-red-600">falhou</span>}
-                    </div>
-                  );
-                })}
+          {/* Status compacto de save (substituiu painel rodapé da Fase 5.1.B —
+              atribuição agora fica embaixo de cada thumb na coluna 3). */}
+          {isPublicationBatch && publications && generatedUrls.length > 0 && assignResult && (
+            <div className="border-t bg-orange-50/30 px-6 py-2 shrink-0">
+              <div className="text-xs flex items-center gap-3">
+                <span className="font-medium">Resultado do save:</span>
+                {assignResult.savedIds.length > 0 && (
+                  <span className="text-green-700">
+                    <Check className="h-3 w-3 inline mr-0.5" />
+                    {assignResult.savedIds.length} salva(s)
+                  </span>
+                )}
+                {assignResult.failedIds.length > 0 && (
+                  <span className="text-red-700">{assignResult.failedIds.length} falhou(aram)</span>
+                )}
               </div>
             </div>
           )}
@@ -1044,22 +1064,22 @@ export default function ThumbGeneratorModal({
                 </Button>
               )}
               {/* Modo publication-batch: salvar atribuições */}
-              {isPublicationBatch && generatedUrls.length > 0 && (
-                <Button
-                  onClick={handleSaveAssignments}
-                  disabled={
-                    savingAssignments ||
-                    Object.values(assignments).filter((v) => v !== null && v !== undefined).length === 0
-                  }
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {savingAssignments ? (
-                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
-                  ) : (
-                    <><Check className="h-4 w-4 mr-2" /> Salvar atribuições</>
-                  )}
-                </Button>
-              )}
+              {isPublicationBatch && publications && generatedUrls.length > 0 && (() => {
+                const attribuidas = Object.values(assignments).filter((v) => v !== null && v !== undefined).length;
+                return (
+                  <Button
+                    onClick={handleSaveAssignments}
+                    disabled={savingAssignments || attribuidas === 0}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {savingAssignments ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
+                    ) : (
+                      <><Check className="h-4 w-4 mr-2" /> Salvar {attribuidas}/{publications.length} atribuições</>
+                    )}
+                  </Button>
+                );
+              })()}
             </div>
           </DialogFooter>
         </DialogContent>
