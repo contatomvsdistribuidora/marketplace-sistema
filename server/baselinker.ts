@@ -563,9 +563,44 @@ export async function startProductSync(
           }
         }
 
+        // Fase 7.C: carrega linhas existentes pra aplicar last-write-wins
+        // por grupo (peso / dim / custo). Mantém timestamps locais intactos
+        // e preserva valores que o operador editou (local_at > bl_at).
+        const batchProductIds = Object.keys(detailedData).map(Number);
+        const existingRows = batchProductIds.length > 0
+          ? await db.select().from(productCache).where(
+              and(
+                eq(productCache.userId, userId),
+                eq(productCache.inventoryId, inventoryId),
+                inArray(productCache.productId, batchProductIds),
+              ),
+            )
+          : [];
+        const existingByProductId = new Map<number, typeof existingRows[number]>();
+        for (const r of existingRows) existingByProductId.set(Number(r.productId), r);
+
+        const now = new Date();
+
+        // Helper: operador editou esse grupo mais recentemente que a última
+        // sync BL → preserve local (sync NÃO sobrescreve valor nem bl_at).
+        // null timestamps tratados como Date(0) — funciona pra produtos
+        // recém-migrados (linhas pré-existentes têm bl_at=NULL, local_at=NULL).
+        const localWins = (
+          localAt: Date | null | undefined,
+          blAt: Date | null | undefined,
+        ): boolean => {
+          if (!localAt) return false;
+          const lTs = localAt.getTime();
+          const bTs = blAt ? blAt.getTime() : 0;
+          return lTs > bTs;
+        };
+
         // Prepare batch insert
         const rows: any[] = [];
         for (const [id, product] of Object.entries(detailedData) as [string, any][]) {
+          const productId = Number(id);
+          const existing = existingByProductId.get(productId);
+
           const priceValues = Object.values(product.prices || {}) as number[];
           const mainPrice = priceValues.length > 0 ? priceValues[0] : 0;
           // Estoque negativo no BL geralmente significa ajuste pendente
@@ -601,10 +636,100 @@ export async function startProductSync(
             videoLinkUrl = videoLink.substring(0, 1024);
           }
 
+          // ── Fase 7.C: PESO — last-write-wins ──
+          // Coluna `weight` é notNull default "0" (existia antes da Fase 7).
+          // Lógica:
+          //  • local recente → preserva valor + bl_at antigos.
+          //  • BL trouxe valor > 0 → sobrescreve + bl_at = now.
+          //  • BL trouxe 0/null → mantém valor anterior (não zera dado bom).
+          const blWeight: number | null = typeof product.weight === "number" ? product.weight : null;
+          let weightOut: string;
+          let weightBlAt: Date | null;
+          if (localWins(existing?.weightUpdatedLocalAt, existing?.weightUpdatedBlAt)) {
+            weightOut = existing!.weight;
+            weightBlAt = existing!.weightUpdatedBlAt ?? null;
+          } else if (blWeight != null && blWeight > 0) {
+            weightOut = String(blWeight).substring(0, 32);
+            weightBlAt = now;
+          } else {
+            weightOut = existing?.weight ?? "0";
+            weightBlAt = existing?.weightUpdatedBlAt ?? null;
+          }
+          const weightLocalAt = existing?.weightUpdatedLocalAt ?? null;
+
+          // ── DIM — last-write-wins (3 dims compartilham timestamps) ──
+          // Quando BL traz ao menos 1 dim válida (>0), considera sync valida
+          // pro grupo inteiro. Se BL vazio em tudo: preserva existente.
+          const blLength: number | null = typeof product.length === "number" ? product.length : null;
+          const blWidthBL: number | null = typeof product.width === "number" ? product.width : null;
+          const blHeight: number | null = typeof product.height === "number" ? product.height : null;
+          const blHasAnyDim =
+            (blLength != null && blLength > 0) ||
+            (blWidthBL != null && blWidthBL > 0) ||
+            (blHeight != null && blHeight > 0);
+          let dimLengthOut: string | null;
+          let dimWidthOut: string | null;
+          let dimHeightOut: string | null;
+          let dimBlAt: Date | null;
+          if (localWins(existing?.dimUpdatedLocalAt, existing?.dimUpdatedBlAt)) {
+            dimLengthOut = existing!.dimensionLength ?? null;
+            dimWidthOut = existing!.dimensionWidth ?? null;
+            dimHeightOut = existing!.dimensionHeight ?? null;
+            dimBlAt = existing!.dimUpdatedBlAt ?? null;
+          } else if (blHasAnyDim) {
+            // Pra cada dimensão individual: BL valor > 0 vence, senão
+            // preserva existente. Evita zerar uma dim só porque BL veio
+            // parcial (operador editou L mas W/H vieram do BL antes).
+            dimLengthOut = blLength != null && blLength > 0
+              ? String(blLength).substring(0, 32)
+              : (existing?.dimensionLength ?? null);
+            dimWidthOut = blWidthBL != null && blWidthBL > 0
+              ? String(blWidthBL).substring(0, 32)
+              : (existing?.dimensionWidth ?? null);
+            dimHeightOut = blHeight != null && blHeight > 0
+              ? String(blHeight).substring(0, 32)
+              : (existing?.dimensionHeight ?? null);
+            dimBlAt = now;
+          } else {
+            dimLengthOut = existing?.dimensionLength ?? null;
+            dimWidthOut = existing?.dimensionWidth ?? null;
+            dimHeightOut = existing?.dimensionHeight ?? null;
+            dimBlAt = existing?.dimUpdatedBlAt ?? null;
+          }
+          const dimLocalAt = existing?.dimUpdatedLocalAt ?? null;
+
+          // ── CUSTO — last-write-wins (avg_cost + landed compartilham ts) ──
+          const blAvgCost: number | null = typeof product.average_cost === "number" ? product.average_cost : null;
+          const blAvgLanded: number | null = typeof product.average_landed_cost === "number" ? product.average_landed_cost : null;
+          const blHasAnyCost =
+            (blAvgCost != null && blAvgCost > 0) ||
+            (blAvgLanded != null && blAvgLanded > 0);
+          let avgCostOut: string | null;
+          let avgLandedOut: string | null;
+          let costBlAt: Date | null;
+          if (localWins(existing?.costUpdatedLocalAt, existing?.costUpdatedBlAt)) {
+            avgCostOut = existing!.averageCost ?? null;
+            avgLandedOut = existing!.averageLandedCost ?? null;
+            costBlAt = existing!.costUpdatedBlAt ?? null;
+          } else if (blHasAnyCost) {
+            avgCostOut = blAvgCost != null && blAvgCost > 0
+              ? String(blAvgCost).substring(0, 32)
+              : (existing?.averageCost ?? null);
+            avgLandedOut = blAvgLanded != null && blAvgLanded > 0
+              ? String(blAvgLanded).substring(0, 32)
+              : (existing?.averageLandedCost ?? null);
+            costBlAt = now;
+          } else {
+            avgCostOut = existing?.averageCost ?? null;
+            avgLandedOut = existing?.averageLandedCost ?? null;
+            costBlAt = existing?.costUpdatedBlAt ?? null;
+          }
+          const costLocalAt = existing?.costUpdatedLocalAt ?? null;
+
           rows.push({
             userId,
             inventoryId,
-            productId: Number(id),
+            productId,
             name: (product.text_fields?.name || "").substring(0, 1024),
             sku: (product.sku || "").substring(0, 256),
             ean: (product.ean || "").substring(0, 128),
@@ -612,18 +737,32 @@ export async function startProductSync(
             manufacturerId: product.manufacturer_id || 0,
             mainPrice: String(mainPrice).substring(0, 32),
             totalStock,
-            weight: String(product.weight || 0).substring(0, 32),
+            weight: weightOut,
             tags: tags,
             description: product.text_fields?.description || "",
             imageUrl: (imageUrl || "").substring(0, 1024),
             videoUrl,
             videoTitle,
             videoLinkUrl,
+            // Fase 7.C: dim/custo + timestamps last-write-wins
+            dimensionLength: dimLengthOut,
+            dimensionWidth: dimWidthOut,
+            dimensionHeight: dimHeightOut,
+            averageCost: avgCostOut,
+            averageLandedCost: avgLandedOut,
+            weightUpdatedLocalAt: weightLocalAt,
+            weightUpdatedBlAt: weightBlAt,
+            dimUpdatedLocalAt: dimLocalAt,
+            dimUpdatedBlAt: dimBlAt,
+            costUpdatedLocalAt: costLocalAt,
+            costUpdatedBlAt: costBlAt,
           });
         }
 
         if (rows.length > 0) {
           // Upsert: delete existing then insert (simpler than ON DUPLICATE KEY for bulk)
+          // Fase 7.C: o merge acima já preservou local_at/valores quando local venceu,
+          // então re-inserir é seguro (não perde edição manual).
           const existingIds = rows.map(r => r.productId);
           await db.delete(productCache).where(
             and(
