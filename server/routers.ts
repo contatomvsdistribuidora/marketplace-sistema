@@ -5580,6 +5580,10 @@ export const appRouter = router({
                 variationNameSuffixVar1: pub.variationNameSuffixVar1,
                 variationNamePrefixVar2: pub.variationNamePrefixVar2,
                 variationNameSuffixVar2: pub.variationNameSuffixVar2,
+                // Fase 6.1.B: pricing override por conta (multiplier ativo,
+                // minMargin inerte — placeholder pra futuro motor server)
+                priceMultiplier: pub.priceMultiplier,
+                minMarginPct: pub.minMarginPct,
               },
             );
             results.push({

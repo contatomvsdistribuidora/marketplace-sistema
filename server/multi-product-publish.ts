@@ -94,7 +94,75 @@ export type PublishMultiProductTarget = {
   variationNameSuffixVar1?: string | null;
   variationNamePrefixVar2?: string | null;
   variationNameSuffixVar2?: string | null;
+  // Fase 6.1.B: pricing override por conta. priceMultiplier ativo;
+  // minMarginPct INERTE nesta fase (salvo mas não aplicado — exige motor
+  // de pricing server-side com custo + comissão + frete, fase futura).
+  priceMultiplier?: string | null;
+  minMarginPct?: string | null;
 };
+
+/**
+ * Fase 6.1.B: ajuste de pricing per-publication (Caminho 1 — postprocessing).
+ *
+ * Cliente calcula o preço base com `ws.pricing.marginMultiplier` (default 2.5).
+ * Pra outra conta, operador define `publication.priceMultiplier` distinto.
+ * Aplicamos um fator de ajuste em cima do preço já calculado pelo cliente:
+ *
+ *   factor = publicationMultiplier / listingMultiplier
+ *   finalPrice = clientPrice × factor
+ *
+ * Casos onde NÃO aplica (fator = 1):
+ *  - `pub.priceMultiplier` null/vazio (sem override)
+ *  - `cellPriceWasManual` true (operador digitou cellOpt.price no Step C —
+ *    preço exato deve ser respeitado, não ajustado)
+ *  - `listingMultiplier` inválido (NaN, 0)
+ *
+ * minMarginPct: inerte nesta fase. Salvo no banco, aviso na UI, sem efeito.
+ */
+function applyPricingAdjustment(params: {
+  clientPrice: number;
+  cellPriceWasManual: boolean;
+  listingMultiplier: string | number | null | undefined;
+  publicationMultiplier: string | number | null | undefined;
+  logContext: { publicationId: number; cellKey: string };
+}): number {
+  const { clientPrice, cellPriceWasManual, listingMultiplier, publicationMultiplier, logContext } = params;
+
+  if (cellPriceWasManual) {
+    console.log(
+      `[pricing-adjust] pub=${logContext.publicationId} cell=${logContext.cellKey}: SKIP (manual override) price=${clientPrice}`,
+    );
+    return clientPrice;
+  }
+
+  const pubMult = publicationMultiplier == null || publicationMultiplier === ""
+    ? null
+    : Number(publicationMultiplier);
+  const listingMult = listingMultiplier == null || listingMultiplier === ""
+    ? null
+    : Number(listingMultiplier);
+
+  if (pubMult == null || !Number.isFinite(pubMult) || pubMult <= 0) {
+    console.log(
+      `[pricing-adjust] pub=${logContext.publicationId} cell=${logContext.cellKey}: SKIP (no pub override) price=${clientPrice}`,
+    );
+    return clientPrice;
+  }
+  if (listingMult == null || !Number.isFinite(listingMult) || listingMult <= 0) {
+    console.warn(
+      `[pricing-adjust] pub=${logContext.publicationId} cell=${logContext.cellKey}: SKIP (invalid listing multiplier ${listingMultiplier})`,
+    );
+    return clientPrice;
+  }
+
+  const factor = pubMult / listingMult;
+  const adjusted = Math.max(clientPrice * factor, 1);
+  console.log(
+    `[pricing-adjust] pub=${logContext.publicationId} cell=${logContext.cellKey}: ` +
+    `clientPrice=${clientPrice.toFixed(2)} × (pubMult=${pubMult} / listingMult=${listingMult}) = factor=${factor.toFixed(4)} → final=${adjusted.toFixed(2)}`,
+  );
+  return adjusted;
+}
 
 /**
  * Aplica prefix/suffix em um nome de variação, respeitando limite 30 chars
@@ -559,6 +627,10 @@ export async function publishMultiProductListing(
     const models: shopeePublish.KitVariation["models"] = [];
     let minPrice = Infinity;
 
+    // Fase 6.1.B: multiplicador global do listing vem do wizardStateJson.
+    // ws.pricing.marginMultiplier é string (default "2.5" no client).
+    const listingMultiplier: string | undefined = ws?.pricing?.marginMultiplier;
+
     for (let productIdx = 0; productIdx < resolved.length; productIdx++) {
       const product = resolved[productIdx];
 
@@ -568,10 +640,28 @@ export async function publishMultiProductListing(
           const computed = computedByCellKey.get(cellKey);
           const cellOpt = ws.optionDetailsMatrix?.[productIdx]?.[optIdx];
 
+          // Resolve preço base do cliente
           let price = 0;
-          if (cellOpt?.price && Number(cellOpt.price) > 0) price = Number(cellOpt.price);
-          else if (computed?.pricing?.price > 0) price = Number(computed.pricing.price);
-          else price = Number(product.price ?? 0);
+          let cellPriceWasManual = false;
+          if (cellOpt?.price && Number(cellOpt.price) > 0) {
+            price = Number(cellOpt.price);
+            cellPriceWasManual = true; // operador digitou — ajuste NÃO aplica
+          } else if (computed?.pricing?.price > 0) {
+            price = Number(computed.pricing.price);
+          } else {
+            price = Number(product.price ?? 0);
+          }
+
+          // Fase 6.1.B: ajusta pra multiplier per-publication (postprocessing)
+          if (targetPublication) {
+            price = applyPricingAdjustment({
+              clientPrice: price,
+              cellPriceWasManual,
+              listingMultiplier,
+              publicationMultiplier: targetPublication.priceMultiplier,
+              logContext: { publicationId: targetPublication.id, cellKey },
+            });
+          }
 
           const stock = cellOpt?.stock != null && cellOpt.stock !== ""
             ? Number(cellOpt.stock)
@@ -590,7 +680,18 @@ export async function publishMultiProductListing(
           if (price > 0 && price < minPrice) minPrice = price;
         }
       } else {
-        const price = Number(product.price ?? 0);
+        let price = Number(product.price ?? 0);
+        // Fase 6.1.B: aplica ajuste no caso single-variation também.
+        // cellPriceWasManual=false aqui — não há override manual sem hasOptions.
+        if (targetPublication) {
+          price = applyPricingAdjustment({
+            clientPrice: price,
+            cellPriceWasManual: false,
+            listingMultiplier,
+            publicationMultiplier: targetPublication.priceMultiplier,
+            logContext: { publicationId: targetPublication.id, cellKey: `${productIdx}-novars` },
+          });
+        }
         const stock = product.stock > 0 ? product.stock : 1;
         const sku = product.sku || `${listing.id}-${skuSuffix}-P${productIdx + 1}`;
 
