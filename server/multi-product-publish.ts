@@ -89,7 +89,28 @@ export type PublishMultiProductTarget = {
   customDescription: string | null;
   customThumbUrl: string | null;
   customVideoId: number | null;
+  // Fase 6.1.A: prefix/suffix opcional pra nome de variação por conta.
+  variationNamePrefixVar1?: string | null;
+  variationNameSuffixVar1?: string | null;
+  variationNamePrefixVar2?: string | null;
+  variationNameSuffixVar2?: string | null;
 };
+
+/**
+ * Aplica prefix/suffix em um nome de variação, respeitando limite 30 chars
+ * Shopee. Vazio = original sem mudança. Slice defensivo no fim.
+ */
+function applyVariationAffix(
+  original: string,
+  prefix?: string | null,
+  suffix?: string | null,
+): string {
+  const p = (prefix ?? "").trim();
+  const s = (suffix ?? "").trim();
+  if (!p && !s) return original;
+  const joined = `${p ? p + " " : ""}${original}${s ? " " + s : ""}`;
+  return joined.slice(0, 30);
+}
 
 export async function publishMultiProductListing(
   listingId: number,
@@ -488,13 +509,19 @@ export async function publishMultiProductListing(
     // ============ Variacoes 2D reais ============
     const hasOptions = optionLabels.length > 0;
 
-    // Trunca pra 30 chars (limite Shopee tier_variation option), mas garante unicidade (Shopee rejeita duplicatas)
+    // Trunca pra 30 chars (limite Shopee tier_variation option), mas garante unicidade (Shopee rejeita duplicatas).
+    // Fase 6.1.A: aplica prefix/suffix var1 por publication antes do truncamento.
     const productOptions: string[] = (() => {
       const result: string[] = [];
       const seen = new Set<string>();
       resolved.forEach((p, idx) => {
         const fullLabel = ws.productNameOverrides?.[String(idx)] ?? p.name ?? `Produto ${idx + 1}`;
-        let label = String(fullLabel).slice(0, 30);
+        const withAffix = applyVariationAffix(
+          String(fullLabel),
+          targetPublication?.variationNamePrefixVar1,
+          targetPublication?.variationNameSuffixVar1,
+        );
+        let label = withAffix.slice(0, 30);
         if (seen.has(label)) {
           let suffix = 2;
           while (seen.has(`${label.slice(0, 27)} #${suffix}`)) suffix++;
@@ -507,11 +534,17 @@ export async function publishMultiProductListing(
     })();
     const productOptionImageIds: string[] = resolved.map((_, idx) => optionImageIds[idx] ?? thumbImageId);
 
+    // Fase 6.1.A: aplica prefix/suffix var2 por publication.
     const optionLabelsTrimmed: string[] = (() => {
       const result: string[] = [];
       const seen = new Set<string>();
       optionLabels.forEach((l: string) => {
-        let label = String(l).slice(0, 30);
+        const withAffix = applyVariationAffix(
+          String(l),
+          targetPublication?.variationNamePrefixVar2,
+          targetPublication?.variationNameSuffixVar2,
+        );
+        let label = withAffix.slice(0, 30);
         if (seen.has(label)) {
           let suffix = 2;
           while (seen.has(`${label.slice(0, 27)} #${suffix}`)) suffix++;

@@ -237,6 +237,11 @@ function ContentSection({
     id: number;
     customTitle: string | null;
     customDescription: string | null;
+    // Fase 6.1.A: affix por conta (prefix/suffix de nome de variação)
+    variationNamePrefixVar1?: string | null;
+    variationNameSuffixVar1?: string | null;
+    variationNamePrefixVar2?: string | null;
+    variationNameSuffixVar2?: string | null;
   };
   listing: Listing;
   onSaved: () => void;
@@ -245,10 +250,25 @@ function ContentSection({
   const [description, setDescription] = useState(publication.customDescription ?? "");
   const [voice, setVoice] = useState("");
 
+  // Fase 6.1.A: prefix/suffix var1 (produto) + var2 (qty/cor) por conta
+  const [prefV1, setPrefV1] = useState(publication.variationNamePrefixVar1 ?? "");
+  const [sufV1, setSufV1] = useState(publication.variationNameSuffixVar1 ?? "");
+  const [prefV2, setPrefV2] = useState(publication.variationNamePrefixVar2 ?? "");
+  const [sufV2, setSufV2] = useState(publication.variationNameSuffixVar2 ?? "");
+  const [affixOpen, setAffixOpen] = useState(false);
+
   useEffect(() => {
     setTitle(publication.customTitle ?? "");
     setDescription(publication.customDescription ?? "");
-  }, [publication.id, publication.customTitle, publication.customDescription]);
+    setPrefV1(publication.variationNamePrefixVar1 ?? "");
+    setSufV1(publication.variationNameSuffixVar1 ?? "");
+    setPrefV2(publication.variationNamePrefixVar2 ?? "");
+    setSufV2(publication.variationNameSuffixVar2 ?? "");
+  }, [
+    publication.id, publication.customTitle, publication.customDescription,
+    publication.variationNamePrefixVar1, publication.variationNameSuffixVar1,
+    publication.variationNamePrefixVar2, publication.variationNameSuffixVar2,
+  ]);
 
   const updateMut = trpc.multiProduct.updatePublicationContent.useMutation({
     onSuccess: () => {
@@ -273,6 +293,11 @@ function ContentSection({
     },
     onError: (e) => toast.error(e.message),
   });
+  // Fase 6.1.A: mutation pra affix de variação
+  const affixMut = trpc.multiProduct.updatePublicationVariationAffix.useMutation({
+    onSuccess: () => { toast.success("Prefix/suffix de variação atualizado."); onSaved(); },
+    onError: (e) => toast.error(e.message),
+  });
 
   function save() {
     updateMut.mutate({
@@ -285,6 +310,25 @@ function ContentSection({
     setTitle("");
     setDescription("");
     updateMut.mutate({ publicationId: publication.id, customTitle: null, customDescription: null });
+  }
+  function saveAffix() {
+    affixMut.mutate({
+      publicationId: publication.id,
+      variationNamePrefixVar1: prefV1.trim() === "" ? null : prefV1.trim(),
+      variationNameSuffixVar1: sufV1.trim() === "" ? null : sufV1.trim(),
+      variationNamePrefixVar2: prefV2.trim() === "" ? null : prefV2.trim(),
+      variationNameSuffixVar2: sufV2.trim() === "" ? null : sufV2.trim(),
+    });
+  }
+  function clearAffix() {
+    setPrefV1(""); setSufV1(""); setPrefV2(""); setSufV2("");
+    affixMut.mutate({
+      publicationId: publication.id,
+      variationNamePrefixVar1: null,
+      variationNameSuffixVar1: null,
+      variationNamePrefixVar2: null,
+      variationNameSuffixVar2: null,
+    });
   }
 
   const titleLen = title.length;
@@ -345,6 +389,83 @@ function ContentSection({
         <p className="text-[10px] text-muted-foreground italic mt-0.5">
           Usado pela IA pra diferenciar título/descrição desta conta das outras (evita penalidade Shopee).
         </p>
+      </div>
+
+      {/* Fase 6.1.A: prefix/suffix do nome de variação, colapsável */}
+      <div className="border-t border-gray-200 pt-2">
+        <button
+          type="button"
+          onClick={() => setAffixOpen((v) => !v)}
+          className="text-[11px] text-orange-600 hover:text-orange-700 font-medium"
+        >
+          {affixOpen ? "▼" : "▶"} Personalizar nome de variação (prefix/suffix)
+          {(prefV1 || sufV1 || prefV2 || sufV2) && !affixOpen && (
+            <span className="ml-1 text-muted-foreground">— ativo</span>
+          )}
+        </button>
+        {affixOpen && (
+          <div className="space-y-2 mt-2 bg-gray-50 rounded p-2">
+            <p className="text-[10px] text-muted-foreground italic">
+              Aplicado no nome de cada variação na Shopee. Total ≤ 30 chars (truncado). Vazio = sem prefix/suffix.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Var 1 (produto) — prefix</Label>
+                <Input
+                  value={prefV1}
+                  onChange={(e) => setPrefV1(e.target.value.slice(0, 40))}
+                  maxLength={40}
+                  placeholder="ex: Premium"
+                  className="h-7 text-xs"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Var 1 (produto) — suffix</Label>
+                <Input
+                  value={sufV1}
+                  onChange={(e) => setSufV1(e.target.value.slice(0, 40))}
+                  maxLength={40}
+                  placeholder="ex: Plus"
+                  className="h-7 text-xs"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Var 2 (qty/cor) — prefix</Label>
+                <Input
+                  value={prefV2}
+                  onChange={(e) => setPrefV2(e.target.value.slice(0, 40))}
+                  maxLength={40}
+                  placeholder="ex: Kit"
+                  className="h-7 text-xs"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Var 2 (qty/cor) — suffix</Label>
+                <Input
+                  value={sufV2}
+                  onChange={(e) => setSufV2(e.target.value.slice(0, 40))}
+                  maxLength={40}
+                  placeholder="ex: Premium"
+                  className="h-7 text-xs"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 justify-end">
+              <Button
+                variant="ghost" size="sm"
+                onClick={clearAffix}
+                disabled={affixMut.isPending || (!prefV1 && !sufV1 && !prefV2 && !sufV2)}
+                className="h-7 text-xs"
+              >
+                Limpar
+              </Button>
+              <Button size="sm" onClick={saveAffix} disabled={affixMut.isPending} className="h-7 text-xs">
+                {affixMut.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                Salvar prefix/suffix
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 justify-end pt-1">

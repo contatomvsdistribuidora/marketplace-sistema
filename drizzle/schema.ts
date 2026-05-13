@@ -700,6 +700,14 @@ export const shopeeListingPublications = mysqlTable("shopee_listing_publications
   shopeeAccountId: bigint("shopee_account_id", { mode: "number" }).notNull(),
   priceMultiplier: decimal("price_multiplier", { precision: 8, scale: 4 }),
   minMarginPct: decimal("min_margin_pct", { precision: 5, scale: 2 }),
+  // Fase 6.1.A: prefix/suffix opcional pra nome de variação por conta.
+  // var1 = nome do produto (tier 1); var2 = quantidade/cor/etc (tier 2).
+  // Aplicado em publish após o cálculo de productOptions/optionLabels,
+  // limitado a 30 chars (Shopee constraint).
+  variationNamePrefixVar1: varchar("variation_name_prefix_var1", { length: 40 }),
+  variationNameSuffixVar1: varchar("variation_name_suffix_var1", { length: 40 }),
+  variationNamePrefixVar2: varchar("variation_name_prefix_var2", { length: 40 }),
+  variationNameSuffixVar2: varchar("variation_name_suffix_var2", { length: 40 }),
   customTitle: varchar("custom_title", { length: 120 }),
   customDescription: text("custom_description"),
   customThumbUrl: varchar("custom_thumb_url", { length: 500 }),

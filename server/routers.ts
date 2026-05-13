@@ -4593,6 +4593,52 @@ export const appRouter = router({
         return updated;
       }),
 
+    /**
+     * Fase 6.1.A: prefix/suffix do nome de variação por publication.
+     * 4 campos opcionais — null limpa o override (herda do listing).
+     * Validação 30 chars Shopee é aplicada no publish (truncamento defensivo).
+     */
+    updatePublicationVariationAffix: protectedProcedure
+      .input(z.object({
+        publicationId: z.number().int().positive(),
+        variationNamePrefixVar1: z.string().max(40).nullable(),
+        variationNameSuffixVar1: z.string().max(40).nullable(),
+        variationNamePrefixVar2: z.string().max(40).nullable(),
+        variationNameSuffixVar2: z.string().max(40).nullable(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const [own] = await sharedDb
+          .select({ pubId: shopeeListingPublications.id })
+          .from(shopeeListingPublications)
+          .innerJoin(
+            multiProductListings,
+            eq(multiProductListings.id, shopeeListingPublications.listingId),
+          )
+          .where(and(
+            eq(shopeeListingPublications.id, input.publicationId),
+            eq(multiProductListings.userId, ctx.user.id),
+          ))
+          .limit(1);
+        if (!own) throw new TRPCError({ code: "NOT_FOUND", message: "Publicação não encontrada." });
+
+        await sharedDb
+          .update(shopeeListingPublications)
+          .set({
+            variationNamePrefixVar1: input.variationNamePrefixVar1,
+            variationNameSuffixVar1: input.variationNameSuffixVar1,
+            variationNamePrefixVar2: input.variationNamePrefixVar2,
+            variationNameSuffixVar2: input.variationNameSuffixVar2,
+          })
+          .where(eq(shopeeListingPublications.id, input.publicationId));
+
+        const [updated] = await sharedDb
+          .select()
+          .from(shopeeListingPublications)
+          .where(eq(shopeeListingPublications.id, input.publicationId))
+          .limit(1);
+        return updated;
+      }),
+
     // Gera título por conta usando o mesmo gerador do Step B, mas com hint de
     // voz opcional pra reduzir similaridade entre contas (Shopee penaliza).
     // Escreve em custom_title (não no listing-pai). Não muda outras contas.
@@ -5529,6 +5575,11 @@ export const appRouter = router({
                 customDescription: pub.customDescription,
                 customThumbUrl: pub.customThumbUrl,
                 customVideoId: pub.customVideoId,
+                // Fase 6.1.A: prefix/suffix de variação por conta
+                variationNamePrefixVar1: pub.variationNamePrefixVar1,
+                variationNameSuffixVar1: pub.variationNameSuffixVar1,
+                variationNamePrefixVar2: pub.variationNamePrefixVar2,
+                variationNameSuffixVar2: pub.variationNameSuffixVar2,
               },
             );
             results.push({
