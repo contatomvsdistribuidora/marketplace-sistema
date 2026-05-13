@@ -3692,6 +3692,284 @@ export const appRouter = router({
       }),
 
     /**
+     * Fase 8.E-bis — sync FOCADO nas categorias que JÁ EXISTEM nos
+     * produtos publicados de cada account ativa do user.
+     *
+     * Diferença vs outras fases:
+     *  - 8.D (syncAllBrandsBR): TODAS as ~1748 leaves, 58-204h.
+     *  - 8.E (syncBrandsBRNightly): mesma cobertura mas janela 2h/noite.
+     *  - 8.E-bis (esta): SÓ categorias usadas em Bella+Bidushop+...
+     *    Cobertura mínima útil — geralmente 25-100 categorias, sync em
+     *    ~1-3h total. Recomendado pra rodar pré-validação Fase 7.E.
+     *
+     * Internamente reusa o mesmo padrão de syncAllBrandsForAccount +
+     * syncAllAttributesForAccount, mas itera TODAS as contas ativas
+     * (não recebe accountId como input). Sync brands + attributes
+     * em paralelo dentro de cada categoria.
+     */
+    syncBrandsAndAttrsForUsedCategories: protectedProcedure
+      .input(z.object({
+        force: z.boolean().optional().default(false),
+        language: z.string().optional().default("pt-BR"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // 1. Contas ativas
+        const accounts = await sharedDb
+          .select({ id: shopeeAccounts.id, shopName: shopeeAccounts.shopName })
+          .from(shopeeAccounts)
+          .where(and(
+            eq(shopeeAccounts.userId, ctx.user.id),
+            eq(shopeeAccounts.isActive, 1),
+            ne(shopeeAccounts.tokenStatus, "revoked"),
+          ))
+          .orderBy(asc(shopeeAccounts.shopName));
+
+        if (accounts.length === 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Nenhuma conta Shopee ativa.",
+          });
+        }
+
+        // 2. Pra cada conta, lista categorias únicas de seus produtos
+        const accountCategories: Array<{
+          accountId: number;
+          shopName: string;
+          categoryIds: number[];
+        }> = [];
+        const allCategoryIdsUnion = new Set<number>();
+
+        for (const acc of accounts) {
+          const rows = await sharedDb
+            .selectDistinct({ categoryId: shopeeProducts.categoryId })
+            .from(shopeeProducts)
+            .where(eq(shopeeProducts.shopeeAccountId, acc.id));
+          const ids = rows
+            .map((r) => Number(r.categoryId ?? 0))
+            .filter((c) => Number.isFinite(c) && c > 0);
+          accountCategories.push({
+            accountId: acc.id,
+            shopName: acc.shopName ?? `Conta #${acc.id}`,
+            categoryIds: ids,
+          });
+          for (const id of ids) allCategoryIdsUnion.add(id);
+        }
+
+        // Total de pares (account, category) que serão processados
+        const totalPairs = accountCategories.reduce((sum, ac) => sum + ac.categoryIds.length, 0);
+
+        if (totalPairs === 0) {
+          return {
+            jobStarted: false as const,
+            accounts: accountCategories,
+            totalCategoryAccountPairs: 0,
+            uniqueCategories: 0,
+            forceMode: input.force,
+          };
+        }
+
+        // 3. Se force=true: limpa progress rows pros (account, category)
+        // alvo de brand E attribute, forçando re-fetch
+        if (input.force) {
+          const { shopeeBrandSyncProgress, shopeeCategoryAttributeSyncProgress } = await import(
+            "../drizzle/schema"
+          );
+          for (const { accountId, categoryIds } of accountCategories) {
+            if (categoryIds.length === 0) continue;
+            await sharedDb
+              .delete(shopeeBrandSyncProgress)
+              .where(and(
+                eq(shopeeBrandSyncProgress.shopeeAccountId, accountId),
+                inArray(shopeeBrandSyncProgress.categoryId, categoryIds),
+              ));
+            await sharedDb
+              .delete(shopeeCategoryAttributeSyncProgress)
+              .where(and(
+                eq(shopeeCategoryAttributeSyncProgress.shopeeAccountId, accountId),
+                inArray(shopeeCategoryAttributeSyncProgress.categoryId, categoryIds),
+              ));
+          }
+        }
+
+        const language = input.language;
+        const snapshot = accountCategories.map((a) => ({
+          accountId: a.accountId,
+          shopName: a.shopName,
+          categoryIds: [...a.categoryIds],
+        }));
+
+        // 4. Worker em background
+        setImmediate(async () => {
+          const startedAt = Date.now();
+          const brandSync = await import("./shopee/brand-sync");
+          const attributeSync = await import("./shopee/attribute-sync");
+          let brandsSynced = 0, brandsCached = 0, brandsErrors = 0;
+          let attrsSynced = 0, attrsCached = 0, attrsErrors = 0;
+
+          for (const { accountId, shopName, categoryIds } of snapshot) {
+            console.log(
+              `[syncBrandsAndAttrsForUsedCategories] iniciando ${shopName} ` +
+              `(account=${accountId}) com ${categoryIds.length} categorias`,
+            );
+            for (let i = 0; i < categoryIds.length; i++) {
+              const categoryId = categoryIds[i];
+
+              try {
+                const r = await brandSync.syncBrandsForCategory(accountId, categoryId);
+                if (r.fromCache) brandsCached++;
+                else brandsSynced++;
+              } catch (e: any) {
+                brandsErrors++;
+              }
+
+              try {
+                const r = await attributeSync.syncAttributesForCategory(accountId, categoryId, language);
+                if (r.fromCache) attrsCached++;
+                else attrsSynced++;
+              } catch (e: any) {
+                attrsErrors++;
+              }
+
+              if ((i + 1) % 10 === 0) {
+                console.log(
+                  `[syncBrandsAndAttrsForUsedCategories] ${shopName}: ${i + 1}/${categoryIds.length}` +
+                  ` — brands ${brandsSynced}+${brandsCached} (${brandsErrors} err),` +
+                  ` attrs ${attrsSynced}+${attrsCached} (${attrsErrors} err)`,
+                );
+              }
+            }
+          }
+
+          const elapsedMin = ((Date.now() - startedAt) / 60000).toFixed(1);
+          console.log(
+            `[syncBrandsAndAttrsForUsedCategories] DONE em ${elapsedMin}min: ` +
+            `brands ${brandsSynced} synced, ${brandsCached} cached, ${brandsErrors} err | ` +
+            `attrs ${attrsSynced} synced, ${attrsCached} cached, ${attrsErrors} err`,
+          );
+        });
+
+        return {
+          jobStarted: true as const,
+          accounts: accountCategories.map((a) => ({
+            accountId: a.accountId,
+            shopName: a.shopName,
+            categoryCount: a.categoryIds.length,
+          })),
+          totalCategoryAccountPairs: totalPairs,
+          uniqueCategories: allCategoryIdsUnion.size,
+          forceMode: input.force,
+        };
+      }),
+
+    /**
+     * Fase 8.E-bis — status agregado SÓ pras categorias usadas em produtos
+     * publicados nas accounts ativas. Diferente de getBrandSyncStatusBR
+     * (agrega TUDO) — esta filtra pelas categorias do escopo "used".
+     */
+    getUsedCategoriesSyncStatus: protectedProcedure
+      .input(z.object({ language: z.string().optional().default("pt-BR") }))
+      .query(async ({ ctx, input }) => {
+        const { shopeeBrandSyncProgress, shopeeCategoryAttributeSyncProgress } = await import(
+          "../drizzle/schema"
+        );
+
+        const accounts = await sharedDb
+          .select({ id: shopeeAccounts.id, shopName: shopeeAccounts.shopName })
+          .from(shopeeAccounts)
+          .where(and(
+            eq(shopeeAccounts.userId, ctx.user.id),
+            eq(shopeeAccounts.isActive, 1),
+            ne(shopeeAccounts.tokenStatus, "revoked"),
+          ));
+
+        type AccountStatus = {
+          accountId: number;
+          shopName: string;
+          categoryCount: number;
+          brandsDone: number;
+          brandsPending: number;
+          brandsError: number;
+          attrsDone: number;
+          attrsPending: number;
+          attrsError: number;
+        };
+
+        const byAccount: AccountStatus[] = [];
+        let totalCategoryAccountPairs = 0;
+        let totalBrandsDone = 0;
+        let totalAttrsDone = 0;
+
+        for (const acc of accounts) {
+          const rows = await sharedDb
+            .selectDistinct({ categoryId: shopeeProducts.categoryId })
+            .from(shopeeProducts)
+            .where(eq(shopeeProducts.shopeeAccountId, acc.id));
+          const ids = rows
+            .map((r) => Number(r.categoryId ?? 0))
+            .filter((c) => Number.isFinite(c) && c > 0);
+          totalCategoryAccountPairs += ids.length;
+
+          const status: AccountStatus = {
+            accountId: acc.id,
+            shopName: acc.shopName ?? `Conta #${acc.id}`,
+            categoryCount: ids.length,
+            brandsDone: 0, brandsPending: 0, brandsError: 0,
+            attrsDone: 0, attrsPending: 0, attrsError: 0,
+          };
+
+          if (ids.length > 0) {
+            const brandRows = await sharedDb
+              .select({ status: shopeeBrandSyncProgress.status, count: sql<number>`COUNT(*)` })
+              .from(shopeeBrandSyncProgress)
+              .where(and(
+                eq(shopeeBrandSyncProgress.shopeeAccountId, acc.id),
+                inArray(shopeeBrandSyncProgress.categoryId, ids),
+              ))
+              .groupBy(shopeeBrandSyncProgress.status);
+            for (const r of brandRows) {
+              const c = Number(r.count);
+              if (r.status === "done") status.brandsDone = c;
+              else if (r.status === "error") status.brandsError = c;
+              else status.brandsPending += c;
+            }
+
+            const attrRows = await sharedDb
+              .select({ status: shopeeCategoryAttributeSyncProgress.status, count: sql<number>`COUNT(*)` })
+              .from(shopeeCategoryAttributeSyncProgress)
+              .where(and(
+                eq(shopeeCategoryAttributeSyncProgress.shopeeAccountId, acc.id),
+                eq(shopeeCategoryAttributeSyncProgress.language, input.language),
+                inArray(shopeeCategoryAttributeSyncProgress.categoryId, ids),
+              ))
+              .groupBy(shopeeCategoryAttributeSyncProgress.status);
+            for (const r of attrRows) {
+              const c = Number(r.count);
+              if (r.status === "done") status.attrsDone = c;
+              else if (r.status === "error") status.attrsError = c;
+              else status.attrsPending += c;
+            }
+          }
+
+          totalBrandsDone += status.brandsDone;
+          totalAttrsDone += status.attrsDone;
+          byAccount.push(status);
+        }
+
+        return {
+          accounts: byAccount,
+          totalCategoryAccountPairs,
+          totalBrandsDone,
+          totalAttrsDone,
+          brandsCompletionPct: totalCategoryAccountPairs > 0
+            ? (totalBrandsDone / totalCategoryAccountPairs) * 100
+            : 0,
+          attrsCompletionPct: totalCategoryAccountPairs > 0
+            ? (totalAttrsDone / totalCategoryAccountPairs) * 100
+            : 0,
+        };
+      }),
+
+    /**
      * Resolve a single category id to its breadcrumb (e.g. "Indústria >
      * Embalagens > Sacos de Lixo"). Reuses the cached tree from
      * shopee_category_cache; bootstraps it with one shop's token if absent.
