@@ -708,6 +708,8 @@ export const shopeeListingPublications = mysqlTable("shopee_listing_publications
   publishStatus: mysqlEnum("publish_status", ["pending", "publishing", "published", "failed"]).default("pending").notNull(),
   publishError: text("publish_error"),
   publishedAt: timestamp("published_at"),
+  qualityLevel: int("quality_level"),
+  unfinishedTasks: json("unfinished_tasks"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });

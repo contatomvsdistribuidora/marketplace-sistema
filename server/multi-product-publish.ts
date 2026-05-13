@@ -316,8 +316,11 @@ export async function publishMultiProductListing(
         resolvedDuration = vb.duration ?? undefined;
       }
     }
-    // Fallback URL crua só quando NÃO tem publication (legado BL global).
-    if (!resolvedVideoUrl && !targetPublication && (listing as any).videoUrl) {
+    // Fallback URL crua quando publication não tem custom_video_id e o listing
+    // tem só videoUrl puro (vídeo BL escolhido no Step 4 sem passar pelo bank).
+    // Fase 6.0.3: removida a guarda `!targetPublication` que vetava herança em
+    // multi-store, fazendo vídeo BL global sumir nas publications.
+    if (!resolvedVideoUrl && (listing as any).videoUrl) {
       resolvedVideoUrl = (listing as any).videoUrl;
     }
     if (resolvedVideoUrl) {
@@ -835,6 +838,10 @@ export async function publishMultiProductListing(
           shopeeItemId,
           publishedAt: new Date(),
           publishError: null,
+          // Fase 6.0.3: grava diagnóstico de qualidade por publication
+          // (antes só multi_product_listings ganhava — info perdida em multi).
+          qualityLevel,
+          unfinishedTasks,
         })
         .where(eq(shopeeListingPublications.id, targetPublication.id));
     } else {
