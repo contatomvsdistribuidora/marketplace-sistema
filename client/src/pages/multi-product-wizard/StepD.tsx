@@ -105,6 +105,19 @@ export function StepD({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listing.id, listing.shopeeItemId]);
 
+  // Fase 6.0.2: dados pra exibição de status/links multi-loja. Mesmas queries
+  // que MultiStorePublishPanel já usa internamente — react-query dedupe.
+  const { data: accountsList } = trpc.shopee.listActiveAccounts.useQuery();
+  const { data: publicationsList } = trpc.multiProduct.listPublications.useQuery(
+    { listingId: listing.id },
+  );
+  const accountById = new Map((accountsList ?? []).map((a) => [a.id, a]));
+  const publications = publicationsList ?? [];
+  const publishedPubs = publications.filter(
+    (p) => p.publishStatus === "published" && p.shopeeItemId,
+  );
+  const failedPubs = publications.filter((p) => p.publishStatus === "failed");
+
   const isPrincipalShopee = listing.mainProductSource === "shopee";
   const wsCategoryId = (() => {
     try {
@@ -122,7 +135,9 @@ export function StepD({
       return "Descrição precisa ter pelo menos 30 caracteres (Step B).";
     if (!listing.thumbUrl) return "Gere a thumb no Step C antes de publicar.";
     if (items.length < 2) return "Adicione pelo menos 2 produtos no Step A.";
-    if (listing.status === "published") return "Anúncio já publicado.";
+    // Fase 6.0.2: NÃO bloqueia mais quando listing.status === "published".
+    // Multi-loja permite re-publicar contas falhas ou adicionar novas contas.
+    // Risco de duplicar a publicação numa conta já OK é assumido pelo operador.
     return null;
   })();
 
@@ -312,7 +327,8 @@ export function StepD({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-sm">
+          {/* Fase 6.0.2: status + nomes das contas publicadas/falhas */}
+          <div className="flex items-center gap-2 text-sm flex-wrap">
             <span className="text-muted-foreground">Status:</span>
             <Badge
               variant={
@@ -326,17 +342,20 @@ export function StepD({
               }
             >
               {listing.status}
+              {publishedPubs.length > 0 && (
+                <> → {publishedPubs
+                  .map((p) => accountById.get(p.shopeeAccountId)?.shopName ?? `#${p.shopeeAccountId}`)
+                  .join(", ")}</>
+              )}
             </Badge>
+            {failedPubs.length > 0 && (
+              <Badge variant="destructive">
+                ✗ {failedPubs
+                  .map((p) => accountById.get(p.shopeeAccountId)?.shopName ?? `#${p.shopeeAccountId}`)
+                  .join(", ")} falhou{failedPubs.length > 1 ? "" : ""}
+              </Badge>
+            )}
           </div>
-
-          {listing.shopeeItemId && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Item ID Shopee:</span>
-              <code className="text-xs bg-muted px-2 py-0.5 rounded">
-                {String(listing.shopeeItemId)}
-              </code>
-            </div>
-          )}
 
           {listing.status === "error" && listing.lastError && (
             <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -368,23 +387,35 @@ export function StepD({
               )}
             </Button>
           )}
-          {listing.status !== "published" && (
-            <MultiStorePublishPanel
-              listing={listing}
-              blockingPublishReason={blockingPublishReason}
-              onChange={onChange}
-            />
-          )}
+          {/* Fase 6.0.2: panel SEMPRE visível pra ver detalhe por conta +
+              retry de falhas / publicar em contas novas pós-published. */}
+          <MultiStorePublishPanel
+            listing={listing}
+            blockingPublishReason={blockingPublishReason}
+            onChange={onChange}
+          />
 
-          {(publishedItemUrl || listing.status === "published") && listing.shopeeItemId && (
-            <a
-              href={publishedItemUrl || `https://shopee.com.br/product/0/${listing.shopeeItemId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-center text-sm underline text-blue-600 hover:text-blue-800"
-            >
-              Ver anúncio na Shopee →
-            </a>
+          {/* Fase 6.0.2: 1 link por conta publicada (shop_id correto vem da
+              account associada à publication, não do listing-pai). */}
+          {publishedPubs.length > 0 && (
+            <div className="flex flex-col gap-1 items-center">
+              {publishedPubs.map((p) => {
+                const acc = accountById.get(p.shopeeAccountId);
+                const shopId = acc?.shopId ?? 0;
+                const accName = acc?.shopName ?? `Conta #${p.shopeeAccountId}`;
+                return (
+                  <a
+                    key={p.id}
+                    href={`https://shopee.com.br/product/${shopId}/${p.shopeeItemId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm underline text-blue-600 hover:text-blue-800"
+                  >
+                    Ver na {accName} (#{p.shopeeItemId}) →
+                  </a>
+                );
+              })}
+            </div>
           )}
 
           {listing.status === "published" && (
