@@ -3392,6 +3392,306 @@ export const appRouter = router({
       }),
 
     /**
+     * Fase 8.E — sync incremental com janela temporal fixa.
+     *
+     * Diferença vs syncAllBrandsBR (8.D):
+     *  - 8.D itera TODAS as ~1748 leaves sem limite de tempo (worker pode
+     *    rodar 58-204h ininterruptamente).
+     *  - 8.E para após maxDurationMinutes (default 2h) e retoma da próxima
+     *    pendente na próxima execução. ~2 meses pra cobrir 100%.
+     *
+     * Estratégia de priorização (ordem de processamento):
+     *  1. Leaves SEM progress row (nunca sincronizadas) — pending implícito
+     *  2. status='error' (re-try)
+     *  3. status='in_progress' velho (stale lock — sync travado)
+     *  4. status='done' com lastSyncedAt > TTL (refresh)
+     *  5. status='done' fresh → PULADAS (já cacheadas)
+     *
+     * Estado persistido em settings.brand_sync_nightly_state como JSON
+     * pra UI mostrar histórico e estimativa de noites restantes.
+     *
+     * Worker em setImmediate (mesma forma do 8.D). Falha em 1 categoria
+     * não para o sync.
+     */
+    syncBrandsBRNightly: protectedProcedure
+      .input(z.object({
+        maxDurationMinutes: z.number().positive().default(120),
+        includeAttributes: z.boolean().default(true),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const REGION = "BR";
+        const TTL_MS = 24 * 60 * 60 * 1000; // mesmo TTL do brand-sync.ts
+        const STALE_LOCK_MS = 5 * 60 * 1000; // mesmo STALE_LOCK do brand-sync.ts
+        const NIGHTLY_STATE_KEY = "brand_sync_nightly_state";
+
+        // 1. Account ativa
+        const [acc] = await sharedDb
+          .select({ id: shopeeAccounts.id })
+          .from(shopeeAccounts)
+          .where(and(
+            eq(shopeeAccounts.userId, ctx.user.id),
+            eq(shopeeAccounts.isActive, 1),
+            ne(shopeeAccounts.tokenStatus, "revoked"),
+          ))
+          .orderBy(asc(shopeeAccounts.shopName))
+          .limit(1);
+        if (!acc) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Nenhuma conta Shopee ativa pra obter token.",
+          });
+        }
+        const accountId = acc.id;
+
+        // 2. Tree do cache
+        const [cached] = await sharedDb
+          .select({ categoryTree: shopeeCategoryCache.categoryTree })
+          .from(shopeeCategoryCache)
+          .where(eq(shopeeCategoryCache.region, REGION))
+          .limit(1);
+        const tree = (cached?.categoryTree ?? []) as any[];
+        if (!Array.isArray(tree) || tree.length === 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "shopee_category_cache vazio. Rode syncAllCategoriesBR antes.",
+          });
+        }
+
+        // 3. Identifica leaves
+        const parentIds = new Set<number>();
+        for (const c of tree) {
+          const p = Number(c?.parent_category_id ?? 0);
+          if (p > 0) parentIds.add(p);
+        }
+        const allLeafIds: number[] = [];
+        for (const c of tree) {
+          const id = Number(c?.category_id ?? 0);
+          if (id > 0 && !parentIds.has(id)) allLeafIds.push(id);
+        }
+
+        // 4. Carrega progress rows existentes pra priorizar
+        const { shopeeBrandSyncProgress, shopeeCategoryAttributeSyncProgress } = await import(
+          "../drizzle/schema"
+        );
+        const brandProgressRows = await sharedDb
+          .select()
+          .from(shopeeBrandSyncProgress)
+          .where(and(
+            eq(shopeeBrandSyncProgress.shopeeAccountId, accountId),
+            inArray(shopeeBrandSyncProgress.categoryId, allLeafIds),
+          ));
+        const brandProgressByCat = new Map<number, typeof brandProgressRows[number]>();
+        for (const r of brandProgressRows) brandProgressByCat.set(Number(r.categoryId), r);
+
+        // Score por categoria pra priorização (menor = processa primeiro)
+        const nowMs = Date.now();
+        const scoreFor = (catId: number): number | null => {
+          const p = brandProgressByCat.get(catId);
+          if (!p) return 1; // nunca sincronizada — alta prioridade
+          if (p.status === "error") return 2;
+          if (p.status === "in_progress") {
+            const updatedAt = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+            if (nowMs - updatedAt > STALE_LOCK_MS) return 3; // lock antigo — resume
+            return null; // outro worker trabalhando, pula
+          }
+          if (p.status === "done") {
+            const lastSync = p.lastSyncedAt ? new Date(p.lastSyncedAt).getTime() : 0;
+            if (nowMs - lastSync > TTL_MS) return 4; // refresh por TTL
+            return null; // done + fresh → pula
+          }
+          if (p.status === "pending") return 1;
+          return 1;
+        };
+
+        const queue: number[] = [];
+        const scoreCounts = { p1: 0, p2: 0, p3: 0, p4: 0, skipped: 0 };
+        const withScore: Array<{ id: number; score: number }> = [];
+        for (const id of allLeafIds) {
+          const s = scoreFor(id);
+          if (s === null) { scoreCounts.skipped++; continue; }
+          withScore.push({ id, score: s });
+          if (s === 1) scoreCounts.p1++;
+          else if (s === 2) scoreCounts.p2++;
+          else if (s === 3) scoreCounts.p3++;
+          else scoreCounts.p4++;
+        }
+        // Sort por score asc, id desc (mais recentes primeiro dentro do grupo)
+        withScore.sort((a, b) => a.score - b.score || b.id - a.id);
+        for (const x of withScore) queue.push(x.id);
+
+        const includeAttributes = input.includeAttributes;
+        const maxDurationMs = input.maxDurationMinutes * 60 * 1000;
+        const userId = ctx.user.id;
+
+        const dbMod = await import("./db");
+
+        // Worker em background. tRPC retorna imediatamente.
+        setImmediate(async () => {
+          const startedAt = Date.now();
+          let categoriesDone = 0;
+          let categoriesErrored = 0;
+          let categoriesSkipped = 0;
+          let stoppedByTimeout = false;
+
+          const brandSync = await import("./shopee/brand-sync");
+          const attributeSync = includeAttributes
+            ? await import("./shopee/attribute-sync")
+            : null;
+
+          for (let i = 0; i < queue.length; i++) {
+            // Verifica janela ANTES de cada categoria — evita ficar preso
+            // numa categoria gigante (3.5min) sem checar tempo.
+            const elapsed = Date.now() - startedAt;
+            if (elapsed >= maxDurationMs) {
+              stoppedByTimeout = true;
+              console.log(
+                `[syncBrandsBRNightly] janela ${input.maxDurationMinutes}min esgotada. ` +
+                `Processadas ${i}/${queue.length} categorias. Próxima execução retoma de cat=${queue[i]}`,
+              );
+              break;
+            }
+
+            const categoryId = queue[i];
+            let hadError = false;
+
+            try {
+              const r = await brandSync.syncBrandsForCategory(accountId, categoryId);
+              if (r.fromCache) categoriesSkipped++;
+              else categoriesDone++;
+            } catch (e: any) {
+              categoriesErrored++;
+              hadError = true;
+            }
+
+            if (attributeSync) {
+              try {
+                await attributeSync.syncAttributesForCategory(accountId, categoryId);
+              } catch (e: any) {
+                if (!hadError) categoriesErrored++;
+              }
+            }
+
+            if ((i + 1) % 10 === 0) {
+              const pct = (((i + 1) / queue.length) * 100).toFixed(1);
+              const elapsedMin = (elapsed / 60000).toFixed(1);
+              console.log(
+                `[syncBrandsBRNightly] ${i + 1}/${queue.length} (${pct}%) — ` +
+                `${categoriesDone} done, ${categoriesSkipped} cached, ${categoriesErrored} err ` +
+                `em ${elapsedMin}min`,
+              );
+            }
+          }
+
+          const finalElapsedMs = Date.now() - startedAt;
+
+          // Persiste estado em settings pra histórico e estimativa de noites
+          // restantes. Acumula totalRuns e totalCategoriesDone — UI usa.
+          let previousState: any = {};
+          try {
+            const raw = await dbMod.getSetting(userId, NIGHTLY_STATE_KEY);
+            if (raw) previousState = JSON.parse(raw);
+          } catch { /* sem estado prévio */ }
+          const totalRuns = Number(previousState.totalRuns ?? 0) + 1;
+          const totalCategoriesDoneAccum = Number(previousState.totalCategoriesDone ?? 0) + categoriesDone;
+          const newState = {
+            lastRunAt: new Date().toISOString(),
+            lastRunDurationMs: finalElapsedMs,
+            lastRunCategoriesDone: categoriesDone,
+            lastRunCategoriesSkipped: categoriesSkipped,
+            lastRunCategoriesErrored: categoriesErrored,
+            lastRunStoppedByTimeout: stoppedByTimeout,
+            lastRunMaxDurationMinutes: input.maxDurationMinutes,
+            lastRunIncludeAttributes: includeAttributes,
+            totalRuns,
+            totalCategoriesDone: totalCategoriesDoneAccum,
+          };
+          try {
+            await dbMod.setSetting(userId, NIGHTLY_STATE_KEY, JSON.stringify(newState));
+          } catch (e: any) {
+            console.error(`[syncBrandsBRNightly] falha ao salvar state em settings:`, e?.message ?? e);
+          }
+
+          console.log(
+            `[syncBrandsBRNightly] DONE em ${(finalElapsedMs / 60000).toFixed(1)}min: ` +
+            `${categoriesDone} synced, ${categoriesSkipped} cached, ${categoriesErrored} errors. ` +
+            `stoppedByTimeout=${stoppedByTimeout}. totalRuns=${totalRuns}`,
+          );
+        });
+
+        return {
+          jobStarted: true as const,
+          accountId,
+          totalLeafCategories: allLeafIds.length,
+          queueLength: queue.length,
+          skippedFreshlyCached: scoreCounts.skipped,
+          priority: scoreCounts,
+          maxDurationMinutes: input.maxDurationMinutes,
+          includeAttributes,
+        };
+      }),
+
+    /**
+     * Fase 8.E — estado da última noitada + estimativa de noites restantes.
+     * Lê settings.brand_sync_nightly_state JSON e agrega progresso atual.
+     */
+    getBrandSyncNightlyStatus: protectedProcedure
+      .query(async ({ ctx }) => {
+        const NIGHTLY_STATE_KEY = "brand_sync_nightly_state";
+        const REGION = "BR";
+
+        const dbMod = await import("./db");
+        const raw = await dbMod.getSetting(ctx.user.id, NIGHTLY_STATE_KEY);
+        let state: any = null;
+        if (raw) {
+          try { state = JSON.parse(raw); } catch { /* corrompido */ }
+        }
+
+        // Tree → total leaves (denominador da estimativa)
+        const [cached] = await sharedDb
+          .select({ categoryTree: shopeeCategoryCache.categoryTree })
+          .from(shopeeCategoryCache)
+          .where(eq(shopeeCategoryCache.region, REGION))
+          .limit(1);
+        const tree = (cached?.categoryTree ?? []) as any[];
+        let totalLeafCategories = 0;
+        if (Array.isArray(tree) && tree.length > 0) {
+          const parentIds = new Set<number>();
+          for (const c of tree) {
+            const p = Number(c?.parent_category_id ?? 0);
+            if (p > 0) parentIds.add(p);
+          }
+          for (const c of tree) {
+            const id = Number(c?.category_id ?? 0);
+            if (id > 0 && !parentIds.has(id)) totalLeafCategories++;
+          }
+        }
+
+        // Done count atual via shopeeBrandSyncProgress
+        const { shopeeBrandSyncProgress } = await import("../drizzle/schema");
+        const [doneRow] = await sharedDb
+          .select({ count: sql<number>`COUNT(*)` })
+          .from(shopeeBrandSyncProgress)
+          .where(eq(shopeeBrandSyncProgress.status, "done"));
+        const currentDone = Number(doneRow?.count ?? 0);
+        const remaining = Math.max(0, totalLeafCategories - currentDone);
+
+        // Estimativa: usa lastRunCategoriesDone como rate; se ausente, default 50/noite
+        const ratePerNight = Number(state?.lastRunCategoriesDone ?? 0) > 0
+          ? Number(state.lastRunCategoriesDone)
+          : 50;
+        const estimatedNightsToFull = remaining > 0 ? Math.ceil(remaining / ratePerNight) : 0;
+
+        return {
+          state,
+          totalLeafCategories,
+          currentDone,
+          remaining,
+          estimatedNightsToFull,
+          ratePerNightUsed: ratePerNight,
+        };
+      }),
+
+    /**
      * Resolve a single category id to its breadcrumb (e.g. "Indústria >
      * Embalagens > Sacos de Lixo"). Reuses the cached tree from
      * shopee_category_cache; bootstraps it with one shop's token if absent.
