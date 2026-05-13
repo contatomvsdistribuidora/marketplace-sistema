@@ -126,28 +126,69 @@ export function StepD({
     } catch { return null; }
   })();
 
+  // Fase 6.0.5: validação considera publications em multi-loja.
+  // Pra cada publication marcada, valor efetivo = custom_X ?? listing.X.
+  // Em single-conta (publications vazio), cai no comportamento legado.
+  const effectiveFor = (
+    pub: { customTitle: string | null; customDescription: string | null; customThumbUrl: string | null } | undefined,
+  ) => ({
+    title: (pub?.customTitle ?? listing.title) ?? "",
+    description: (pub?.customDescription ?? listing.description) ?? "",
+    thumbUrl: (pub?.customThumbUrl ?? listing.thumbUrl) ?? "",
+  });
+
+  const isMultiStore = publications.length > 0;
+
   const blockingPublishReason: string | null = (() => {
     if (!isPrincipalShopee && !wsCategoryId)
       return "Marque um produto Shopee como ⭐ principal no Step A OU escolha a categoria Shopee no Step C.";
+    if (items.length < 2) return "Adicione pelo menos 2 produtos no Step A.";
+
+    if (isMultiStore) {
+      // Multi-loja: cada publication precisa ter title/desc/thumb válidos
+      // (custom da publication OU herdado do listing).
+      for (const pub of publications) {
+        const eff = effectiveFor(pub);
+        const accName = accountById.get(pub.shopeeAccountId)?.shopName ?? `Conta #${pub.shopeeAccountId}`;
+        if (eff.title.trim().length < 10) {
+          return `Conta "${accName}" precisa de título com pelo menos 10 caracteres (Step 3).`;
+        }
+        if (eff.description.trim().length < 30) {
+          return `Conta "${accName}" precisa de descrição com pelo menos 30 caracteres (Step 3).`;
+        }
+        if (!eff.thumbUrl) {
+          return `Conta "${accName}" precisa de thumb (Step 4).`;
+        }
+      }
+      return null;
+    }
+
+    // Single-conta (legacy): valida campos do listing direto
     if (!listing.title || listing.title.trim().length < 10)
       return "Título precisa ter pelo menos 10 caracteres (Step B).";
     if (!listing.description || listing.description.trim().length < 30)
       return "Descrição precisa ter pelo menos 30 caracteres (Step B).";
     if (!listing.thumbUrl) return "Gere a thumb no Step C antes de publicar.";
-    if (items.length < 2) return "Adicione pelo menos 2 produtos no Step A.";
-    // Fase 6.0.2: NÃO bloqueia mais quando listing.status === "published".
-    // Multi-loja permite re-publicar contas falhas ou adicionar novas contas.
-    // Risco de duplicar a publicação numa conta já OK é assumido pelo operador.
     return null;
   })();
 
-  const checks = {
-    products: items.length >= 2,
-    title: !!listing.title && listing.title.trim().length >= 10,
-    description: !!listing.description && listing.description.trim().length >= 30,
-    thumb: !!listing.thumbUrl,
-    video: !!listing.videoBankId || !!listing.videoUrl,
-  };
+  // Checks pros badges Status no resumo. Em multi-loja, considera "ok" se
+  // TODAS as publications têm o campo efetivo preenchido.
+  const checks = isMultiStore
+    ? {
+        products: items.length >= 2,
+        title: publications.every((p) => effectiveFor(p).title.trim().length >= 10),
+        description: publications.every((p) => effectiveFor(p).description.trim().length >= 30),
+        thumb: publications.every((p) => !!effectiveFor(p).thumbUrl),
+        video: publications.every((p) => !!p.customVideoId || !!listing.videoBankId || !!listing.videoUrl),
+      }
+    : {
+        products: items.length >= 2,
+        title: !!listing.title && listing.title.trim().length >= 10,
+        description: !!listing.description && listing.description.trim().length >= 30,
+        thumb: !!listing.thumbUrl,
+        video: !!listing.videoBankId || !!listing.videoUrl,
+      };
 
   const Status = ({ ok }: { ok: boolean }) =>
     ok ? (
@@ -254,6 +295,12 @@ export function StepD({
         </CardContent>
       </Card>
 
+      {/* Fase 6.0.5: Card "Mídia" global só faz sentido em single-conta.
+          Em multi-loja, o MultiStorePublishPanel abaixo já mostra thumb +
+          vídeo efetivos por publication (override ?? listing). Esconder
+          evita confusão ("Mídia: faltando" mesmo com custom em todas as
+          publications). */}
+      {!isMultiStore && (
       <Card>
         <CardHeader className="flex flex-row items-start justify-between">
           <div>
@@ -313,6 +360,7 @@ export function StepD({
           )}
         </CardContent>
       </Card>
+      )}
 
       <Card>
         <CardHeader>
