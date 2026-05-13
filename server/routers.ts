@@ -3176,6 +3176,222 @@ export const appRouter = router({
       }),
 
     /**
+     * Fase 8.D — sync proativo de marcas (e opcionalmente atributos) pra
+     * TODAS as categorias leaf do shopee_category_cache.
+     *
+     * Diferença vs syncAllBrandsForAccount: aquela filtra pelas categorias
+     * dos PRODUTOS do user (~25-50 categorias). Esta itera TODAS as ~1748
+     * categorias leaf da árvore BR — cobertura total pra eliminar gargalo
+     * BrandPicker em runtime.
+     *
+     * Worker setImmediate (não bloqueia tRPC). Iteração serial respeita
+     * rate limit Shopee (withRateLimit já encapsula). Falha em uma categoria
+     * NÃO para o sync — apenas registra error no progress row.
+     *
+     * Pré-requisito: shopee_category_cache populado (rode syncAllCategoriesBR
+     * antes na primeira execução).
+     */
+    syncAllBrandsBR: protectedProcedure
+      .input(z.object({
+        force: z.boolean().optional().default(false),
+        includeAttributes: z.boolean().optional().default(true),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const REGION = "BR";
+
+        // Conta ativa pra accessToken (marcas são per-shop pra API mas o
+        // cache é regional — qualquer shop BR serve).
+        const [acc] = await sharedDb
+          .select({ id: shopeeAccounts.id })
+          .from(shopeeAccounts)
+          .where(and(
+            eq(shopeeAccounts.userId, ctx.user.id),
+            eq(shopeeAccounts.isActive, 1),
+            ne(shopeeAccounts.tokenStatus, "revoked"),
+          ))
+          .orderBy(asc(shopeeAccounts.shopName))
+          .limit(1);
+
+        if (!acc) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Nenhuma conta Shopee ativa pra obter token.",
+          });
+        }
+
+        // Lê árvore de categorias do cache.
+        const [cached] = await sharedDb
+          .select({ categoryTree: shopeeCategoryCache.categoryTree })
+          .from(shopeeCategoryCache)
+          .where(eq(shopeeCategoryCache.region, REGION))
+          .limit(1);
+
+        const tree = (cached?.categoryTree ?? []) as any[];
+        if (!Array.isArray(tree) || tree.length === 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "shopee_category_cache vazio. Rode syncAllCategoriesBR antes.",
+          });
+        }
+
+        // Identifica categorias leaf (publicáveis).
+        const parentIds = new Set<number>();
+        for (const c of tree) {
+          const p = Number(c?.parent_category_id ?? 0);
+          if (p > 0) parentIds.add(p);
+        }
+        const leafIds: number[] = [];
+        for (const c of tree) {
+          const id = Number(c?.category_id ?? 0);
+          if (id > 0 && !parentIds.has(id)) leafIds.push(id);
+        }
+
+        const accountId = acc.id;
+        const force = input.force;
+        const includeAttributes = input.includeAttributes;
+
+        // Force=true: limpa progress rows pra forçar re-fetch
+        // (syncBrandsForCategory pula quando status='done' + TTL fresh).
+        if (force) {
+          const { shopeeBrandSyncProgress } = await import("../drizzle/schema");
+          await sharedDb
+            .delete(shopeeBrandSyncProgress)
+            .where(and(
+              eq(shopeeBrandSyncProgress.shopeeAccountId, accountId),
+              inArray(shopeeBrandSyncProgress.categoryId, leafIds),
+            ));
+          if (includeAttributes) {
+            const { shopeeCategoryAttributeSyncProgress } = await import("../drizzle/schema");
+            await sharedDb
+              .delete(shopeeCategoryAttributeSyncProgress)
+              .where(and(
+                eq(shopeeCategoryAttributeSyncProgress.shopeeAccountId, accountId),
+                inArray(shopeeCategoryAttributeSyncProgress.categoryId, leafIds),
+              ));
+          }
+        }
+
+        // Worker em background. tRPC retorna imediatamente.
+        setImmediate(async () => {
+          const startedAt = Date.now();
+          let brandsSynced = 0, brandsSkipped = 0, brandsErrors = 0;
+          let attrsSynced = 0, attrsSkipped = 0, attrsErrors = 0;
+
+          const brandSync = await import("./shopee/brand-sync");
+          const attributeSync = includeAttributes
+            ? await import("./shopee/attribute-sync")
+            : null;
+
+          for (let i = 0; i < leafIds.length; i++) {
+            const categoryId = leafIds[i];
+
+            try {
+              const r = await brandSync.syncBrandsForCategory(accountId, categoryId);
+              if (r.fromCache) brandsSkipped++;
+              else brandsSynced++;
+            } catch (e: any) {
+              brandsErrors++;
+              // erro já logado por syncBrandsForCategory; continua
+            }
+
+            if (attributeSync) {
+              try {
+                const r = await attributeSync.syncAttributesForCategory(accountId, categoryId);
+                if (r.fromCache) attrsSkipped++;
+                else attrsSynced++;
+              } catch (e: any) {
+                attrsErrors++;
+              }
+            }
+
+            if ((i + 1) % 50 === 0) {
+              const pct = (((i + 1) / leafIds.length) * 100).toFixed(1);
+              console.log(
+                `[syncAllBrandsBR] ${i + 1}/${leafIds.length} (${pct}%): ` +
+                `brands ${brandsSynced}+${brandsSkipped} (${brandsErrors} err)` +
+                (attributeSync ? ` attrs ${attrsSynced}+${attrsSkipped} (${attrsErrors} err)` : ""),
+              );
+            }
+          }
+
+          console.log(
+            `[syncAllBrandsBR] DONE em ${Date.now() - startedAt}ms: ` +
+            `brands ${brandsSynced} synced, ${brandsSkipped} cached, ${brandsErrors} errors` +
+            (attributeSync ? ` | attrs ${attrsSynced} synced, ${attrsSkipped} cached, ${attrsErrors} errors` : ""),
+          );
+        });
+
+        return {
+          jobStarted: true as const,
+          accountId,
+          totalLeafCategories: leafIds.length,
+          includeAttributes,
+          forceMode: force,
+        };
+      }),
+
+    /**
+     * Fase 8.D — status agregado do sync regional de marcas (e atributos).
+     *
+     * Útil pra UI mostrar barra de progresso enquanto syncAllBrandsBR
+     * roda em background. Diferente de `getBrandSyncStatus` (per-account):
+     * este agrega TODAS as rows, já que a 1ª account ativa é a "fonte de
+     * verdade" pra o sync global da fase 8.
+     */
+    getBrandSyncStatusBR: protectedProcedure
+      .input(z.object({ includeAttributes: z.boolean().optional().default(true) }))
+      .query(async ({ input }) => {
+        const { shopeeBrandSyncProgress, shopeeCategoryAttributeSyncProgress } = await import(
+          "../drizzle/schema"
+        );
+
+        const brandRows = await sharedDb
+          .select({
+            status: shopeeBrandSyncProgress.status,
+            count: sql<number>`COUNT(*)`,
+          })
+          .from(shopeeBrandSyncProgress)
+          .groupBy(shopeeBrandSyncProgress.status);
+        const brandByStatus: Record<string, number> = {};
+        for (const r of brandRows) brandByStatus[r.status] = Number(r.count);
+
+        let attributes: Record<string, number> | null = null;
+        if (input.includeAttributes) {
+          const attrRows = await sharedDb
+            .select({
+              status: shopeeCategoryAttributeSyncProgress.status,
+              count: sql<number>`COUNT(*)`,
+            })
+            .from(shopeeCategoryAttributeSyncProgress)
+            .groupBy(shopeeCategoryAttributeSyncProgress.status);
+          attributes = {};
+          for (const r of attrRows) attributes[r.status] = Number(r.count);
+        }
+
+        const total = (s: Record<string, number>) =>
+          (s.pending ?? 0) + (s.in_progress ?? 0) + (s.done ?? 0) + (s.error ?? 0);
+
+        return {
+          brands: {
+            pending: brandByStatus.pending ?? 0,
+            inProgress: brandByStatus.in_progress ?? 0,
+            done: brandByStatus.done ?? 0,
+            error: brandByStatus.error ?? 0,
+            total: total(brandByStatus),
+          },
+          attributes: attributes
+            ? {
+                pending: attributes.pending ?? 0,
+                inProgress: attributes.in_progress ?? 0,
+                done: attributes.done ?? 0,
+                error: attributes.error ?? 0,
+                total: total(attributes),
+              }
+            : null,
+        };
+      }),
+
+    /**
      * Resolve a single category id to its breadcrumb (e.g. "Indústria >
      * Embalagens > Sacos de Lixo"). Reuses the cached tree from
      * shopee_category_cache; bootstraps it with one shop's token if absent.
