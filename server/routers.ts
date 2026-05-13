@@ -3085,25 +3085,60 @@ export const appRouter = router({
           .where(and(eq(shopeeBrandCache.region, REGION), eq(shopeeBrandCache.categoryId, input.categoryId)))
           .limit(1);
 
+        // Fase 6.0.6: cache "fresh com lista vazia" é tratado como stale.
+        // Cache poisoning protection — se cache foi populado com [] por algum
+        // erro anterior, força nova chamada à API.
         const isFresh = cached
           && cached.updatedAt
           && Date.now() - new Date(cached.updatedAt).getTime() < TTL_MS
-          && Array.isArray(cached.brandList);
+          && Array.isArray(cached.brandList)
+          && (cached.brandList as any[]).length > 0;
 
         let brands = isFresh ? (cached!.brandList as any[]) : null;
         if (!brands) {
-          const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
-          brands = await shopeePublish.getBrandList(accessToken, shopId, input.categoryId);
-          if (cached) {
-            await db.update(shopeeBrandCache)
-              .set({ brandList: brands })
-              .where(and(eq(shopeeBrandCache.region, REGION), eq(shopeeBrandCache.categoryId, input.categoryId)));
-          } else {
-            await db.insert(shopeeBrandCache).values({ region: REGION, categoryId: input.categoryId, brandList: brands });
+          // Fase 6.0.6: try/catch defensivo. Erro da API Shopee
+          // (permission_denied, rate limit, network) NÃO quebra UI — retorna
+          // só [NoBrand sintético] pra operador escolher "sem marca" ou
+          // digitar livre via Enter no BrandPicker.
+          try {
+            const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+            brands = await shopeePublish.getBrandList(accessToken, shopId, input.categoryId);
+            console.log(`[searchBrands] cat=${input.categoryId} acct=${input.accountId}: fetched ${brands.length} brands from Shopee API`);
+            if (cached) {
+              await db.update(shopeeBrandCache)
+                .set({ brandList: brands })
+                .where(and(eq(shopeeBrandCache.region, REGION), eq(shopeeBrandCache.categoryId, input.categoryId)));
+            } else {
+              await db.insert(shopeeBrandCache).values({ region: REGION, categoryId: input.categoryId, brandList: brands });
+            }
+          } catch (e: any) {
+            console.error(
+              `[searchBrands] cat=${input.categoryId} acct=${input.accountId}: API falhou — ${e?.message ?? e}. Retornando só NoBrand.`,
+            );
+            // NoBrand sintético — operador pode escolher "sem marca" ou digitar livre.
+            brands = [{ brand_id: 0, original_brand_name: "NoBrand", display_brand_name: "Sem marca" }];
           }
         }
 
         return shopeePublish.fuzzyMatchBrands(brands as any, input.query, input.limit ?? 20);
+      }),
+
+    /**
+     * Fase 6.0.6: invalida cache de marcas pra uma categoria. Útil quando
+     * cache foi populado em condições ruins (permission_denied silencioso
+     * antes do fix, ou marcas novas na Shopee que ainda não rotacionaram).
+     */
+    invalidateBrandCache: protectedProcedure
+      .input(z.object({ categoryId: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const { shopeeBrandCache } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        const result = await sharedDb
+          .delete(shopeeBrandCache)
+          .where(and(eq(shopeeBrandCache.region, "BR"), eq(shopeeBrandCache.categoryId, input.categoryId)));
+        const affected = (result as any)?.[0]?.affectedRows ?? (result as any)?.affectedRows ?? 0;
+        console.log(`[invalidateBrandCache] cat=${input.categoryId}: deleted ${affected} cache row(s)`);
+        return { invalidated: affected > 0 };
       }),
 
     /**
