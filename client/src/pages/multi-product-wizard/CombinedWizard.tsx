@@ -906,9 +906,17 @@ export function CombinedWizard({
       }
     }
 
-    // Override por celula sempre vence; demais modos aplicam factor de
-    // desconto progressivo. blPrice nao aplica desconto — preco eh literal.
-    if (priceOverrides[idx] != null) {
+    // Fase 8.K: preço digitado manualmente na célula (opt.price) tem
+    // prioridade MÁXIMA — é o que o operador vê no input e o que o
+    // publish usa (linha ~3185). Sem isso, preview/razão 4×/badges e o
+    // botão "Auto-corrigir" ignoravam a edição manual (parecia "não
+    // salva"). Ordem: opt.price > priceOverrides[idx] > cálculo do modo.
+    const manualPrice = parseFloat(opt.price as any);
+    if (Number.isFinite(manualPrice) && manualPrice > 0) {
+      price = manualPrice;
+      minMarginAdjusted = false;
+    } else if (priceOverrides[idx] != null) {
+      // Override automático da regra 4× (applyFourTimesRule).
       price = priceOverrides[idx]!;
       minMarginAdjusted = false;
     } else if (pricingMode === "blPrice") {
