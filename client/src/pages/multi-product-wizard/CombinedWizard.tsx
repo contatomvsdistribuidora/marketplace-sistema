@@ -1985,6 +1985,106 @@ export function CombinedWizard({
                 />
               </div>
 
+              {/* Fase 8.J — peso/dimensões do produto-pai. Opcional e
+                  ADITIVO: vazio = usa o que veio do BaseLinker/Bling.
+                  Preenchido = vira a base preferencial pra escalar os
+                  kits (ver effect de hidratação). Peso é digitado em
+                  GRAMAS mas guardado em KG (÷1000) — o resto do sistema
+                  trabalha em kg; não mexer nessa conversão. */}
+              {categoryId && (
+                <div className="rounded-xl border border-gray-200 bg-white p-4 mb-3">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2">
+                    📦 Peso e dimensões do produto-pai (opcional)
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Preencha aqui pra calcular automaticamente os kits abaixo.
+                    Deixe vazio pra usar o que veio do BaseLinker/Bling.
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <label className="text-xs font-medium text-gray-600">
+                      Peso (g)
+                      <input
+                        type="number"
+                        min="0"
+                        inputMode="decimal"
+                        // baseWeightOverride é KG; o campo mostra/recebe GRAMAS.
+                        value={
+                          baseWeightOverride === ""
+                            ? ""
+                            : String(Math.round((parseFloat(baseWeightOverride) || 0) * 1000))
+                        }
+                        onChange={(e) => {
+                          const g = e.target.value;
+                          if (g === "") { setBaseWeightOverride(""); return; }
+                          const n = parseFloat(g);
+                          // Rejeita negativo (visual): ignora digitação inválida.
+                          if (!Number.isFinite(n) || n < 0) return;
+                          setBaseWeightOverride(String(n / 1000));
+                        }}
+                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-gray-600">
+                      Comprimento (cm)
+                      <input
+                        type="number"
+                        min="0"
+                        inputMode="decimal"
+                        value={baseLengthOverride}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v !== "" && parseFloat(v) < 0) return;
+                          setBaseLengthOverride(v);
+                        }}
+                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-gray-600">
+                      Largura (cm)
+                      <input
+                        type="number"
+                        min="0"
+                        inputMode="decimal"
+                        value={baseWidthOverride}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v !== "" && parseFloat(v) < 0) return;
+                          setBaseWidthOverride(v);
+                        }}
+                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-gray-600">
+                      Altura (cm)
+                      <input
+                        type="number"
+                        min="0"
+                        inputMode="decimal"
+                        value={baseHeightOverride}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v !== "" && parseFloat(v) < 0) return;
+                          setBaseHeightOverride(v);
+                        }}
+                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                      />
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBaseWeightOverride("");
+                      setBaseLengthOverride("");
+                      setBaseWidthOverride("");
+                      setBaseHeightOverride("");
+                    }}
+                    className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition text-xs font-medium"
+                  >
+                    🧹 Limpar e usar valores do BaseLinker
+                  </button>
+                </div>
+              )}
+
               {!categoryId && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-3 text-xs text-yellow-800">
                   💡 Selecione uma categoria acima para ver as especificacoes do produto.
