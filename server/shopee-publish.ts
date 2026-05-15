@@ -261,44 +261,25 @@ export interface ShopeeBrand {
 }
 
 /**
- * Resultado paginado de marcas de uma categoria.
- * `truncated=true` significa que batemos no teto de segurança ANTES
- * de a Shopee sinalizar is_end — ou seja, podem existir mais marcas
- * do que as retornadas (catálogo gigante).
+ * Fetch the full brand list for a category. Shopee paginates this
+ * endpoint (page_size max 30), so we loop until is_end or we hit a
+ * cap — 300 pages (~9k brands) is plenty for any real category.
  */
-export interface BrandListResult {
-  brands: ShopeeBrand[];
-  truncated: boolean;
-}
-
-// Teto de SEGURANÇA (não é mais o limite "real"). 1700 páginas × 30 =
-// ~51k marcas. Paginamos até is_end=true; o teto só existe pra evitar
-// loop infinito se a Shopee nunca mandar is_end. (Fase 8.H — o teto
-// antigo de 300 páginas/~9k marcas deixava marcas reais de fora, ex:
-// "Toalhas Beka".)
-const MAX_PAGES_SAFETY = 1700;
-
-/**
- * Busca a lista completa de marcas de uma categoria, paginando até
- * is_end. Retorna também `truncated` pra UI avisar quando o catálogo
- * é grande demais pro teto de segurança.
- */
-export async function getBrandListWithMeta(
+export async function getBrandList(
   accessToken: string,
   shopId: number,
   categoryId: number,
   language: string = "pt-BR",
-): Promise<BrandListResult> {
+): Promise<ShopeeBrand[]> {
   const all: ShopeeBrand[] = [];
   let offset = 0;
   const pageSize = 30;
-  let completed = false; // true = paginou até o fim (is_end ou página curta)
-  for (let i = 0; i < MAX_PAGES_SAFETY; i++) {
+  for (let i = 0; i < 300; i++) {
     const res = await shopeeGet(
       "/api/v2/product/get_brand_list",
       {
         category_id: categoryId,
-        status: 1, // 1 = só marcas aprovadas
+        status: 1, // 1 = approved brands only
         offset,
         page_size: pageSize,
         language,
@@ -308,36 +289,10 @@ export async function getBrandListWithMeta(
     );
     const page: ShopeeBrand[] = res?.brand_list ?? [];
     all.push(...page);
-    if (res?.is_end || page.length < pageSize) {
-      completed = true;
-      break;
-    }
+    if (res?.is_end || page.length < pageSize) break;
     offset += pageSize;
   }
-  const truncated = !completed;
-  if (truncated) {
-    console.warn(
-      `[getBrandList] cat=${categoryId}: teto de segurança ` +
-        `(${MAX_PAGES_SAFETY} páginas / ${all.length} marcas) atingido ` +
-        `sem is_end — catálogo pode ter mais marcas.`,
-    );
-  }
-  return { brands: all, truncated };
-}
-
-/**
- * Wrapper retrocompatível: retorna só o array de marcas.
- * Consumidores que precisam do flag `truncated` devem usar
- * getBrandListWithMeta().
- */
-export async function getBrandList(
-  accessToken: string,
-  shopId: number,
-  categoryId: number,
-  language: string = "pt-BR",
-): Promise<ShopeeBrand[]> {
-  const { brands } = await getBrandListWithMeta(accessToken, shopId, categoryId, language);
-  return brands;
+  return all;
 }
 
 export function fuzzyMatchBrands(
