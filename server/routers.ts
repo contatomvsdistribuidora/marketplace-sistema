@@ -4136,6 +4136,96 @@ export const appRouter = router({
       }),
 
     /**
+     * Fase 8.H: força refresh de marcas + atributos de UMA categoria.
+     * Disparado automaticamente pelo bloquinho do Step 3 quando o cache
+     * tem > 24h, ou manualmente pelo botão "Atualizar novamente".
+     *
+     * Robustez (Bella vende real):
+     *  - Busca as marcas frescas ANTES de sobrescrever o cache — nunca
+     *    deixa o cache vazio (sem janela de "0 marcas" durante refresh).
+     *  - allSettled: falha no sync de atributos NÃO derruba o refresh
+     *    de marcas (marcas = parte crítica). Só lança erro se as marcas
+     *    falharem, e com mensagem PT-BR amigável (erro técnico só no log).
+     */
+    refreshBrandsForCategory: protectedProcedure
+      .input(z.object({ accountId: z.number(), categoryId: z.number() }))
+      .mutation(async ({ input }) => {
+        const startTime = Date.now();
+        const { shopeeBrandCache } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        const attributeSync = await import("./shopee/attribute-sync");
+        const REGION = "BR";
+
+        const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
+
+        // Marcas e atributos em paralelo. allSettled pra uma falha não
+        // contaminar a outra.
+        const [brandRes, attrRes] = await Promise.allSettled([
+          shopeePublish.getBrandListWithMeta(accessToken, shopId, input.categoryId),
+          attributeSync.syncAttributesForCategory(input.accountId, input.categoryId),
+        ]);
+
+        // Marcas são a parte crítica — se falhou, erro amigável.
+        if (brandRes.status === "rejected") {
+          console.error(
+            `[refreshBrandsForCategory] cat=${input.categoryId} acct=${input.accountId}: ` +
+              `falha ao buscar marcas — ${brandRes.reason?.message ?? brandRes.reason}`,
+          );
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Não foi possível atualizar agora. Tente novamente em alguns segundos.",
+          });
+        }
+
+        const { brands, truncated } = brandRes.value;
+
+        // Sobrescreve o cache só depois de ter as marcas frescas em mão.
+        const [cached] = await sharedDb
+          .select()
+          .from(shopeeBrandCache)
+          .where(
+            and(
+              eq(shopeeBrandCache.region, REGION),
+              eq(shopeeBrandCache.categoryId, input.categoryId),
+            ),
+          )
+          .limit(1);
+        if (cached) {
+          await sharedDb
+            .update(shopeeBrandCache)
+            .set({ brandList: brands })
+            .where(
+              and(
+                eq(shopeeBrandCache.region, REGION),
+                eq(shopeeBrandCache.categoryId, input.categoryId),
+              ),
+            );
+        } else {
+          await sharedDb
+            .insert(shopeeBrandCache)
+            .values({ region: REGION, categoryId: input.categoryId, brandList: brands });
+        }
+
+        // Atributos: falha aqui não bloqueia (loga e segue com count 0).
+        let attributesCount = 0;
+        if (attrRes.status === "fulfilled") {
+          attributesCount = attrRes.value.count ?? 0;
+        } else {
+          console.error(
+            `[refreshBrandsForCategory] cat=${input.categoryId}: sync de atributos ` +
+              `falhou (não-crítico) — ${attrRes.reason?.message ?? attrRes.reason}`,
+          );
+        }
+
+        return {
+          brandsCount: brands.length,
+          attributesCount,
+          truncated,
+          durationMs: Date.now() - startTime,
+        };
+      }),
+
+    /**
      * Fase 6.0.6: invalida cache de marcas pra uma categoria. Útil quando
      * cache foi populado em condições ruins (permission_denied silencioso
      * antes do fix, ou marcas novas na Shopee que ainda não rotacionaram).
