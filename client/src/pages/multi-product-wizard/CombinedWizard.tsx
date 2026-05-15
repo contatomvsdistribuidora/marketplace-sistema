@@ -150,6 +150,24 @@ export function CombinedWizard({
   const [baseLengthOverride, setBaseLengthOverride] = useState<string>("");
   const [baseWidthOverride, setBaseWidthOverride]   = useState<string>("");
   const [baseHeightOverride, setBaseHeightOverride] = useState<string>("");
+  // Fase 8.J-v2: peso/dim do produto-PAI, 1 entrada por produto
+  // (index = productIdx). weight em KG (o input converte de g); L/W/H
+  // em cm. Vazio = usa BL/product.* (fallback). Alimenta SÓ a
+  // hidratação dos filhos (Passo 3). Os 4 scalars acima continuam
+  // dormentes de propósito: têm consumidores pré-existentes em
+  // computePricing/StepD-prep — não mexer (regra: não tocar 8.K).
+  type BaseOverride = { weight: string; length: string; width: string; height: string };
+  const EMPTY_OVERRIDE: BaseOverride = { weight: "", length: "", width: "", height: "" };
+  const [baseOverridesByProduct, setBaseOverridesByProduct] = useState<BaseOverride[]>([]);
+  const getBaseOverride = (i: number): BaseOverride =>
+    baseOverridesByProduct[i] ?? EMPTY_OVERRIDE;
+  const setBaseOverrideField = (i: number, field: keyof BaseOverride, value: string) =>
+    setBaseOverridesByProduct((prev) => {
+      const next = prev.slice();
+      while (next.length <= i) next.push({ ...EMPTY_OVERRIDE });
+      next[i] = { ...(next[i] ?? EMPTY_OVERRIDE), [field]: value };
+      return next;
+    });
   const [inlinePriceEdits, setInlinePriceEdits]     = useState<Record<string, string>>({});
   const [inlineLabelEdits, setInlineLabelEdits]     = useState<Record<string, string>>({});
   const [attributeValues, setAttributeValues]       = useState<Record<number, { valueId: number; originalValue: string; displayValue?: string; valueUnit?: string }>>({});
