@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { trpc } from "../../lib/trpc";
 import { calculateSellerFreightCost } from "@shared/freight-calc";
 import { CategoryPicker } from "../../components/shopee/CategoryPicker";
+import { CategoryCacheStatus } from "../../components/shopee/CategoryCacheStatus";
 import { VariationsReadOnly } from "../../components/shopee/VariationsReadOnly";
 import { BrandPicker, type BrandValue } from "../../components/shopee/BrandPicker";
 import {
@@ -1984,6 +1985,12 @@ export function CombinedWizard({
                   }}
                 />
               </div>
+
+              {/* Fase 8.H — status/auto-refresh do cache da categoria.
+                  ADITIVO: nunca bloqueia a escolha de marca. */}
+              {categoryId && (
+                <CategoryCacheStatus accountId={accountId} categoryId={categoryId} />
+              )}
 
               {!categoryId && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-3 text-xs text-yellow-800">
