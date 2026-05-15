@@ -547,9 +547,17 @@ export function CombinedWizard({
   //   o "extra" em altura ou largura (a menor primeiro), sem ultrapassar 80.
   // - Gate por bloco: dim so e' preenchida se TODAS as 3 estao vazias na
   //   variacao (preserva edicao manual coerente).
+  // - Fase 8.J: se o operador preencheu o card "produto-pai", esses
+  //   valores tem PRIORIDADE sobre BL/product.* (override > BL > product).
+  //   baseWeightOverride ja esta em kg (o card converte de g).
   useEffect(() => {
     if (!hydrated) return;
     if (optionDetailsMatrix.length !== products.length) return;
+    // Override global do produto-pai (Fase 8.J). 0 = não preenchido.
+    const ovW = parseFloat(baseWeightOverride) || 0; // kg
+    const ovL = parseFloat(baseLengthOverride) || 0; // cm
+    const ovWd = parseFloat(baseWidthOverride) || 0; // cm
+    const ovH = parseFloat(baseHeightOverride) || 0; // cm
     setOptionDetailsMatrix(matrix => {
       let changed = false;
       const next = matrix.map((row, productIdx) => {
@@ -558,11 +566,12 @@ export function CombinedWizard({
         if (!row.length) return row;
         // Bootstrap rapido: prefere dims do BL (API), cai pro product.* (ja em memoria)
         // pra nao deixar peso/dim vazio durante os 5-10s da query BL.
+        // Fase 8.J: override do pai (se preenchido) tem prioridade máxima.
         const dimsBL = dimsByProductId.get(product.sourceId);
-        const baseWeight = (dimsBL?.weight ?? 0) > 0 ? dimsBL!.weight : (parseFloat(product.weight ?? "") || 0);
-        const baseLength = (dimsBL?.length ?? 0) > 0 ? dimsBL!.length : (parseFloat(product.dimensionLength ?? "") || 0);
-        const baseWidth  = (dimsBL?.width  ?? 0) > 0 ? dimsBL!.width  : (parseFloat(product.dimensionWidth  ?? "") || 0);
-        const baseHeight = (dimsBL?.height ?? 0) > 0 ? dimsBL!.height : (parseFloat(product.dimensionHeight ?? "") || 0);
+        const baseWeight = ovW > 0 ? ovW : ((dimsBL?.weight ?? 0) > 0 ? dimsBL!.weight : (parseFloat(product.weight ?? "") || 0));
+        const baseLength = ovL > 0 ? ovL : ((dimsBL?.length ?? 0) > 0 ? dimsBL!.length : (parseFloat(product.dimensionLength ?? "") || 0));
+        const baseWidth  = ovWd > 0 ? ovWd : ((dimsBL?.width  ?? 0) > 0 ? dimsBL!.width  : (parseFloat(product.dimensionWidth  ?? "") || 0));
+        const baseHeight = ovH > 0 ? ovH : ((dimsBL?.height ?? 0) > 0 ? dimsBL!.height : (parseFloat(product.dimensionHeight ?? "") || 0));
         if (baseWeight <= 0 && baseLength <= 0) return row;
 
         let rowChanged = false;
@@ -605,7 +614,7 @@ export function CombinedWizard({
       return changed ? next : matrix;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, products, dimsByProductId]);
+  }, [hydrated, products, dimsByProductId, baseWeightOverride, baseLengthOverride, baseWidthOverride, baseHeightOverride]);
 
   // Auto-save quando brandValue muda (debounced 500ms). Gate em `hydrated`
   // pra nao salvar durante a hidratacao inicial — sem isso, abrir um listing
