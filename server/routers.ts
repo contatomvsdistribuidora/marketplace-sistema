@@ -4077,6 +4077,65 @@ export const appRouter = router({
       }),
 
     /**
+     * Fase 8.H: status do cache de marcas+atributos de UMA categoria.
+     * Usado pelo bloquinho CategoryCacheStatus no Step 3 do wizard pra
+     * decidir se dispara auto-refresh (cache > 24h ou inexistente) e
+     * pra mostrar "atualizado há X horas".
+     *
+     * Cache é por região ("BR"), não por conta — mesmo padrão de
+     * searchBrands. accountId entra no input só por simetria de API.
+     */
+    getCategoryCacheStatus: protectedProcedure
+      .input(z.object({ accountId: z.number(), categoryId: z.number() }))
+      .query(async ({ input }) => {
+        const { shopeeBrandCache, shopeeCategoryAttributeCache } = await import(
+          "../drizzle/schema"
+        );
+        const { eq, and } = await import("drizzle-orm");
+        const REGION = "BR";
+
+        // ── Cache de marcas (fonte do gatilho de auto-refresh) ──
+        const [brandRow] = await sharedDb
+          .select()
+          .from(shopeeBrandCache)
+          .where(
+            and(
+              eq(shopeeBrandCache.region, REGION),
+              eq(shopeeBrandCache.categoryId, input.categoryId),
+            ),
+          )
+          .limit(1);
+
+        const brandsCount =
+          brandRow && Array.isArray(brandRow.brandList) ? brandRow.brandList.length : 0;
+        const lastSyncedAt: Date | null = brandRow?.updatedAt
+          ? (brandRow.updatedAt as Date)
+          : null;
+        const hoursSinceSync: number | null = lastSyncedAt
+          ? (Date.now() - new Date(lastSyncedAt).getTime()) / 3_600_000
+          : null;
+
+        // ── Cache de atributos (independente; só pra exibição) ──
+        const [attrRow] = await sharedDb
+          .select()
+          .from(shopeeCategoryAttributeCache)
+          .where(
+            and(
+              eq(shopeeCategoryAttributeCache.region, REGION),
+              eq(shopeeCategoryAttributeCache.categoryId, input.categoryId),
+            ),
+          )
+          .limit(1);
+
+        const attributesCount = attrRow
+          ? attrRow.attributeCount ??
+            (Array.isArray(attrRow.attributeTree) ? attrRow.attributeTree.length : 0)
+          : 0;
+
+        return { lastSyncedAt, hoursSinceSync, brandsCount, attributesCount };
+      }),
+
+    /**
      * Fase 6.0.6: invalida cache de marcas pra uma categoria. Útil quando
      * cache foi populado em condições ruins (permission_denied silencioso
      * antes do fix, ou marcas novas na Shopee que ainda não rotacionaram).
