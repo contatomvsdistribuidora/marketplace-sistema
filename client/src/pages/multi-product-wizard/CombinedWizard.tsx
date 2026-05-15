@@ -626,6 +626,20 @@ export function CombinedWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandValue.brandId, brandValue.brandName, hydrated]);
 
+  // Fase 8.K: auto-save quando QUALQUER preço de célula muda (edição
+  // manual no input ou "Auto-corrigir"). Mesma técnica do brandValue:
+  // debounce 500ms + gate `hydrated` (não salva durante hidratação).
+  // A assinatura só inclui opt.price → não dispara por peso/dim.
+  const priceSignature = optionDetailsMatrix
+    .map((row) => row.map((o) => o.price ?? "").join(","))
+    .join("|");
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(() => autoSaveWizardState(), 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceSignature, hydrated]);
+
   function autoSaveWizardState() {
     if (!multiListingId) return;
     updateListingMutation
