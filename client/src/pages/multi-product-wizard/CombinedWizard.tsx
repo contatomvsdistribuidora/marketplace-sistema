@@ -2361,6 +2361,103 @@ export function CombinedWizard({
                       )}
                     </div>
                   </div>
+                  {/* Fase 8.J-v2 — peso/dim do produto-PAI deste produto.
+                      Opcional/aditivo: vazio = usa BaseLinker/Bling. 1 card
+                      por produto (escopo productIdx). Peso digitado em GRAMAS,
+                      guardado em KG (÷1000) — sistema usa kg internamente.
+                      Alimenta a hidratação dos filhos DESTE produto (Passo 3). */}
+                  {(() => {
+                    const ov = getBaseOverride(productIdx);
+                    return (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 mt-3">
+                        <h5 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1.5">
+                          📦 Peso e dimensões do produto-pai (opcional)
+                        </h5>
+                        <p className="text-[11px] text-gray-500 mb-2">
+                          Preenche automaticamente os kits deste produto. Vazio = usa o que veio do BaseLinker/Bling.
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <label className="text-[11px] font-medium text-gray-600">
+                            Peso (g)
+                            <input
+                              type="number"
+                              min="0"
+                              inputMode="decimal"
+                              // ov.weight é KG; o campo mostra/recebe GRAMAS.
+                              value={ov.weight === "" ? "" : String(Math.round((parseFloat(ov.weight) || 0) * 1000))}
+                              onChange={(e) => {
+                                const g = e.target.value;
+                                if (g === "") { setBaseOverrideField(productIdx, "weight", ""); return; }
+                                const n = parseFloat(g);
+                                if (!Number.isFinite(n) || n < 0) return;
+                                setBaseOverrideField(productIdx, "weight", String(n / 1000));
+                              }}
+                              className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                            />
+                          </label>
+                          <label className="text-[11px] font-medium text-gray-600">
+                            Comprimento (cm)
+                            <input
+                              type="number"
+                              min="0"
+                              inputMode="decimal"
+                              value={ov.length}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v !== "" && parseFloat(v) < 0) return;
+                                setBaseOverrideField(productIdx, "length", v);
+                              }}
+                              className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                            />
+                          </label>
+                          <label className="text-[11px] font-medium text-gray-600">
+                            Largura (cm)
+                            <input
+                              type="number"
+                              min="0"
+                              inputMode="decimal"
+                              value={ov.width}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v !== "" && parseFloat(v) < 0) return;
+                                setBaseOverrideField(productIdx, "width", v);
+                              }}
+                              className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                            />
+                          </label>
+                          <label className="text-[11px] font-medium text-gray-600">
+                            Altura (cm)
+                            <input
+                              type="number"
+                              min="0"
+                              inputMode="decimal"
+                              value={ov.height}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v !== "" && parseFloat(v) < 0) return;
+                                setBaseOverrideField(productIdx, "height", v);
+                              }}
+                              className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
+                            />
+                          </label>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBaseOverridesByProduct((prev) => {
+                              const next = prev.slice();
+                              while (next.length <= productIdx) next.push({ ...EMPTY_OVERRIDE });
+                              next[productIdx] = { ...EMPTY_OVERRIDE };
+                              return next;
+                            })
+                          }
+                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition text-[11px] font-medium"
+                        >
+                          🧹 Limpar e usar valores do BaseLinker
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {(() => {
                     const row = optionDetailsMatrix[productIdx] || [];
                     const exceeds = row.some(opt => {
