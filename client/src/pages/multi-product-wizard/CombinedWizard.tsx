@@ -547,17 +547,9 @@ export function CombinedWizard({
   //   o "extra" em altura ou largura (a menor primeiro), sem ultrapassar 80.
   // - Gate por bloco: dim so e' preenchida se TODAS as 3 estao vazias na
   //   variacao (preserva edicao manual coerente).
-  // - Fase 8.J: se o operador preencheu o card "produto-pai", esses
-  //   valores tem PRIORIDADE sobre BL/product.* (override > BL > product).
-  //   baseWeightOverride ja esta em kg (o card converte de g).
   useEffect(() => {
     if (!hydrated) return;
     if (optionDetailsMatrix.length !== products.length) return;
-    // Override global do produto-pai (Fase 8.J). 0 = não preenchido.
-    const ovW = parseFloat(baseWeightOverride) || 0; // kg
-    const ovL = parseFloat(baseLengthOverride) || 0; // cm
-    const ovWd = parseFloat(baseWidthOverride) || 0; // cm
-    const ovH = parseFloat(baseHeightOverride) || 0; // cm
     setOptionDetailsMatrix(matrix => {
       let changed = false;
       const next = matrix.map((row, productIdx) => {
@@ -566,12 +558,11 @@ export function CombinedWizard({
         if (!row.length) return row;
         // Bootstrap rapido: prefere dims do BL (API), cai pro product.* (ja em memoria)
         // pra nao deixar peso/dim vazio durante os 5-10s da query BL.
-        // Fase 8.J: override do pai (se preenchido) tem prioridade máxima.
         const dimsBL = dimsByProductId.get(product.sourceId);
-        const baseWeight = ovW > 0 ? ovW : ((dimsBL?.weight ?? 0) > 0 ? dimsBL!.weight : (parseFloat(product.weight ?? "") || 0));
-        const baseLength = ovL > 0 ? ovL : ((dimsBL?.length ?? 0) > 0 ? dimsBL!.length : (parseFloat(product.dimensionLength ?? "") || 0));
-        const baseWidth  = ovWd > 0 ? ovWd : ((dimsBL?.width  ?? 0) > 0 ? dimsBL!.width  : (parseFloat(product.dimensionWidth  ?? "") || 0));
-        const baseHeight = ovH > 0 ? ovH : ((dimsBL?.height ?? 0) > 0 ? dimsBL!.height : (parseFloat(product.dimensionHeight ?? "") || 0));
+        const baseWeight = (dimsBL?.weight ?? 0) > 0 ? dimsBL!.weight : (parseFloat(product.weight ?? "") || 0);
+        const baseLength = (dimsBL?.length ?? 0) > 0 ? dimsBL!.length : (parseFloat(product.dimensionLength ?? "") || 0);
+        const baseWidth  = (dimsBL?.width  ?? 0) > 0 ? dimsBL!.width  : (parseFloat(product.dimensionWidth  ?? "") || 0);
+        const baseHeight = (dimsBL?.height ?? 0) > 0 ? dimsBL!.height : (parseFloat(product.dimensionHeight ?? "") || 0);
         if (baseWeight <= 0 && baseLength <= 0) return row;
 
         let rowChanged = false;
@@ -614,7 +605,7 @@ export function CombinedWizard({
       return changed ? next : matrix;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, products, dimsByProductId, baseWeightOverride, baseLengthOverride, baseWidthOverride, baseHeightOverride]);
+  }, [hydrated, products, dimsByProductId]);
 
   // Auto-save quando brandValue muda (debounced 500ms). Gate em `hydrated`
   // pra nao salvar durante a hidratacao inicial — sem isso, abrir um listing
@@ -2016,106 +2007,6 @@ export function CombinedWizard({
                 />
               </div>
 
-              {/* Fase 8.J — peso/dimensões do produto-pai. Opcional e
-                  ADITIVO: vazio = usa o que veio do BaseLinker/Bling.
-                  Preenchido = vira a base preferencial pra escalar os
-                  kits (ver effect de hidratação). Peso é digitado em
-                  GRAMAS mas guardado em KG (÷1000) — o resto do sistema
-                  trabalha em kg; não mexer nessa conversão. */}
-              {categoryId && (
-                <div className="rounded-xl border border-gray-200 bg-white p-4 mb-3">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2">
-                    📦 Peso e dimensões do produto-pai (opcional)
-                  </h3>
-                  <p className="text-xs text-gray-500 mb-3">
-                    Preencha aqui pra calcular automaticamente os kits abaixo.
-                    Deixe vazio pra usar o que veio do BaseLinker/Bling.
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <label className="text-xs font-medium text-gray-600">
-                      Peso (g)
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="decimal"
-                        // baseWeightOverride é KG; o campo mostra/recebe GRAMAS.
-                        value={
-                          baseWeightOverride === ""
-                            ? ""
-                            : String(Math.round((parseFloat(baseWeightOverride) || 0) * 1000))
-                        }
-                        onChange={(e) => {
-                          const g = e.target.value;
-                          if (g === "") { setBaseWeightOverride(""); return; }
-                          const n = parseFloat(g);
-                          // Rejeita negativo (visual): ignora digitação inválida.
-                          if (!Number.isFinite(n) || n < 0) return;
-                          setBaseWeightOverride(String(n / 1000));
-                        }}
-                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
-                      />
-                    </label>
-                    <label className="text-xs font-medium text-gray-600">
-                      Comprimento (cm)
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="decimal"
-                        value={baseLengthOverride}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v !== "" && parseFloat(v) < 0) return;
-                          setBaseLengthOverride(v);
-                        }}
-                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
-                      />
-                    </label>
-                    <label className="text-xs font-medium text-gray-600">
-                      Largura (cm)
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="decimal"
-                        value={baseWidthOverride}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v !== "" && parseFloat(v) < 0) return;
-                          setBaseWidthOverride(v);
-                        }}
-                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
-                      />
-                    </label>
-                    <label className="text-xs font-medium text-gray-600">
-                      Altura (cm)
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="decimal"
-                        value={baseHeightOverride}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v !== "" && parseFloat(v) < 0) return;
-                          setBaseHeightOverride(v);
-                        }}
-                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-orange-400"
-                      />
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBaseWeightOverride("");
-                      setBaseLengthOverride("");
-                      setBaseWidthOverride("");
-                      setBaseHeightOverride("");
-                    }}
-                    className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition text-xs font-medium"
-                  >
-                    🧹 Limpar e usar valores do BaseLinker
-                  </button>
-                </div>
-              )}
-
               {!categoryId && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-3 text-xs text-yellow-800">
                   💡 Selecione uma categoria acima para ver as especificacoes do produto.
@@ -2675,15 +2566,6 @@ export function CombinedWizard({
                                 }}
                                 className="w-full px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
                               />
-                              {/* Fase 8.J — badge por linha quando a dim escalada
-                                  estoura o perímetro interno (220cm). Apenas aviso
-                                  visual; NÃO bloqueia publicação. c.* já reflete
-                                  override do pai + escala lado-maior-primeiro. */}
-                              {(c.length + c.width + c.height) > INTERNAL_MAX_PERIMETER_CM && (
-                                <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800">
-                                  ⚠️ Excede perímetro ({INTERNAL_MAX_PERIMETER_CM}cm)
-                                </div>
-                              )}
                             </td>
 
                             {/* Peso/Comp/Larg/Alt */}
