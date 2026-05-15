@@ -4136,48 +4136,57 @@ export const appRouter = router({
       }),
 
     /**
-     * Fase 8.H: força refresh de marcas + atributos de UMA categoria.
+     * Fase 8.H (+ 8.H-fix): força refresh de MARCAS de UMA categoria.
      * Disparado automaticamente pelo bloquinho do Step 3 quando o cache
      * tem > 24h, ou manualmente pelo botão "Atualizar novamente".
+     *
+     * 8.H-fix (mitigação): REMOVIDO o syncAttributesForCategory daqui.
+     * Forçar o sync de atributos no meio da sessão trocava a fonte de
+     * atributos do wizard (seed curado → árvore viva), gerando value_id
+     * divergente e erro product.error_busi no add_item. Agora o refresh
+     * é SÓ de marcas (mantém o fix da "Toalhas Beka"); atributos voltam
+     * ao comportamento pré-8.H — populados só pelo sync noturno, com
+     * fallback pro seed local. attributesCount aqui é só LEITURA do
+     * cache atual (não dispara sync).
      *
      * Robustez (Bella vende real):
      *  - Busca as marcas frescas ANTES de sobrescrever o cache — nunca
      *    deixa o cache vazio (sem janela de "0 marcas" durante refresh).
-     *  - allSettled: falha no sync de atributos NÃO derruba o refresh
-     *    de marcas (marcas = parte crítica). Só lança erro se as marcas
-     *    falharem, e com mensagem PT-BR amigável (erro técnico só no log).
+     *  - Falha ao buscar marcas → erro PT-BR amigável (stack só no log).
      */
     refreshBrandsForCategory: protectedProcedure
       .input(z.object({ accountId: z.number(), categoryId: z.number() }))
       .mutation(async ({ input }) => {
         const startTime = Date.now();
-        const { shopeeBrandCache } = await import("../drizzle/schema");
+        const { shopeeBrandCache, shopeeCategoryAttributeCache } = await import(
+          "../drizzle/schema"
+        );
         const { eq, and } = await import("drizzle-orm");
-        const attributeSync = await import("./shopee/attribute-sync");
         const REGION = "BR";
 
         const { accessToken, shopId } = await shopee.getValidToken(input.accountId);
 
-        // Marcas e atributos em paralelo. allSettled pra uma falha não
-        // contaminar a outra.
-        const [brandRes, attrRes] = await Promise.allSettled([
-          shopeePublish.getBrandListWithMeta(accessToken, shopId, input.categoryId),
-          attributeSync.syncAttributesForCategory(input.accountId, input.categoryId),
-        ]);
-
-        // Marcas são a parte crítica — se falhou, erro amigável.
-        if (brandRes.status === "rejected") {
+        // 8.H-fix: SÓ marcas. Atributos NÃO são mais sincronizados aqui.
+        let brands: Awaited<ReturnType<typeof shopeePublish.getBrandListWithMeta>>["brands"];
+        let truncated: boolean;
+        try {
+          const r = await shopeePublish.getBrandListWithMeta(
+            accessToken,
+            shopId,
+            input.categoryId,
+          );
+          brands = r.brands;
+          truncated = r.truncated;
+        } catch (err: any) {
           console.error(
             `[refreshBrandsForCategory] cat=${input.categoryId} acct=${input.accountId}: ` +
-              `falha ao buscar marcas — ${brandRes.reason?.message ?? brandRes.reason}`,
+              `falha ao buscar marcas — ${err?.message ?? err}`,
           );
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: "Não foi possível atualizar agora. Tente novamente em alguns segundos.",
           });
         }
-
-        const { brands, truncated } = brandRes.value;
 
         // Sobrescreve o cache só depois de ter as marcas frescas em mão.
         const [cached] = await sharedDb
@@ -4206,16 +4215,23 @@ export const appRouter = router({
             .values({ region: REGION, categoryId: input.categoryId, brandList: brands });
         }
 
-        // Atributos: falha aqui não bloqueia (loga e segue com count 0).
-        let attributesCount = 0;
-        if (attrRes.status === "fulfilled") {
-          attributesCount = attrRes.value.count ?? 0;
-        } else {
-          console.error(
-            `[refreshBrandsForCategory] cat=${input.categoryId}: sync de atributos ` +
-              `falhou (não-crítico) — ${attrRes.reason?.message ?? attrRes.reason}`,
-          );
-        }
+        // 8.H-fix: attributesCount é só LEITURA do cache atual (o que o
+        // sync noturno deixou). NÃO dispara sync — só pra exibição no
+        // bloquinho. Se não houver cache, 0.
+        const [attrRow] = await sharedDb
+          .select()
+          .from(shopeeCategoryAttributeCache)
+          .where(
+            and(
+              eq(shopeeCategoryAttributeCache.region, REGION),
+              eq(shopeeCategoryAttributeCache.categoryId, input.categoryId),
+            ),
+          )
+          .limit(1);
+        const attributesCount = attrRow
+          ? attrRow.attributeCount ??
+            (Array.isArray(attrRow.attributeTree) ? attrRow.attributeTree.length : 0)
+          : 0;
 
         return {
           brandsCount: brands.length,
