@@ -2653,6 +2653,15 @@ export function CombinedWizard({
                                 }}
                                 className="w-full px-1.5 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
                               />
+                              {/* Fase 8.J — badge por linha quando a dim escalada
+                                  estoura o perímetro interno (220cm). Apenas aviso
+                                  visual; NÃO bloqueia publicação. c.* já reflete
+                                  override do pai + escala lado-maior-primeiro. */}
+                              {(c.length + c.width + c.height) > INTERNAL_MAX_PERIMETER_CM && (
+                                <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800">
+                                  ⚠️ Excede perímetro ({INTERNAL_MAX_PERIMETER_CM}cm)
+                                </div>
+                              )}
                             </td>
 
                             {/* Peso/Comp/Larg/Alt */}
