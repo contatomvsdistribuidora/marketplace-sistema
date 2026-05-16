@@ -577,10 +577,19 @@ export function CombinedWizard({
         // Bootstrap rapido: prefere dims do BL (API), cai pro product.* (ja em memoria)
         // pra nao deixar peso/dim vazio durante os 5-10s da query BL.
         const dimsBL = dimsByProductId.get(product.sourceId);
-        const baseWeight = (dimsBL?.weight ?? 0) > 0 ? dimsBL!.weight : (parseFloat(product.weight ?? "") || 0);
-        const baseLength = (dimsBL?.length ?? 0) > 0 ? dimsBL!.length : (parseFloat(product.dimensionLength ?? "") || 0);
-        const baseWidth  = (dimsBL?.width  ?? 0) > 0 ? dimsBL!.width  : (parseFloat(product.dimensionWidth  ?? "") || 0);
-        const baseHeight = (dimsBL?.height ?? 0) > 0 ? dimsBL!.height : (parseFloat(product.dimensionHeight ?? "") || 0);
+        // Fase 8.J-v2: override do produto-PAI DESTE produto tem prioridade
+        // máxima. ovW em kg; ovL/ovWd/ovH em cm. 0 = não preenchido → cai
+        // no fluxo antigo (BL → product.*). Gate "3 dims vazias" (mais
+        // abaixo) preservado → não sobrescreve edição manual do filho.
+        const ovP = getBaseOverride(productIdx);
+        const ovW = parseFloat(ovP.weight) || 0;
+        const ovL = parseFloat(ovP.length) || 0;
+        const ovWd = parseFloat(ovP.width) || 0;
+        const ovH = parseFloat(ovP.height) || 0;
+        const baseWeight = ovW > 0 ? ovW : ((dimsBL?.weight ?? 0) > 0 ? dimsBL!.weight : (parseFloat(product.weight ?? "") || 0));
+        const baseLength = ovL > 0 ? ovL : ((dimsBL?.length ?? 0) > 0 ? dimsBL!.length : (parseFloat(product.dimensionLength ?? "") || 0));
+        const baseWidth  = ovWd > 0 ? ovWd : ((dimsBL?.width  ?? 0) > 0 ? dimsBL!.width  : (parseFloat(product.dimensionWidth  ?? "") || 0));
+        const baseHeight = ovH > 0 ? ovH : ((dimsBL?.height ?? 0) > 0 ? dimsBL!.height : (parseFloat(product.dimensionHeight ?? "") || 0));
         if (baseWeight <= 0 && baseLength <= 0) return row;
 
         let rowChanged = false;
@@ -623,7 +632,7 @@ export function CombinedWizard({
       return changed ? next : matrix;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, products, dimsByProductId]);
+  }, [hydrated, products, dimsByProductId, baseOverridesByProduct]);
 
   // Auto-save quando brandValue muda (debounced 500ms). Gate em `hydrated`
   // pra nao salvar durante a hidratacao inicial — sem isso, abrir um listing
